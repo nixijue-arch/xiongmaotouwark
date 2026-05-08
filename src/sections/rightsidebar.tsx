@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
@@ -12,6 +12,17 @@ const EN_TEXTS = ['V me 50 plz','I quit!','Really?','You sus','No cap fr fr','I 
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
 const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const CAPTURE_SIZE = 500;
+const PREVIEW_CROP_MIN_SIZE = 48;
+const PREVIEW_CROP_PADDING = 16;
+
+type CropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type CropHandle = 'move' | 'nw' | 'ne' | 'sw' | 'se';
 
 function validateImageFile(file: File, language: 'zh' | 'en'): string | null {
   if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
@@ -91,14 +102,16 @@ async function renderMemeCanvas(elements: MemeElement[], pixelScale = 1): Promis
     ctx.rotate((textElement.rotation * Math.PI) / 180);
     ctx.font = `${textElement.fontWeight} ${textElement.fontSize}px ${textElement.fontFamily}`;
     ctx.textBaseline = 'top';
-    ctx.textAlign = textElement.textAlign;
+    ctx.textAlign = 'left';
     ctx.fillStyle = textElement.fillColor;
     ctx.strokeStyle = textElement.strokeColor;
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(0, textElement.strokeWidth * 2);
 
-    const textX = textElement.textAlign === 'center' ? textElement.width / 2 : textElement.textAlign === 'right' ? textElement.width : 0;
-    const textY = 0;
+    // Match the on-canvas text block, which is currently rendered as a natural-width
+    // inline element with Tailwind `px-2 py-1`.
+    const textX = 8;
+    const textY = 4;
 
     if (textElement.strokeWidth > 0) {
       ctx.strokeText(textElement.text, textX, textY);
@@ -108,6 +121,90 @@ async function renderMemeCanvas(elements: MemeElement[], pixelScale = 1): Promis
   }
 
   return canvas;
+}
+
+function clampCropRect(rect: CropRect, boundsWidth = CAPTURE_SIZE, boundsHeight = CAPTURE_SIZE): CropRect {
+  const minWidth = Math.min(PREVIEW_CROP_MIN_SIZE, boundsWidth);
+  const minHeight = Math.min(PREVIEW_CROP_MIN_SIZE, boundsHeight);
+  const width = Math.max(minWidth, Math.min(boundsWidth, rect.width));
+  const height = Math.max(minHeight, Math.min(boundsHeight, rect.height));
+  const x = Math.max(0, Math.min(boundsWidth - width, rect.x));
+  const y = Math.max(0, Math.min(boundsHeight - height, rect.y));
+  return { x, y, width, height };
+}
+
+function cropCanvas(source: HTMLCanvasElement, cropRect: CropRect): HTMLCanvasElement {
+  const safeRect = clampCropRect(cropRect, source.width, source.height);
+  const target = document.createElement('canvas');
+  target.width = Math.max(1, Math.round(safeRect.width));
+  target.height = Math.max(1, Math.round(safeRect.height));
+  const ctx = target.getContext('2d');
+  if (!ctx) return source;
+
+  ctx.drawImage(
+    source,
+    safeRect.x,
+    safeRect.y,
+    safeRect.width,
+    safeRect.height,
+    0,
+    0,
+    target.width,
+    target.height
+  );
+  return target;
+}
+
+function scaleCropRect(cropRect: CropRect, scaleX: number, scaleY = scaleX): CropRect {
+  return {
+    x: cropRect.x * scaleX,
+    y: cropRect.y * scaleY,
+    width: cropRect.width * scaleX,
+    height: cropRect.height * scaleY,
+  };
+}
+
+function detectContentBounds(canvas: HTMLCanvasElement): CropRect {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    return { x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE };
+  }
+
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const alpha = data[idx + 3];
+      if (alpha < 8) continue;
+
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const isNearWhite = r > 248 && g > 248 && b > 248;
+      if (isNearWhite) continue;
+
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return { x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE };
+  }
+
+  return clampCropRect({
+    x: minX - PREVIEW_CROP_PADDING,
+    y: minY - PREVIEW_CROP_PADDING,
+    width: maxX - minX + 1 + PREVIEW_CROP_PADDING * 2,
+    height: maxY - minY + 1 + PREVIEW_CROP_PADDING * 2,
+  });
 }
 
 function isPanda(e: MemeElement): boolean {
@@ -120,6 +217,52 @@ function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
   return FACES.some(f => f.id === name) || name.startsWith('custom-face-');
+}
+
+function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
+  const selected = selectedId ? elements.find(e => e.id === selectedId) : undefined;
+  if (selected && isPanda(selected)) {
+    return selected as ImageElement;
+  }
+
+  const pandas = elements.filter(isPanda) as ImageElement[];
+  if (pandas.length === 0) return undefined;
+  return pandas.reduce((top, current) => current.zIndex > top.zIndex ? current : top);
+}
+
+function LayerThumbnail({ element }: { element: MemeElement }) {
+  const size = 38;
+  const style: React.CSSProperties = { width: size, height: size, borderRadius: 6, flexShrink: 0, overflow: 'hidden' };
+
+  if (element.type === 'image') {
+    return (
+      <div style={{ ...style, backgroundColor: '#fff' }}>
+        <img src={(element as ImageElement).src} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+      </div>
+    );
+  }
+
+  const el = element as TextElement;
+  return (
+    <div style={{ ...style, backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
+      <span style={{
+        color: el.fillColor,
+        fontSize: 9,
+        fontWeight: el.fontWeight,
+        fontFamily: el.fontFamily,
+        WebkitTextStroke: el.strokeWidth > 0 ? `0.4px ${el.strokeColor}` : 'none',
+        lineHeight: 1.2,
+        textAlign: 'center',
+        wordBreak: 'break-all',
+        display: '-webkit-box',
+        WebkitLineClamp: 3,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+      } as React.CSSProperties}>
+        {el.text || 'T'}
+      </span>
+    </div>
+  );
 }
 
 function getLayerLabel(element: MemeElement, language: 'zh' | 'en'): string {
@@ -140,6 +283,13 @@ function getLayerLabel(element: MemeElement, language: 'zh' | 'en'): string {
   return language === 'zh' ? '图片图层' : 'Image Layer';
 }
 
+function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
   const { state, dispatch, t, generateId } = useMeme();
   const isMobile = useIsMobile();
@@ -147,9 +297,19 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [showSuccess, setShowSuccess] = useState(false);
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [previewCrop, setPreviewCrop] = useState<CropRect>({ x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE });
   const [sheetOpen, setSheetOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
+  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const previewRequestIdRef = useRef(0);
+  const previewCropActionRef = useRef<{
+    handle: CropHandle;
+    startX: number;
+    startY: number;
+    startRect: CropRect;
+  } | null>(null);
+  const previewCropFrameRef = useRef<HTMLDivElement | null>(null);
 
   const handleExport = async () => {
     if (state.elements.length === 0) {
@@ -158,8 +318,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     }
     setIsExporting(true);
     try {
-      const canvas = await renderMemeCanvas(state.elements, 2);
-      const dataUrl = canvas.toDataURL('image/png');
+      const fullCanvas = await renderMemeCanvas(state.elements, 2);
+      const scale = fullCanvas.width / CAPTURE_SIZE;
+      const exportCanvas = cropCanvas(fullCanvas, scaleCropRect(previewCrop, scale));
+      const dataUrl = exportCanvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.download = `memeforge-${Date.now()}.png`;
       link.href = dataUrl;
@@ -280,8 +442,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     }
 
     try {
-      const canvas = await renderMemeCanvas(state.elements, 2);
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      const fullCanvas = await renderMemeCanvas(state.elements, 2);
+      const scale = fullCanvas.width / CAPTURE_SIZE;
+      const croppedCanvas = cropCanvas(fullCanvas, scaleCropRect(previewCrop, scale));
+      const blob = await new Promise<Blob | null>(resolve => croppedCanvas.toBlob(resolve, 'image/png'));
       if (blob) {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
         setCopyToast(t('copyImageSuccess'));
@@ -335,8 +499,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   };
 
   const handleCustomFaceConfirm = (dataUrl: string, facePos?: { x: number; y: number; w: number; h: number }) => {
-    state.elements.filter(isFace).forEach(el => dispatch({ type: 'REMOVE_ELEMENT', id: el.id }));
-    let currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
+    let currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (!currentPanda) {
       const defaultPanda = PANDA_HEADS[0];
       currentPanda = {
@@ -346,9 +509,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element: currentPanda });
     }
     const offset = facePos || getPandaFaceOffset(currentPanda.name);
+    const faceCount = state.elements.filter(isFace).length;
     const element: ImageElement = {
       id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
-      x: offset.x, y: offset.y, width: offset.w, height: offset.h,
+      x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
       rotation: 0, opacity: 1, zIndex: 1, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
@@ -359,6 +523,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const handleRefreshPreview = useCallback(async () => {
     if (state.elements.length === 0) {
       setPreviewUrl('');
+      setPreviewCrop({ x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE });
       return;
     }
 
@@ -367,8 +532,101 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       const canvas = await renderMemeCanvas(state.elements, 1);
       if (previewRequestIdRef.current === requestId) {
         setPreviewUrl(canvas.toDataURL('image/png'));
+        setPreviewCrop(detectContentBounds(canvas));
       }
     } catch (err) { console.error('Preview failed:', err); }
+  }, [state.elements]);
+
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const action = previewCropActionRef.current;
+      const frame = previewCropFrameRef.current;
+      if (!action || !frame) return;
+
+      const rect = frame.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scaleX = CAPTURE_SIZE / rect.width;
+      const scaleY = CAPTURE_SIZE / rect.height;
+      const dx = (event.clientX - action.startX) * scaleX;
+      const dy = (event.clientY - action.startY) * scaleY;
+
+      let nextRect: CropRect = action.startRect;
+      switch (action.handle) {
+        case 'move':
+          nextRect = {
+            ...action.startRect,
+            x: action.startRect.x + dx,
+            y: action.startRect.y + dy,
+          };
+          break;
+        case 'nw':
+          nextRect = {
+            x: action.startRect.x + dx,
+            y: action.startRect.y + dy,
+            width: action.startRect.width - dx,
+            height: action.startRect.height - dy,
+          };
+          break;
+        case 'ne':
+          nextRect = {
+            x: action.startRect.x,
+            y: action.startRect.y + dy,
+            width: action.startRect.width + dx,
+            height: action.startRect.height - dy,
+          };
+          break;
+        case 'sw':
+          nextRect = {
+            x: action.startRect.x + dx,
+            y: action.startRect.y,
+            width: action.startRect.width - dx,
+            height: action.startRect.height + dy,
+          };
+          break;
+        case 'se':
+          nextRect = {
+            x: action.startRect.x,
+            y: action.startRect.y,
+            width: action.startRect.width + dx,
+            height: action.startRect.height + dy,
+          };
+          break;
+      }
+
+      setPreviewCrop(clampCropRect(nextRect));
+    };
+
+    const onUp = () => {
+      previewCropActionRef.current = null;
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  const startPreviewCropAction = useCallback((handle: CropHandle, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    previewCropActionRef.current = {
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      startRect: previewCrop,
+    };
+  }, [previewCrop]);
+
+  const resetPreviewCrop = useCallback(async () => {
+    if (state.elements.length === 0) return;
+    try {
+      const canvas = await renderMemeCanvas(state.elements, 1);
+      setPreviewCrop(detectContentBounds(canvas));
+    } catch (err) {
+      console.error('Reset preview crop failed:', err);
+    }
   }, [state.elements]);
 
   useEffect(() => {
@@ -387,6 +645,22 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const selectedElement = state.selectedId ? state.elements.find(e => e.id === state.selectedId) : undefined;
   const layerElements = [...state.elements].sort((a, b) => b.zIndex - a.zIndex);
+
+  const handleLayerReorder = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+
+    const fromIndex = layerElements.findIndex(element => element.id === fromId);
+    const toIndex = layerElements.findIndex(element => element.id === toId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const reordered = moveArrayItem(layerElements, fromIndex, toIndex);
+    reordered.forEach((element, index) => {
+      const nextZIndex = reordered.length - index;
+      if (element.zIndex !== nextZIndex) {
+        dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { zIndex: nextZIndex } });
+      }
+    });
+  }, [dispatch, layerElements]);
 
   // ===== MOBILE: Bottom Sheet =====
   if (isMobile) {
@@ -413,7 +687,6 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               <div
                 className="rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
                 style={{ backgroundColor: '#FFFFFF', border: '1px solid #ddd', aspectRatio: '1' }}
-                onClick={handleRefreshPreview}
               >
                 {previewUrl ? (
                   <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
@@ -463,6 +736,13 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                     className="flex-1" style={{ accentColor: '#FF5E00' }} />
                   <span className="text-[10px] font-mono" style={{ color: '#ccc' }}>{(state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined)?.rotation ?? 0}°</span>
                 </div>
+                <button
+                  onClick={() => dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId! })}
+                  className="w-full mt-2 py-2 rounded-lg text-xs font-semibold text-white"
+                  style={{ backgroundColor: '#EF4444' }}
+                >
+                  {state.language === 'zh' ? '删除图片' : 'Delete Image'}
+                </button>
               </div>
             )}
 
@@ -618,9 +898,53 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
           <Sparkles size={14} color="#FF5E00" />{t('preview')}
         </h3>
-        <div className="rounded-lg overflow-hidden flex items-center justify-center cursor-pointer" style={{ backgroundColor: '#FFFFFF', border: '1px solid #ddd', aspectRatio: '1' }} onClick={handleRefreshPreview}>
+        <div
+          ref={previewCropFrameRef}
+          className="rounded-lg overflow-hidden relative flex items-center justify-center select-none"
+          style={{ backgroundColor: '#FFFFFF', border: '1px solid #ddd', aspectRatio: '1' }}
+        >
           {previewUrl ? (
-            <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
+            <>
+              <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
+              <div
+                className="absolute border-2"
+                onMouseDown={(event) => startPreviewCropAction('move', event)}
+                style={{
+                  left: `${(previewCrop.x / CAPTURE_SIZE) * 100}%`,
+                  top: `${(previewCrop.y / CAPTURE_SIZE) * 100}%`,
+                  width: `${(previewCrop.width / CAPTURE_SIZE) * 100}%`,
+                  height: `${(previewCrop.height / CAPTURE_SIZE) * 100}%`,
+                  borderColor: '#FF5E00',
+                  background: 'rgba(255,94,0,0.08)',
+                  cursor: 'move',
+                  boxShadow: '0 0 0 9999px rgba(255,255,255,0.42)',
+                }}
+              >
+                {(['nw', 'ne', 'sw', 'se'] as const).map(handle => {
+                  const positionStyle =
+                    handle === 'nw' ? { left: -6, top: -6, cursor: 'nwse-resize' } :
+                    handle === 'ne' ? { right: -6, top: -6, cursor: 'nesw-resize' } :
+                    handle === 'sw' ? { left: -6, bottom: -6, cursor: 'nesw-resize' } :
+                    { right: -6, bottom: -6, cursor: 'nwse-resize' };
+
+                  return (
+                    <div
+                      key={handle}
+                      onMouseDown={(event) => startPreviewCropAction(handle, event)}
+                      style={{
+                        position: 'absolute',
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        backgroundColor: '#FF5E00',
+                        border: '2px solid #fff',
+                        ...positionStyle,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </>
           ) : (
             <div className="flex flex-col items-center gap-1 py-8">
               <Image size={28} color="#999" />
@@ -628,6 +952,20 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             </div>
           )}
         </div>
+        {previewUrl && (
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-[10px]" style={{ color: '#777' }}>
+              {state.language === 'zh' ? '默认自动贴边，可拖动或拉角调整复制范围' : 'Auto-trim by default. Drag or resize the box before copying.'}
+            </p>
+            <button
+              onClick={() => void resetPreviewCrop()}
+              className="shrink-0 px-2 py-1 rounded text-[10px] font-medium"
+              style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+            >
+              {state.language === 'zh' ? '重置范围' : 'Reset Crop'}
+            </button>
+          </div>
+        )}
         <button
           onClick={handleCopyPreview}
           disabled={state.elements.length === 0}
@@ -643,6 +981,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
           <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '图层' : 'Layers'}
         </h3>
+        <p className="text-[10px] mb-3" style={{ color: '#666' }}>
+          {state.language === 'zh' ? '拖动图层卡片可调整前后顺序' : 'Drag layer cards to reorder front/back stacking'}
+        </p>
         {layerElements.length === 0 ? (
           <p className="text-[11px]" style={{ color: '#666' }}>
             {state.language === 'zh' ? '画布为空，添加素材后可在这里切换选中图层' : 'Canvas is empty. Add elements to switch layers here.'}
@@ -651,17 +992,54 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           <div className="space-y-2">
             {layerElements.map((element, index) => {
               const isActive = element.id === state.selectedId;
+              const isDragging = element.id === draggedLayerId;
+              const isDropTarget = element.id === dragOverLayerId && draggedLayerId !== element.id;
               return (
                 <button
                   key={element.id}
                   onClick={() => dispatch({ type: 'SELECT_ELEMENT', id: element.id })}
-                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left"
+                  draggable
+                  onDragStart={(event) => {
+                    setDraggedLayerId(element.id);
+                    setDragOverLayerId(element.id);
+                    dispatch({ type: 'SELECT_ELEMENT', id: element.id });
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', element.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    if (dragOverLayerId !== element.id) {
+                      setDragOverLayerId(element.id);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const fromId = draggedLayerId ?? event.dataTransfer.getData('text/plain');
+                    if (fromId) {
+                      handleLayerReorder(fromId, element.id);
+                    }
+                    setDraggedLayerId(null);
+                    setDragOverLayerId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedLayerId(null);
+                    setDragOverLayerId(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left"
                   style={{
-                    backgroundColor: isActive ? 'rgba(255,94,0,0.12)' : '#1a1a1a',
-                    border: isActive ? '1px solid #FF5E00' : '1px solid #2a2a2a',
+                    backgroundColor: isDragging
+                      ? 'rgba(255,94,0,0.18)'
+                      : isActive ? 'rgba(255,94,0,0.12)' : '#1a1a1a',
+                    border: isDropTarget
+                      ? '1px solid #FFB347'
+                      : isActive ? '1px solid #FF5E00' : '1px solid #2a2a2a',
                     color: isActive ? '#fff' : '#ccc',
+                    opacity: isDragging ? 0.7 : 1,
+                    cursor: 'grab',
                   }}
                 >
+                  <LayerThumbnail element={element} />
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold truncate">{getLayerLabel(element, state.language)}</div>
                     <div className="text-[10px]" style={{ color: isActive ? '#ffb37a' : '#777' }}>
@@ -711,6 +1089,13 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             </div>
             <input type="range" min={-180} max={180} step={1} value={(selectedElement as ImageElement).rotation} onChange={e => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: Number(e.target.value) } }); }} className="w-full" style={{ accentColor: '#FF5E00' }} />
           </div>
+          <button
+            onClick={() => { dispatch({ type: 'REMOVE_ELEMENT', id: selectedElement.id }); }}
+            className="w-full flex items-center justify-center gap-2 py-2 mt-3 rounded-lg text-xs font-semibold text-white transition-all hover:scale-[1.02]"
+            style={{ backgroundColor: '#EF4444' }}
+          >
+            <Trash2 size={14} />{state.language === 'zh' ? '删除图片' : 'Delete Image'}
+          </button>
         </div>
       )}
 
