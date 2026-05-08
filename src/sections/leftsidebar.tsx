@@ -22,6 +22,17 @@ function isFace(e: MemeElement): boolean {
   return FACES.some(f => f.id === name);
 }
 
+function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
+  const selected = selectedId ? elements.find(e => e.id === selectedId) : undefined;
+  if (selected && isPanda(selected)) {
+    return selected as ImageElement;
+  }
+
+  const pandas = elements.filter(isPanda) as ImageElement[];
+  if (pandas.length === 0) return undefined;
+  return pandas.reduce((top, current) => current.zIndex > top.zIndex ? current : top);
+}
+
 function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): Material[] {
   if (!query.trim()) return items;
   const q = query.trim().toLowerCase();
@@ -37,7 +48,7 @@ function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): M
 }
 
 export function LeftSidebar() {
-  const { state, dispatch, generateId } = useMeme();
+  const { state, dispatch, generateId, draftSlots, saveDraft, loadDraft, clearDraft } = useMeme();
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'panda' | 'face'>('panda');
@@ -47,14 +58,36 @@ export function LeftSidebar() {
   const lang = state.language;
   const filteredPandas = filterMaterials(PANDA_HEADS, pandaSearch, lang);
   const filteredFaces = filterMaterials(FACES, faceSearch, lang);
+  const savedDraftSlots = draftSlots.filter(slot => slot.state);
+  const nextDraftSlot = draftSlots.find(slot => !slot.state) ?? draftSlots[draftSlots.length - 1];
+
+  const handleUseDraft = (slotId: string, slotName: string) => {
+    const confirmed = window.confirm(
+      lang === 'zh'
+        ? `使用 ${slotName} 会覆盖当前画布内容，确定继续吗？`
+        : `Using ${slotName.replace('草稿', 'Draft ')} will overwrite the current canvas. Continue?`
+    );
+    if (!confirmed) return;
+    loadDraft(slotId);
+  };
+
+  const handleDeleteDraft = (slotId: string, slotName: string) => {
+    const confirmed = window.confirm(
+      lang === 'zh'
+        ? `确定删除 ${slotName} 吗？删除后无法恢复。`
+        : `Delete ${slotName.replace('草稿', 'Draft ')}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    clearDraft(slotId);
+  };
 
   const handleAddPandaHead = (src: string, id: string) => {
-    state.elements.filter(isPanda).forEach(e => {
-      dispatch({ type: 'REMOVE_ELEMENT', id: e.id });
-    });
+    const pandaCount = state.elements.filter(isPanda).length;
     const element: ImageElement = {
       id: generateId(), type: 'image', src, name: id,
-      x: 75, y: 50, width: 350, height: 350,
+      x: Math.min(150, 75 + pandaCount * 18),
+      y: Math.min(120, 50 + pandaCount * 18),
+      width: 350, height: 350,
       rotation: 0, opacity: 1, zIndex: 0, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
@@ -62,11 +95,8 @@ export function LeftSidebar() {
   };
 
   const handleAddFace = (src: string, id: string) => {
-    state.elements.filter(isFace).forEach(e => {
-      dispatch({ type: 'REMOVE_ELEMENT', id: e.id });
-    });
     let pandaId = 'panda-head';
-    const currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
+    const currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (currentPanda) {
       pandaId = currentPanda.name;
     } else {
@@ -78,9 +108,10 @@ export function LeftSidebar() {
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
     const offset = getPandaFaceOffset(pandaId);
+    const faceCount = state.elements.filter(isFace).length;
     const faceElement: ImageElement = {
       id: generateId(), type: 'image', src, name: id,
-      x: offset.x, y: offset.y, width: offset.w, height: offset.h,
+      x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
       rotation: 0, opacity: 1, zIndex: 1, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element: faceElement });
@@ -190,6 +221,60 @@ export function LeftSidebar() {
 
   return (
     <aside className="desktop-sidebar-left">
+      <div className="draft-card">
+        <div className="draft-card-header">
+          <span className="draft-card-icon">💾</span>
+          <span className="draft-card-title">{lang === 'zh' ? '本地草稿' : 'Local Draft'}</span>
+        </div>
+        <button className="draft-save-current-btn" onClick={() => void saveDraft(nextDraftSlot.id)}>
+          {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
+        </button>
+        {savedDraftSlots.length === 0 ? (
+          <p className="draft-empty-hint">
+            {lang === 'zh' ? '还没有已保存草稿，先保存一份当前编辑内容' : 'No saved drafts yet. Save the current edit first.'}
+          </p>
+        ) : (
+          <div className="draft-slot-grid">
+            {savedDraftSlots.map(slot => {
+            const draftTime = slot.updatedAt
+              ? new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+                  month: 'numeric',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }).format(new Date(slot.updatedAt))
+              : '';
+
+            return (
+              <div key={slot.id} className="draft-slot-card">
+                <button
+                  className="draft-slot-preview"
+                  onClick={() => handleUseDraft(slot.id, slot.name)}
+                  title={lang === 'zh' ? '点击使用草稿' : 'Click to use this draft'}
+                >
+                  <img src={slot.previewUrl} alt={slot.name} className="draft-slot-image" />
+                </button>
+                <div className="draft-slot-info">
+                  <div className="draft-slot-name">{lang === 'zh' ? slot.name : slot.name.replace('草稿', 'Draft ')}</div>
+                  <div className="draft-slot-meta">
+                    {lang === 'zh' ? `${slot.elementCount} 图层 · ${draftTime}` : `${slot.elementCount} layers · ${draftTime}`}
+                  </div>
+                </div>
+                  <div className="draft-slot-actions">
+                    <button className="draft-card-btn primary" onClick={() => handleUseDraft(slot.id, slot.name)}>
+                    {lang === 'zh' ? '使用' : 'Use'}
+                    </button>
+                    <button className="draft-card-btn danger" onClick={() => handleDeleteDraft(slot.id, slot.name)}>
+                      {lang === 'zh' ? '删除' : 'Delete'}
+                    </button>
+                  </div>
+              </div>
+            );
+            })}
+          </div>
+        )}
+      </div>
+
       <div className="sidebar-section sidebar-panda">
         <div className="sidebar-section-header">
           <span className="sidebar-icon">🐼</span>

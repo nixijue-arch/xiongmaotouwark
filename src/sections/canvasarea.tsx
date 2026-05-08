@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
 import { useMeme } from '@/context/memecontext';
 import type { ImageElement, TextElement } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
@@ -19,6 +19,25 @@ const MAX_DESKTOP_CANVAS_SCALE = 1.9;
 const DRAGGABLE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 const DEFAULT_VISIBLE_BOUNDS = { left: 0, top: 0, width: 1, height: 1 };
 const visibleBoundsCache = new Map<string, typeof DEFAULT_VISIBLE_BOUNDS>();
+
+function getCanvasScale(isMobile: boolean) {
+  if (typeof window === 'undefined') return 1;
+
+  if (isMobile) {
+    const vw = window.innerWidth - 16;
+    const vh = window.innerHeight - 120;
+    const scale = Math.min(1, Math.min(vw / CANVAS_SIZE, vh / CANVAS_SIZE));
+    return Math.max(0.45, scale);
+  }
+
+  const reservedSidebars = 192 + 214;
+  const reservedPadding = 12;
+  const reservedHeader = 72;
+  const vw = window.innerWidth - reservedSidebars - reservedPadding;
+  const vh = window.innerHeight - reservedHeader;
+  const scale = Math.min(MAX_DESKTOP_CANVAS_SCALE, vw / CANVAS_SIZE, vh / CANVAS_SIZE);
+  return Math.max(1, scale);
+}
 
 function validateDroppedImage(file: File, language: 'zh' | 'en'): string | null {
   if (!DRAGGABLE_IMAGE_TYPES.includes(file.type)) {
@@ -50,24 +69,6 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = dataUrl;
   });
-}
-
-function measureTextBox(element: TextElement) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return { width: element.width, height: element.height };
-  }
-
-  ctx.font = `${element.fontWeight} ${element.fontSize}px ${element.fontFamily}`;
-  const metrics = ctx.measureText(element.text || '');
-  const textWidth = Math.ceil(metrics.width);
-  const textHeight = Math.ceil((metrics.actualBoundingBoxAscent || element.fontSize) + (metrics.actualBoundingBoxDescent || element.fontSize * 0.2));
-
-  return {
-    width: textWidth + 16, // px-2
-    height: textHeight + 8, // py-1
-  };
 }
 
 async function getVisibleImageBounds(src: string): Promise<typeof DEFAULT_VISIBLE_BOUNDS> {
@@ -177,8 +178,8 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
   const p = posMap[dir];
   return (
     <div
-      className={`absolute ${p.c}`}
-      style={{ ...p.s, width: 10, height: 10, borderRadius: '50%', backgroundColor: '#FF5E00', zIndex: 15, border: '2px solid #fff', boxSizing: 'border-box' }}
+      className={`absolute ${p.c} resize-handle`}
+      style={{ ...p.s, width: 10, height: 10, borderRadius: '50%', backgroundColor: '#FF5E00', zIndex: 15, border: '2px solid #fff', boxSizing: 'border-box', pointerEvents: 'auto' }}
       onMouseDown={onStart}
       onTouchStart={onStart}
     />
@@ -220,18 +221,25 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
     handler(e);
   };
 
+  const handleElementPointerStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    onSelect();
+  };
+
   return (
     <Draggable
       nodeRef={nodeRef}
+      cancel="button, input, .resize-handle"
       position={{ x: element.x, y: element.y }}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
       onStart={onSelect}
     >
       <div
         ref={nodeRef}
-        className="absolute cursor-move select-none"
+        className="absolute cursor-move select-none canvas-element"
         style={{ zIndex: isSelected ? 50 : element.zIndex, opacity: element.opacity }}
-        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        onMouseDown={handleElementPointerStart}
+        onTouchStart={handleElementPointerStart}
       >
         <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
           <img src={element.src} alt="element" className="block max-w-none" draggable={false}
@@ -241,26 +249,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
           {isSelected && (
             <>
               <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', zIndex: 5, ...selectionStyle }} />
-              {/* Delete button - top right corner */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
-                  dispatch({ type: 'SELECT_ELEMENT', id: null });
-                }}
-                className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
-                style={{
-                  width: 18, height: 18,
-                  top: selectionStyle.top as number - 8, left: (selectionStyle.left as number) + (selectionStyle.width as number) - 8,
-                  backgroundColor: '#EF4444',
-                  zIndex: 20,
-                  border: '2px solid #fff',
-                }}
-                title="删除"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-              <div className="absolute" style={{ zIndex: 15, ...selectionStyle }}>
+              <div className="absolute" style={{ zIndex: 15, pointerEvents: 'none', ...selectionStyle }}>
                 <ResizeHandle dir="nw" onStart={handleSelectionStart(rhNW)} />
                 <ResizeHandle dir="n"  onStart={handleSelectionStart(rhN)} />
                 <ResizeHandle dir="ne" onStart={handleSelectionStart(rhNE)} />
@@ -270,20 +259,36 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
               </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
-                className="absolute flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white pointer-events-auto"
+              <div
+                className="absolute flex items-center gap-2 pointer-events-auto"
                 style={{
-                  backgroundColor: '#0080FF',
                   zIndex: 16,
                   left: (selectionStyle.left as number) + (selectionStyle.width as number) / 2,
                   transform: 'translateX(-50%)',
                   top: (selectionStyle.top as number) + (selectionStyle.height as number) + 8,
                 }}
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                编辑
-              </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
+                  style={{ backgroundColor: '#0080FF' }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  编辑
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
+                    dispatch({ type: 'SELECT_ELEMENT', id: null });
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
+                  style={{ backgroundColor: '#EF4444' }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  删除
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -333,58 +338,103 @@ function DraggableText({ element, isSelected, onSelect }: {
   onSelect: () => void;
 }) {
   const nodeRef = useRef<HTMLDivElement>(null);
-  const { dispatch } = useMeme();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { state, dispatch } = useMeme();
   const rh = useTextResizeHandler(element);
-  const measuredBox = measureTextBox(element);
-  const contentLeft = element.textAlign === 'center'
-    ? Math.max(0, (element.width - measuredBox.width) / 2)
-    : element.textAlign === 'right'
-      ? Math.max(0, element.width - measuredBox.width)
-      : 0;
-  const selectionStyle: React.CSSProperties = {
-    left: contentLeft - 4,
-    top: -4,
-    width: measuredBox.width + 8,
-    height: Math.max(element.height, measuredBox.height) + 8,
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(element.text);
+
+  useEffect(() => {
+    if (!isEditing) setEditText(element.text);
+  }, [element.text, isEditing]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const commitEdit = useCallback(() => {
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== element.text) {
+      dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { text: trimmed } });
+    } else if (!trimmed) {
+      setEditText(element.text);
+    }
+    setIsEditing(false);
+  }, [dispatch, editText, element.id, element.text]);
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditText(element.text);
+    setIsEditing(true);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+    else if (e.key === 'Escape') { setEditText(element.text); setIsEditing(false); }
+  };
+
+  const textStyle: React.CSSProperties = {
+    fontSize: element.fontSize,
+    color: element.fillColor,
+    fontWeight: element.fontWeight,
+    fontFamily: element.fontFamily,
+    textAlign: element.textAlign,
+    WebkitTextStroke: element.strokeWidth > 0 ? `${element.strokeWidth}px ${element.strokeColor}` : 'none',
   };
 
   return (
     <Draggable
       nodeRef={nodeRef}
-      handle=".text-drag-handle"
-      cancel="button, input"
+      cancel="button, input, .resize-handle"
       position={{ x: element.x, y: element.y }}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
       onStart={onSelect}
     >
       <div
         ref={nodeRef}
-        className="absolute cursor-move select-none"
-        style={{ zIndex: isSelected ? 50 : element.zIndex, width: element.width, minHeight: element.height }}
+        className="absolute select-none"
+        style={{ zIndex: isSelected ? 50 : element.zIndex, cursor: isEditing ? 'text' : 'move' }}
+        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        onDoubleClick={handleDoubleClick}
       >
-        <div
-          className="absolute whitespace-nowrap px-2 py-1 font-bold text-drag-handle"
-          style={{
-            left: contentLeft,
-            top: 0,
-            width: measuredBox.width,
-            minHeight: Math.max(element.height, measuredBox.height),
-            boxSizing: 'border-box',
-            fontSize: element.fontSize,
-            color: element.fillColor,
-            fontWeight: element.fontWeight,
-            textAlign: element.textAlign,
-            WebkitTextStroke: element.strokeWidth > 0 ? `${element.strokeWidth}px ${element.strokeColor}` : 'none',
-            cursor: 'move',
-          }}
-          onClick={(e) => { e.stopPropagation(); onSelect(); }}
-        >
-          {element.text}
-        </div>
-        {isSelected && (
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={handleInputKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            className="px-2 py-1 bg-transparent border-none outline-none whitespace-nowrap block"
+            style={{
+              ...textStyle,
+              caretColor: '#FF5E00',
+              minWidth: Math.max(80, (editText.length || 1) * element.fontSize * 0.65),
+              boxShadow: 'inset 0 -2px 0 #FF5E00',
+            }}
+          />
+        ) : (
+          <div className="whitespace-nowrap px-2 py-1" style={textStyle}>
+            {element.text}
+          </div>
+        )}
+        {isEditing && (
+          <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#0080FF', inset: -4, zIndex: 5 }} />
+        )}
+        {isSelected && !isEditing && (
           <>
-            <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', zIndex: 5, ...selectionStyle }} />
-            {/* Delete button - top right corner */}
+            <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', inset: -4, zIndex: 5 }} />
+            <div
+              className="absolute left-1/2 -translate-x-1/2 text-[9px] font-medium whitespace-nowrap pointer-events-none"
+              style={{ bottom: -18, color: '#FF5E00' }}
+            >
+              {state.language === 'zh' ? '双击编辑' : 'Double-click to edit'}
+            </div>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -394,26 +444,23 @@ function DraggableText({ element, isSelected, onSelect }: {
               className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
               style={{
                 width: 18, height: 18,
-                top: (selectionStyle.top as number) - 8,
-                left: (selectionStyle.left as number) + (selectionStyle.width as number) - 8,
+                top: -12, right: -12,
                 backgroundColor: '#EF4444',
                 zIndex: 20,
                 border: '2px solid #fff',
               }}
-              title="删除"
+              title={state.language === 'zh' ? '删除' : 'Delete'}
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
-            <div className="absolute" style={{ zIndex: 15, ...selectionStyle }}>
-              <ResizeHandle dir="nw" onStart={rh} />
-              <ResizeHandle dir="n"  onStart={rh} />
-              <ResizeHandle dir="ne" onStart={rh} />
-              <ResizeHandle dir="w"  onStart={rh} />
-              <ResizeHandle dir="e"  onStart={rh} />
-              <ResizeHandle dir="sw" onStart={rh} />
-              <ResizeHandle dir="s"  onStart={rh} />
-              <ResizeHandle dir="se" onStart={rh} />
-            </div>
+            <ResizeHandle dir="nw" onStart={rh} />
+            <ResizeHandle dir="n"  onStart={rh} />
+            <ResizeHandle dir="ne" onStart={rh} />
+            <ResizeHandle dir="w"  onStart={rh} />
+            <ResizeHandle dir="e"  onStart={rh} />
+            <ResizeHandle dir="sw" onStart={rh} />
+            <ResizeHandle dir="s"  onStart={rh} />
+            <ResizeHandle dir="se" onStart={rh} />
           </>
         )}
       </div>
@@ -720,7 +767,9 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   /* ===== Keyboard: Delete selected element ===== */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId && !editingId) {
+      const active = document.activeElement;
+      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId && !editingId && !isTyping) {
         e.preventDefault();
         dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId });
         dispatch({ type: 'SELECT_ELEMENT', id: null });
@@ -734,31 +783,17 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const isMobile = useIsMobile();
 
   // Mobile canvas auto-scale
-  const [canvasScale, setCanvasScale] = useState(1);
+  const [canvasScale, setCanvasScale] = useState(() => getCanvasScale(isMobile));
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const calc = () => {
-      if (isMobile) {
-        const vw = window.innerWidth - 16;
-        const vh = window.innerHeight - 120; // leave room for header + FABs
-        const s = Math.min(1, Math.min(vw / CANVAS_SIZE, vh / CANVAS_SIZE));
-        setCanvasScale(Math.max(0.45, s));
-        return;
-      }
-
-      // Desktop: enlarge the visible canvas while keeping the internal coordinate system at 500x500.
-      const reservedSidebars = 192 + 214;
-      const reservedPadding = 12;
-      const reservedHeader = 72;
-      const vw = window.innerWidth - reservedSidebars - reservedPadding;
-      const vh = window.innerHeight - reservedHeader;
-      const s = Math.min(MAX_DESKTOP_CANVAS_SCALE, vw / CANVAS_SIZE, vh / CANVAS_SIZE);
-      setCanvasScale(Math.max(1, s));
+  useLayoutEffect(() => {
+    const updateCanvasScale = () => {
+      setCanvasScale(getCanvasScale(isMobile));
     };
-    calc();
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
+
+    updateCanvasScale();
+    window.addEventListener('resize', updateCanvasScale);
+    return () => window.removeEventListener('resize', updateCanvasScale);
   }, [isMobile]);
 
   return (
