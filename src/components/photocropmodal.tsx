@@ -59,6 +59,9 @@ const tDict = {
   },
 };
 
+const DEFAULT_CONTRAST = 100;
+const DEFAULT_STRENGTH = 150;
+
 // Enhanced B&W + Exposure combined
 function applyStrength(gray: number, s: number): number {
   if (s <= 0) return gray;
@@ -103,8 +106,8 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   const [mode, setMode] = useState<Mode>('crop');
   const [crop, setCrop] = useState({ x: 80, y: 60, w: 180, h: 180 });
   const [lassoPoints, setLassoPoints] = useState<Point[]>([]);
-  const [contrast, setContrast] = useState(0);
-  const [strength, setStrength] = useState(0);
+  const [contrast, setContrast] = useState(DEFAULT_CONTRAST);
+  const [strength, setStrength] = useState(DEFAULT_STRENGTH);
   const [flipH, setFlipH] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -118,7 +121,7 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   const [historyIndex, setHistoryIndex] = useState(-1);
   // Panda head preview loaded
   const [, setPandaLoaded] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
+  const [isDragOverUpload, setIsDragOverUpload] = useState(false);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -294,13 +297,12 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   }, [sourceUrl, tool, crop, lassoPoints, contrast, strength, flipH, hasEraseData]);
 
   // ===== FILE UPLOAD =====
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
+  const handleSelectedFile = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const url = ev.target?.result as string;
       setSourceUrl(url); setLassoPoints([]); setFlipH(false);
-      setContrast(0); setStrength(0);
+      setContrast(DEFAULT_CONTRAST); setStrength(DEFAULT_STRENGTH);
       setMode('crop'); setHasEraseData(false);
       setMode('crop'); setHasEraseData(false);
       const img = new window.Image();
@@ -310,7 +312,35 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
       };
       img.src = url;
     };
-    reader.readAsDataURL(file); e.target.value = '';
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    handleSelectedFile(file);
+    e.target.value = '';
+  };
+
+  const handleUploadDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOverUpload(true);
+  };
+
+  const handleUploadDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    setIsDragOverUpload(false);
+  };
+
+  const handleUploadDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOverUpload(false);
+    const file = Array.from(e.dataTransfer.files).find(item => item.type.startsWith('image/'));
+    if (!file) return;
+    handleSelectedFile(file);
   };
 
   // ===== COORDS =====
@@ -459,20 +489,11 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   const resetAll = () => {
     setSourceUrl(''); setLassoPoints([]);
     setCrop({ x: 80, y: 60, w: 180, h: 180 });
-    setContrast(0); setStrength(0);
+    setContrast(DEFAULT_CONTRAST); setStrength(DEFAULT_STRENGTH);
     setFlipH(false); setMode('crop'); setHasEraseData(false);
     setTool('rect');
     setHistory([]); setHistoryIndex(-1);
   };
-
-  // ===== TIP TOAST =====
-  useEffect(() => {
-    if (sourceUrl) {
-      setShowGuide(true);
-      const timer = setTimeout(() => setShowGuide(false), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [sourceUrl]);
 
   const handleConfirm = () => {
     const finalCanvas = previewCanvasRef.current || processCanvasRef.current;
@@ -550,12 +571,25 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
 
         {/* Upload */}
         {!sourceUrl && (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 sm:py-12">
+          <div
+            className="flex flex-col items-center justify-center gap-3 py-10 sm:py-12 rounded-xl border border-dashed transition-all"
+            style={{
+              borderColor: isDragOverUpload ? '#FF5E00' : '#333',
+              backgroundColor: isDragOverUpload ? 'rgba(255,94,0,0.08)' : 'transparent',
+            }}
+            onDragOver={handleUploadDragOver}
+            onDragLeave={handleUploadDragLeave}
+            onDrop={handleUploadDrop}
+          >
             <label className="flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white cursor-pointer transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}>
               <Upload size={18} />{t.upload}
               <input type="file" accept="image/*" onChange={handleFile} className="hidden" ref={fileInputRef} />
             </label>
-            <p className="text-xs" style={{ color: '#888' }}>{language === 'zh' ? '支持 JPG / PNG / GIF' : 'Supports JPG / PNG / GIF'}</p>
+            <p className="text-xs text-center" style={{ color: '#888' }}>
+              {language === 'zh'
+                ? '上传照片生成熊猫脸 · 支持 JPG / PNG / GIF · 支持拖拽上传图片'
+                : 'Upload photo to generate panda face · Supports JPG / PNG / GIF · Drag images here to upload'}
+            </p>
           </div>
         )}
 
@@ -586,34 +620,37 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
             <div className="flex flex-col lg:flex-row gap-3 sm:gap-4">
               {/* Source image */}
               <div className="flex-1 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-                {/* Toast guide tip */}
-                {showGuide && (
+                <div className="min-h-[40px]">
                   <div className="px-3 py-2 rounded-lg text-xs text-center" style={{ backgroundColor: 'rgba(255,94,0,0.15)', border: '1px solid rgba(255,94,0,0.3)', color: '#FF5E00' }}>
                     {language === 'zh'
                       ? '💡 圈选T型五官区域（眼睛→鼻子→嘴巴）效果更好'
                       : '💡 Crop T-zone (eyes→nose→mouth) for best results'}
                   </div>
-                )}
-                <p className="text-[10px] sm:text-xs" style={{ color: '#aaa' }}>
-                  {isDrawingLasso ? t.lassoDraw
-                    : mode === 'eraser' ? (language === 'zh' ? '在右侧预览图使用橡皮擦' : 'Use eraser on preview')
-                    : tool === 'lasso' ? t.lassoHint
-                    : t.cropHint}
-                </p>
+                </div>
+                <div className="min-h-[20px]">
+                  <p className="text-[10px] sm:text-xs" style={{ color: '#aaa' }}>
+                    {isDrawingLasso ? t.lassoDraw
+                      : mode === 'eraser' ? (language === 'zh' ? '在右侧预览图使用橡皮擦' : 'Use eraser on preview')
+                      : tool === 'lasso' ? t.lassoHint
+                      : t.cropHint}
+                  </p>
+                </div>
                 <div className="relative overflow-hidden rounded-lg select-none" style={{ backgroundColor: '#000', maxHeight: '40vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
                   onPointerMove={(e) => { if (tool === 'lasso') onLassoMove(e); }}
                   onPointerUp={() => { if (tool === 'lasso') onLassoUp(); }}
                 >
-                  <img ref={imgRef} src={sourceUrl} alt="source" className="max-w-full max-h-[40vh] object-contain" draggable={false} style={tool === 'lasso' ? { pointerEvents: 'none' } : undefined} />
-                  {tool === 'lasso' && (
-                    <div className="absolute inset-0" style={{ touchAction: 'none' }}
-                      onPointerDown={onLassoDown}
-                      onPointerMove={onLassoMove}
-                      onPointerUp={onLassoUp}
-                    />
-                  )}
-                  {renderLassoOverlay()}
-                  {renderCropOverlay()}
+                  <div className="relative inline-block shrink-0">
+                    <img ref={imgRef} src={sourceUrl} alt="source" className="block max-w-full max-h-[40vh] object-contain" draggable={false} style={tool === 'lasso' ? { pointerEvents: 'none' } : undefined} />
+                    {tool === 'lasso' && (
+                      <div className="absolute inset-0" style={{ touchAction: 'none' }}
+                        onPointerDown={onLassoDown}
+                        onPointerMove={onLassoMove}
+                        onPointerUp={onLassoUp}
+                      />
+                    )}
+                    {renderLassoOverlay()}
+                    {renderCropOverlay()}
+                  </div>
                   
                 </div>
               </div>

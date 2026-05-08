@@ -13,13 +13,13 @@ function isElementActive(elements: MemeElement[], itemId: string): boolean {
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return PANDA_HEADS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return PANDA_HEADS.some(p => p.id === name);
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return FACES.some(f => f.id === name) || name.startsWith('upload-face-');
+  return FACES.some(f => f.id === name);
 }
 
 function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): Material[] {
@@ -52,14 +52,12 @@ export function LeftSidebar() {
     state.elements.filter(isPanda).forEach(e => {
       dispatch({ type: 'REMOVE_ELEMENT', id: e.id });
     });
-    setTimeout(() => {
-      const element: ImageElement = {
-        id: generateId(), type: 'image', src, name: id,
-        x: 75, y: 50, width: 350, height: 350,
-        rotation: 0, opacity: 1, zIndex: 0, flipX: false,
-      };
-      dispatch({ type: 'ADD_ELEMENT', element });
-    }, 0);
+    const element: ImageElement = {
+      id: generateId(), type: 'image', src, name: id,
+      x: 75, y: 50, width: 350, height: 350,
+      rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+    };
+    dispatch({ type: 'ADD_ELEMENT', element });
     if (isMobile) setSheetOpen(false);
   };
 
@@ -67,25 +65,25 @@ export function LeftSidebar() {
     state.elements.filter(isFace).forEach(e => {
       dispatch({ type: 'REMOVE_ELEMENT', id: e.id });
     });
+    let pandaId = 'panda-head';
     const currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
-    if (!currentPanda) {
+    if (currentPanda) {
+      pandaId = currentPanda.name;
+    } else {
       const pandaElement: ImageElement = {
-        id: generateId(), type: 'image', src: './assets/panda-head.png', name: 'panda-head',
+        id: generateId(), type: 'image', src: './assets/panda-head.png', name: pandaId,
         x: 75, y: 50, width: 350, height: 350,
         rotation: 0, opacity: 1, zIndex: 0, flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
-    const pandaId = currentPanda?.name ?? 'panda-head';
     const offset = getPandaFaceOffset(pandaId);
-    setTimeout(() => {
-      const faceElement: ImageElement = {
-        id: generateId(), type: 'image', src, name: id,
-        x: offset.x, y: offset.y, width: offset.w, height: offset.h,
-        rotation: 0, opacity: 1, zIndex: 1, flipX: false,
-      };
-      dispatch({ type: 'ADD_ELEMENT', element: faceElement });
-    }, 10);
+    const faceElement: ImageElement = {
+      id: generateId(), type: 'image', src, name: id,
+      x: offset.x, y: offset.y, width: offset.w, height: offset.h,
+      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+    };
+    dispatch({ type: 'ADD_ELEMENT', element: faceElement });
     if (isMobile) setSheetOpen(false);
   };
 
@@ -201,7 +199,7 @@ export function LeftSidebar() {
         <div className="sidebar-scroll">
           <div className="sidebar-grid">
             {filteredPandas.map(item => (
-              <MaterialCard key={item.id} item={item} active={isElementActive(state.elements, item.id)} onClick={() => handleAddPandaHead(item.src, item.id)} />
+              <MaterialCard key={item.id} item={item} lang={lang} active={isElementActive(state.elements, item.id)} onClick={() => handleAddPandaHead(item.src, item.id)} />
             ))}
             {filteredPandas.length === 0 && <p className="text-xs text-center col-span-2" style={{ color: '#666' }}>{lang === 'zh' ? '无匹配素材' : 'No matches'}</p>}
           </div>
@@ -217,7 +215,7 @@ export function LeftSidebar() {
         <div className="sidebar-scroll">
           <div className="sidebar-grid">
             {filteredFaces.map(item => (
-              <MaterialCard key={item.id} item={item} active={isElementActive(state.elements, item.id)} onClick={() => handleAddFace(item.src, item.id)} />
+              <MaterialCard key={item.id} item={item} lang={lang} active={isElementActive(state.elements, item.id)} onClick={() => handleAddFace(item.src, item.id)} />
             ))}
             {filteredFaces.length === 0 && <p className="text-xs text-center col-span-2" style={{ color: '#666' }}>{lang === 'zh' ? '无匹配素材' : 'No matches'}</p>}
           </div>
@@ -231,7 +229,10 @@ export function LeftSidebar() {
   );
 }
 
-function MaterialCard({ item, active, onClick }: { item: Material; active: boolean; onClick: () => void }) {
+function MaterialCard({ item, lang, active, onClick }: { item: Material; lang: 'zh' | 'en'; active: boolean; onClick: () => void }) {
+  const displayLabel = lang === 'zh' ? item.labelCn : item.labelEn;
+  const displayTags = lang === 'zh' ? item.tags : item.tagsEn;
+
   return (
     <button
       onClick={onClick}
@@ -239,10 +240,10 @@ function MaterialCard({ item, active, onClick }: { item: Material; active: boole
       style={{ border: active ? '2px solid #FF5E00' : '1px solid #ddd', backgroundColor: '#FFFFFF' }}
       title={`${item.labelCn} / ${item.labelEn}`}
     >
-      <img src={item.src} alt={item.labelCn} className="material-img" draggable={false} loading="lazy" style={{ backgroundColor: '#FFFFFF' }} />
-      <span className="material-name">{item.labelCn}</span>
+      <img src={item.src} alt={displayLabel} className="material-img" draggable={false} loading="lazy" style={{ backgroundColor: '#FFFFFF' }} />
+      <span className="material-name">{displayLabel}</span>
       <div className="material-tags">
-        {item.tags.slice(0, 2).map(t => <span key={t} className="material-tag">{t}</span>)}
+        {displayTags.slice(0, 2).map(t => <span key={t} className="material-tag">{t}</span>)}
       </div>
     </button>
   );
