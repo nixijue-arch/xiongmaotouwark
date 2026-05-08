@@ -14,6 +14,113 @@ interface DraggableImageProps {
 }
 
 type ResizeDir = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
+const CANVAS_SIZE = 500;
+const MAX_DESKTOP_CANVAS_SCALE = 1.9;
+const DRAGGABLE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
+const DEFAULT_VISIBLE_BOUNDS = { left: 0, top: 0, width: 1, height: 1 };
+const visibleBoundsCache = new Map<string, typeof DEFAULT_VISIBLE_BOUNDS>();
+
+function validateDroppedImage(file: File, language: 'zh' | 'en'): string | null {
+  if (!DRAGGABLE_IMAGE_TYPES.includes(file.type)) {
+    return language === 'zh' ? '仅支持拖拽 JPG、PNG 或 GIF 图片' : 'Only JPG, PNG, or GIF images can be dropped';
+  }
+  return null;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => {
+      const dataUrl = event.target?.result;
+      if (typeof dataUrl === 'string' && dataUrl) {
+        resolve(dataUrl);
+        return;
+      }
+      reject(new Error('Empty file data'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = dataUrl;
+  });
+}
+
+function measureTextBox(element: TextElement) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return { width: element.width, height: element.height };
+  }
+
+  ctx.font = `${element.fontWeight} ${element.fontSize}px ${element.fontFamily}`;
+  const metrics = ctx.measureText(element.text || '');
+  const textWidth = Math.ceil(metrics.width);
+  const textHeight = Math.ceil((metrics.actualBoundingBoxAscent || element.fontSize) + (metrics.actualBoundingBoxDescent || element.fontSize * 0.2));
+
+  return {
+    width: textWidth + 16, // px-2
+    height: textHeight + 8, // py-1
+  };
+}
+
+async function getVisibleImageBounds(src: string): Promise<typeof DEFAULT_VISIBLE_BOUNDS> {
+  const cached = visibleBoundsCache.get(src);
+  if (cached) return cached;
+
+  try {
+    const img = await loadImage(src);
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (!width || !height) return DEFAULT_VISIBLE_BOUNDS;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return DEFAULT_VISIBLE_BOUNDS;
+
+    ctx.drawImage(img, 0, 0);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha <= 12) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (maxX < minX || maxY < minY) {
+      visibleBoundsCache.set(src, DEFAULT_VISIBLE_BOUNDS);
+      return DEFAULT_VISIBLE_BOUNDS;
+    }
+
+    const bounds = {
+      left: minX / width,
+      top: minY / height,
+      width: (maxX - minX + 1) / width,
+      height: (maxY - minY + 1) / height,
+    };
+    visibleBoundsCache.set(src, bounds);
+    return bounds;
+  } catch {
+    return DEFAULT_VISIBLE_BOUNDS;
+  }
+}
 
 function useResizeHandler(element: ImageElement, dir: ResizeDir) {
   const { dispatch } = useMeme();
@@ -39,16 +146,20 @@ function useResizeHandler(element: ImageElement, dir: ResizeDir) {
       dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { width: newW, height: newH, x: newX, y: newY } });
     };
 
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', cleanup);
       window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
+      window.removeEventListener('touchend', cleanup);
+      window.removeEventListener('touchcancel', cleanup);
+      window.removeEventListener('blur', cleanup);
     };
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', cleanup);
     window.addEventListener('touchmove', onMove);
-    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchend', cleanup);
+    window.addEventListener('touchcancel', cleanup);
+    window.addEventListener('blur', cleanup);
   }, [element, dispatch, dir]);
 }
 
@@ -77,6 +188,7 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
 function DraggableImage({ element, isSelected, onSelect, onStartEdit }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const { dispatch } = useMeme();
+  const [visibleBounds, setVisibleBounds] = useState(DEFAULT_VISIBLE_BOUNDS);
   const rhNW = useResizeHandler(element, 'nw');
   const rhN  = useResizeHandler(element, 'n');
   const rhNE = useResizeHandler(element, 'ne');
@@ -85,6 +197,29 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
   const rhSW = useResizeHandler(element, 'sw');
   const rhS  = useResizeHandler(element, 's');
   const rhSE = useResizeHandler(element, 'se');
+
+  useEffect(() => {
+    let cancelled = false;
+    void getVisibleImageBounds(element.src).then(bounds => {
+      if (!cancelled) setVisibleBounds(bounds);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [element.src]);
+
+  const selectionStyle: React.CSSProperties = {
+    left: visibleBounds.left * element.width - 2,
+    top: visibleBounds.top * element.height - 2,
+    width: visibleBounds.width * element.width + 4,
+    height: visibleBounds.height * element.height + 4,
+  };
+
+  const handleSelectionStart = (handler: (e: React.MouseEvent | React.TouchEvent) => void) => (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    handler(e);
+  };
+
   return (
     <Draggable
       nodeRef={nodeRef}
@@ -95,53 +230,63 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
       <div
         ref={nodeRef}
         className="absolute cursor-move select-none"
-        style={{ zIndex: isSelected ? 50 : element.zIndex, transform: `rotate(${element.rotation}deg)`, opacity: element.opacity }}
+        style={{ zIndex: isSelected ? 50 : element.zIndex, opacity: element.opacity }}
         onClick={(e) => { e.stopPropagation(); onSelect(); }}
       >
-        <img src={element.src} alt="element" className="block max-w-none" draggable={false}
-          style={{ width: element.width, height: element.height, transform: element.flipX ? 'scaleX(-1)' : 'none' }}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-        />
-        {isSelected && (
-          <>
-            <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', inset: -2, zIndex: 5 }} />
-            {/* Delete button - top right corner */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
-                dispatch({ type: 'SELECT_ELEMENT', id: null });
-              }}
-              className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
-              style={{
-                width: 18, height: 18,
-                top: -10, right: -10,
-                backgroundColor: '#EF4444',
-                zIndex: 20,
-                border: '2px solid #fff',
-              }}
-              title="删除"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-            <ResizeHandle dir="nw" onStart={rhNW} />
-            <ResizeHandle dir="n"  onStart={rhN} />
-            <ResizeHandle dir="ne" onStart={rhNE} />
-            <ResizeHandle dir="w"  onStart={rhW} />
-            <ResizeHandle dir="e"  onStart={rhE} />
-            <ResizeHandle dir="sw" onStart={rhSW} />
-            <ResizeHandle dir="s"  onStart={rhS} />
-            <ResizeHandle dir="se" onStart={rhSE} />
-            <button
-              onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
-              className="absolute flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white pointer-events-auto"
-              style={{ backgroundColor: '#0080FF', zIndex: 16, left: '50%', transform: 'translateX(-50%)', top: 'calc(100% + 6px)' }}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-              编辑
-            </button>
-          </>
-        )}
+        <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
+          <img src={element.src} alt="element" className="block max-w-none" draggable={false}
+            style={{ width: element.width, height: element.height, transform: element.flipX ? 'scaleX(-1)' : 'none' }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+          {isSelected && (
+            <>
+              <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', zIndex: 5, ...selectionStyle }} />
+              {/* Delete button - top right corner */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
+                  dispatch({ type: 'SELECT_ELEMENT', id: null });
+                }}
+                className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
+                style={{
+                  width: 18, height: 18,
+                  top: selectionStyle.top as number - 8, left: (selectionStyle.left as number) + (selectionStyle.width as number) - 8,
+                  backgroundColor: '#EF4444',
+                  zIndex: 20,
+                  border: '2px solid #fff',
+                }}
+                title="删除"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+              <div className="absolute" style={{ zIndex: 15, ...selectionStyle }}>
+                <ResizeHandle dir="nw" onStart={handleSelectionStart(rhNW)} />
+                <ResizeHandle dir="n"  onStart={handleSelectionStart(rhN)} />
+                <ResizeHandle dir="ne" onStart={handleSelectionStart(rhNE)} />
+                <ResizeHandle dir="w"  onStart={handleSelectionStart(rhW)} />
+                <ResizeHandle dir="e"  onStart={handleSelectionStart(rhE)} />
+                <ResizeHandle dir="sw" onStart={handleSelectionStart(rhSW)} />
+                <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
+                <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
+                className="absolute flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white pointer-events-auto"
+                style={{
+                  backgroundColor: '#0080FF',
+                  zIndex: 16,
+                  left: (selectionStyle.left as number) + (selectionStyle.width as number) / 2,
+                  transform: 'translateX(-50%)',
+                  top: (selectionStyle.top as number) + (selectionStyle.height as number) + 8,
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                编辑
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </Draggable>
   );
@@ -165,16 +310,20 @@ function useTextResizeHandler(element: TextElement) {
       dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { fontSize: newFontSize } });
     };
 
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', cleanup);
       window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
+      window.removeEventListener('touchend', cleanup);
+      window.removeEventListener('touchcancel', cleanup);
+      window.removeEventListener('blur', cleanup);
     };
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', cleanup);
     window.addEventListener('touchmove', onMove);
-    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchend', cleanup);
+    window.addEventListener('touchcancel', cleanup);
+    window.addEventListener('blur', cleanup);
   }, [element, dispatch]);
 }
 
@@ -186,10 +335,24 @@ function DraggableText({ element, isSelected, onSelect }: {
   const nodeRef = useRef<HTMLDivElement>(null);
   const { dispatch } = useMeme();
   const rh = useTextResizeHandler(element);
+  const measuredBox = measureTextBox(element);
+  const contentLeft = element.textAlign === 'center'
+    ? Math.max(0, (element.width - measuredBox.width) / 2)
+    : element.textAlign === 'right'
+      ? Math.max(0, element.width - measuredBox.width)
+      : 0;
+  const selectionStyle: React.CSSProperties = {
+    left: contentLeft - 4,
+    top: -4,
+    width: measuredBox.width + 8,
+    height: Math.max(element.height, measuredBox.height) + 8,
+  };
 
   return (
     <Draggable
       nodeRef={nodeRef}
+      handle=".text-drag-handle"
+      cancel="button, input"
       position={{ x: element.x, y: element.y }}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
       onStart={onSelect}
@@ -197,24 +360,30 @@ function DraggableText({ element, isSelected, onSelect }: {
       <div
         ref={nodeRef}
         className="absolute cursor-move select-none"
-        style={{ zIndex: isSelected ? 50 : element.zIndex }}
-        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        style={{ zIndex: isSelected ? 50 : element.zIndex, width: element.width, minHeight: element.height }}
       >
         <div
-          className="whitespace-nowrap px-2 py-1 font-bold"
+          className="absolute whitespace-nowrap px-2 py-1 font-bold text-drag-handle"
           style={{
+            left: contentLeft,
+            top: 0,
+            width: measuredBox.width,
+            minHeight: Math.max(element.height, measuredBox.height),
+            boxSizing: 'border-box',
             fontSize: element.fontSize,
             color: element.fillColor,
             fontWeight: element.fontWeight,
             textAlign: element.textAlign,
             WebkitTextStroke: element.strokeWidth > 0 ? `${element.strokeWidth}px ${element.strokeColor}` : 'none',
+            cursor: 'move',
           }}
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
           {element.text}
         </div>
         {isSelected && (
           <>
-            <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', inset: -4, zIndex: 5 }} />
+            <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', zIndex: 5, ...selectionStyle }} />
             {/* Delete button - top right corner */}
             <button
               onClick={(e) => {
@@ -225,7 +394,8 @@ function DraggableText({ element, isSelected, onSelect }: {
               className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
               style={{
                 width: 18, height: 18,
-                top: -12, right: -12,
+                top: (selectionStyle.top as number) - 8,
+                left: (selectionStyle.left as number) + (selectionStyle.width as number) - 8,
                 backgroundColor: '#EF4444',
                 zIndex: 20,
                 border: '2px solid #fff',
@@ -234,14 +404,16 @@ function DraggableText({ element, isSelected, onSelect }: {
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
-            <ResizeHandle dir="nw" onStart={rh} />
-            <ResizeHandle dir="n"  onStart={rh} />
-            <ResizeHandle dir="ne" onStart={rh} />
-            <ResizeHandle dir="w"  onStart={rh} />
-            <ResizeHandle dir="e"  onStart={rh} />
-            <ResizeHandle dir="sw" onStart={rh} />
-            <ResizeHandle dir="s"  onStart={rh} />
-            <ResizeHandle dir="se" onStart={rh} />
+            <div className="absolute" style={{ zIndex: 15, ...selectionStyle }}>
+              <ResizeHandle dir="nw" onStart={rh} />
+              <ResizeHandle dir="n"  onStart={rh} />
+              <ResizeHandle dir="ne" onStart={rh} />
+              <ResizeHandle dir="w"  onStart={rh} />
+              <ResizeHandle dir="e"  onStart={rh} />
+              <ResizeHandle dir="sw" onStart={rh} />
+              <ResizeHandle dir="s"  onStart={rh} />
+              <ResizeHandle dir="se" onStart={rh} />
+            </div>
           </>
         )}
       </div>
@@ -260,7 +432,7 @@ function buildCursorSVG(tool: 'brush' | 'eraser', size: number, color: string): 
 
 /* ========== CanvasArea ========== */
 export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
-  const { state, dispatch } = useMeme();
+  const { state, dispatch, generateId } = useMeme();
 
   // Image edit (eraser/brush) state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -273,6 +445,8 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const originalSrcRef = useRef<string>('');
   const [cursorUrl, setCursorUrl] = useState<string>('crosshair');
   const [editHistory, setEditHistory] = useState<string[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
     setCursorUrl(buildCursorSVG(editTool, editSize, editColor));
@@ -284,6 +458,94 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
     dispatch({ type: 'SELECT_ELEMENT', id: null });
     setEditingId(null);
   };
+
+  const getCanvasPoint = useCallback((clientX: number, clientY: number) => {
+    const canvasNode = canvasRef.current;
+    if (!canvasNode) return null;
+    const rect = canvasNode.getBoundingClientRect();
+    const scaleX = canvasNode.offsetWidth > 0 ? CANVAS_SIZE / canvasNode.offsetWidth : 1;
+    const scaleY = canvasNode.offsetHeight > 0 ? CANVAS_SIZE / canvasNode.offsetHeight : 1;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }, [canvasRef]);
+
+  const handleDroppedImage = useCallback(async (file: File, clientX: number, clientY: number) => {
+    const validationError = validateDroppedImage(file, state.language);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const image = await loadImage(dataUrl);
+      const dropPoint = getCanvasPoint(clientX, clientY);
+      const maxSide = 320;
+      const naturalWidth = image.naturalWidth || 1;
+      const naturalHeight = image.naturalHeight || 1;
+      const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
+      const width = Math.max(40, Math.round(naturalWidth * scale));
+      const height = Math.max(40, Math.round(naturalHeight * scale));
+      const centerX = dropPoint?.x ?? CANVAS_SIZE / 2;
+      const centerY = dropPoint?.y ?? CANVAS_SIZE / 2;
+      const x = Math.max(0, Math.min(CANVAS_SIZE - width, Math.round(centerX - width / 2)));
+      const y = Math.max(0, Math.min(CANVAS_SIZE - height, Math.round(centerY - height / 2)));
+
+      dispatch({
+        type: 'ADD_ELEMENT',
+        element: {
+          id: generateId(),
+          type: 'image',
+          src: dataUrl,
+          name: `drop-image-${Date.now()}`,
+          x,
+          y,
+          width,
+          height,
+          rotation: 0,
+          opacity: 1,
+          zIndex: 0,
+          flipX: false,
+        },
+      });
+    } catch (error) {
+      console.error('Drop image failed:', error);
+      alert(state.language === 'zh' ? '拖拽图片失败，请重试' : 'Failed to drop image, please try again');
+    }
+  }, [dispatch, generateId, getCanvasPoint, state.language]);
+
+  const handleCanvasDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragOver(true);
+  }, []);
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleCanvasDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragOver(false);
+    const file = Array.from(e.dataTransfer.files).find(item => item.type.startsWith('image/'));
+    if (!file) return;
+    await handleDroppedImage(file, e.clientX, e.clientY);
+  }, [handleDroppedImage]);
 
   const startEdit = (id: string) => {
     setEditingId(id);
@@ -476,15 +738,23 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isMobile) {
-      setCanvasScale(1);
-      return;
-    }
     const calc = () => {
-      const vw = window.innerWidth - 16;
-      const vh = window.innerHeight - 120; // leave room for header + FABs
-      const s = Math.min(1, Math.min(vw / 500, vh / 500));
-      setCanvasScale(Math.max(0.45, s));
+      if (isMobile) {
+        const vw = window.innerWidth - 16;
+        const vh = window.innerHeight - 120; // leave room for header + FABs
+        const s = Math.min(1, Math.min(vw / CANVAS_SIZE, vh / CANVAS_SIZE));
+        setCanvasScale(Math.max(0.45, s));
+        return;
+      }
+
+      // Desktop: enlarge the visible canvas while keeping the internal coordinate system at 500x500.
+      const reservedSidebars = 192 + 214;
+      const reservedPadding = 12;
+      const reservedHeader = 72;
+      const vw = window.innerWidth - reservedSidebars - reservedPadding;
+      const vh = window.innerHeight - reservedHeader;
+      const s = Math.min(MAX_DESKTOP_CANVAS_SCALE, vw / CANVAS_SIZE, vh / CANVAS_SIZE);
+      setCanvasScale(Math.max(1, s));
     };
     calc();
     window.addEventListener('resize', calc);
@@ -498,27 +768,42 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         ref={canvasWrapperRef}
         className="canvas-outer"
         style={{
-          width: isMobile ? 500 * canvasScale : 500,
-          height: isMobile ? 500 * canvasScale : 500,
+          width: CANVAS_SIZE * canvasScale,
+          height: CANVAS_SIZE * canvasScale,
         }}
       >
         <div
           ref={canvasRef}
           className="relative rounded-xl canvas-inner"
+          data-capture-root="true"
           style={{
             backgroundColor: '#FFFFFF',
-            width: 500,
-            height: 500,
+            width: CANVAS_SIZE,
+            height: CANVAS_SIZE,
             boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
             border: '2px solid #2a2a2a',
             overflow: 'hidden',
             flexShrink: 0,
-            transform: isMobile && canvasScale !== 1 ? `scale(${canvasScale})` : undefined,
+            transform: canvasScale !== 1 ? `scale(${canvasScale})` : undefined,
             transformOrigin: 'top left',
           }}
           onClick={handleCanvasClick}
           onTouchEnd={handleCanvasClick}
+          onDragEnter={handleCanvasDragEnter}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
+          onDrop={handleCanvasDrop}
         >
+        {isDragOver && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              border: '3px dashed #FF5E00',
+              backgroundColor: 'rgba(255,94,0,0.08)',
+              zIndex: 200,
+            }}
+          />
+        )}
         {state.elements.map((el) => {
           const isSelected = el.id === state.selectedId;
           if (el.type === 'image') {

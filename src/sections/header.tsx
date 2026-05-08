@@ -1,5 +1,5 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Sparkles, Copy, CheckCircle2, Image, PenTool, BookOpen, User } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User } from 'lucide-react';
 import { useState } from 'react';
 
 export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about'; setPage: (page: 'editor' | 'museum' | 'about') => void }) {
@@ -32,7 +32,7 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
     <header className="header-bar">
       <div className="header-left">
         <div className="brand-icon">
-          <Sparkles size={18} color="#fff" />
+          <img src="/site-logo.png" alt="Site logo" className="brand-logo-image" />
         </div>
         <div className="brand-text">
           <span className="brand-name">$熊猫头</span>
@@ -93,6 +93,7 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
           <User size={14} />
           <span className="link-label">{t('avatarMaker')}</span>
         </a>
+
       </div>
 
       {/* Right side: CA + Lang */}

@@ -1,26 +1,143 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
-import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, Upload, X, ChevronUp, Camera, Type, AlignLeft, AlignCenter, AlignRight, Bold } from 'lucide-react';
-import html2canvas from 'html2canvas';
+import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, Upload, X, ChevronUp, Camera, Type, AlignLeft, AlignCenter, AlignRight, Bold, Copy } from 'lucide-react';
 import { PANDA_HEADS, FACES, getPandaFaceOffset } from '@/data/materials';
 import { PhotoCropModal } from '@/components/photocropmodal';
 
 const ZH_TEXTS = ['在？V我50','我不做人啦！','就这？','你不对劲','尊嘟假嘟','蚌埠住了','这波在大气层','笑死我了','开始你的表演','啊对对对','我真的会谢','无所谓我会出手','这就是中国速度','啊这','你在教我做事？','问题不大','我直接自信','这很合理','有内味了','气氛到这了','家人们谁懂啊','这班不上也罢','我说的是真的','这就是格局','我是废物','我裂开了','太对了哥','反杀反杀！','？？？','我先run了','上班哪有不疯的','这谁顶得住','差不多得了','这合理吗','我已经报警了','再装我就哭了','不可能的','你礼貌吗','给跪了','打工人打工魂','开摆','绷不住了','汗流浃背了','人间真实','笑不活了','绝了','6','小丑竟是我自己','速速撤退','毁灭吧','一键三连','下次一定','高产似那啥','cargo降落伞','我太难了','高手过招','有点意思','不太对劲','这就是实力','啊对对对','梦幻联动','血赚','亏麻了','原地起飞','给我整不会了','离谱','抽象','狠狠拿捏了','重拳出击','纯路人','理性讨论','有一说一','确实','龟龟','吓得我水都喷了','很有精神','一般般啦','祖安钢琴家','这波我必C','你完了','听我狡辩','满脸写着开心','为什么总是我','麻了','我悟了','佛了','杠精退散','老实人','正能量嗷','格局打开','毕竟我也不是什么恶魔','说出来你可能不信','此时一位靓仔路过','先赌为敬','重在参与','赢了会所嫩模','输了下海干活','问题不大'];
 
 const EN_TEXTS = ['V me 50 plz','I quit!','Really?','You sus','No cap fr fr','I cant even','Big brain move','LMAO','Show me what you got','Yeah sure buddy','Im dead','I got this','China speed','Oh no','You telling ME?','No problemo','Straight up confident','Makes sense','Thats the vibe','It is what it is','No shot','Thats crazy','Say less','Bet','Slay','I cant breathe','On god','Periodt','Not even close','Im out','Touch grass','Skill issue','Ratio','Cooked','GG no re','Shaking rn','Bruh','Who asked','Sir this is a Wendys','RIP','F in the chat','Just vibing','Built different','Unhinged','Delulu','Main character energy','Rent free','Gatekeeping','Gaslight gatekeep girlboss','Understood the assignment','Thats suspicious','Its giving','Yassified','Aesthetic','Sheesh','Bussin','Mid','Based','Cringe','Doomer','Goblin mode','Rizz','GigaChad','Absolute cinema','Im cooked','Down bad','W rizz','L take','NPC behavior','Caught in 4k','Hes so real','Not the main character','Fumble','Down horrendous','Its joever','Mogging','Looksmaxxing','Mewing','Huzz','Edging','Ohio','Only in Ohio','Griddy','Suiii','Carti better','Dreamybull','Ambatakum','Quandale dingle','What the sigma','Baby gronk','Livvy dunne rizzing up baby gronk','Fanum tax','Skibidi toilet','Gyatt','Looksmaxxed','Mog or be mogged','Edge or be edged','High T','Low value male','High value male','Alpha wolf','Beta cuck','Sigma grindset','Top G','Matrix is real','Wake up babe','New just dropped','Fake it till you make it','Suffering from success','Another one','You smart','You loyal','I appreciate you','Major key'];
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
+const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const CAPTURE_SIZE = 500;
+
+function validateImageFile(file: File, language: 'zh' | 'en'): string | null {
+  if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
+    return language === 'zh' ? '仅支持 JPG、PNG、WEBP 或 GIF 图片' : 'Only JPG, PNG, WEBP, or GIF images are supported';
+  }
+  if (file.size > MAX_UPLOAD_SIZE) {
+    return language === 'zh' ? '图片不能超过 5MB' : 'Images must be 5MB or smaller';
+  }
+  return null;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => {
+      const dataUrl = event.target?.result;
+      if (typeof dataUrl === 'string' && dataUrl) {
+        resolve(dataUrl);
+        return;
+      }
+      reject(new Error('Empty file data'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = dataUrl;
+  });
+}
+
+async function renderMemeCanvas(elements: MemeElement[], pixelScale = 1): Promise<HTMLCanvasElement> {
+  const canvas = document.createElement('canvas');
+  canvas.width = CAPTURE_SIZE * pixelScale;
+  canvas.height = CAPTURE_SIZE * pixelScale;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to create canvas context');
+  }
+
+  ctx.scale(pixelScale, pixelScale);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, CAPTURE_SIZE, CAPTURE_SIZE);
+
+  const orderedElements = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+  const imageCache = new Map<string, Promise<HTMLImageElement>>();
+
+  for (const element of orderedElements) {
+    ctx.save();
+    ctx.globalAlpha = element.opacity ?? 1;
+
+    if (element.type === 'image') {
+      const imageElement = element as ImageElement;
+      let imagePromise = imageCache.get(imageElement.src);
+      if (!imagePromise) {
+        imagePromise = loadImage(imageElement.src);
+        imageCache.set(imageElement.src, imagePromise);
+      }
+
+      const image = await imagePromise;
+      ctx.translate(imageElement.x + imageElement.width / 2, imageElement.y + imageElement.height / 2);
+      ctx.rotate((imageElement.rotation * Math.PI) / 180);
+      ctx.scale(imageElement.flipX ? -1 : 1, 1);
+      ctx.drawImage(image, -imageElement.width / 2, -imageElement.height / 2, imageElement.width, imageElement.height);
+      ctx.restore();
+      continue;
+    }
+
+    const textElement = element as TextElement;
+    ctx.translate(textElement.x, textElement.y);
+    ctx.rotate((textElement.rotation * Math.PI) / 180);
+    ctx.font = `${textElement.fontWeight} ${textElement.fontSize}px ${textElement.fontFamily}`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = textElement.textAlign;
+    ctx.fillStyle = textElement.fillColor;
+    ctx.strokeStyle = textElement.strokeColor;
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(0, textElement.strokeWidth * 2);
+
+    const textX = textElement.textAlign === 'center' ? textElement.width / 2 : textElement.textAlign === 'right' ? textElement.width : 0;
+    const textY = 0;
+
+    if (textElement.strokeWidth > 0) {
+      ctx.strokeText(textElement.text, textX, textY);
+    }
+    ctx.fillText(textElement.text, textX, textY);
+    ctx.restore();
+  }
+
+  return canvas;
+}
 
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return PANDA_HEADS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return PANDA_HEADS.some(p => p.id === name);
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
+  return FACES.some(f => f.id === name) || name.startsWith('custom-face-');
+}
+
+function getLayerLabel(element: MemeElement, language: 'zh' | 'en'): string {
+  if (element.type === 'text') {
+    const text = (element.text || '').trim();
+    if (text) return text.length > 14 ? `${text.slice(0, 14)}…` : text;
+    return language === 'zh' ? '文字图层' : 'Text Layer';
+  }
+
+  if (isPanda(element)) {
+    return language === 'zh' ? '熊猫头' : 'Panda Head';
+  }
+
+  if (isFace(element)) {
+    return language === 'zh' ? '人脸' : 'Face';
+  }
+
+  return language === 'zh' ? '图片图层' : 'Image Layer';
 }
 
 export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
@@ -32,22 +149,16 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const previewRequestIdRef = useRef(0);
 
   const handleExport = async () => {
-    if (!canvasRef.current) return;
     if (state.elements.length === 0) {
       alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
       return;
     }
     setIsExporting(true);
-    const prevSelected = state.selectedId;
-    dispatch({ type: 'SELECT_ELEMENT', id: null });
-    await new Promise(r => setTimeout(r, 300));
     try {
-      const canvas = await html2canvas(canvasRef.current, {
-        backgroundColor: '#FFFFFF', scale: 2, useCORS: true, allowTaint: true,
-        logging: false, foreignObjectRendering: false, imageTimeout: 5000,
-      });
+      const canvas = await renderMemeCanvas(state.elements, 2);
       const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.download = `memeforge-${Date.now()}.png`;
@@ -62,7 +173,6 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       alert(state.language === 'zh' ? '导出失败' : 'Export failed');
     } finally {
       setIsExporting(false);
-      if (prevSelected) dispatch({ type: 'SELECT_ELEMENT', id: prevSelected });
     }
   };
 
@@ -76,7 +186,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const offset = randomPanda.faceOffset;
     const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false };
     const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: offset.x, y: offset.y, width: offset.w, height: offset.h, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
-    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#FFFFFF', strokeColor: '#000000', strokeWidth: 3 };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'CLEAR_CANVAS' });
     dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
     dispatch({ type: 'ADD_ELEMENT', element: faceEl });
@@ -117,7 +227,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (existingText) {
       dispatch({ type: 'UPDATE_ELEMENT', id: existingText.id, updates: { text: randomText } });
     } else {
-      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#FFFFFF', strokeColor: '#000000', strokeWidth: 3 };
+      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
       dispatch({ type: 'ADD_ELEMENT', element: textEl });
     }
   };
@@ -127,7 +237,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const defaultText = state.language === 'zh' ? '点击输入文字' : 'Click to enter text';
     const text = window.prompt(promptText, defaultText);
     if (!text || text.trim() === '') return;
-    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#FFFFFF', strokeColor: '#000000', strokeWidth: 3 };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     dispatch({ type: 'SELECT_ELEMENT', id: textEl.id });
   };
@@ -135,18 +245,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const handleShare = async (platform: 'x' | 'facebook') => {
     if (platform === 'x') {
       // Copy canvas image then open X intent
-      if (!canvasRef.current || state.elements.length === 0) {
+      if (state.elements.length === 0) {
         alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
         return;
       }
       try {
-        const prevSelected = state.selectedId;
-        dispatch({ type: 'SELECT_ELEMENT', id: null });
-        await new Promise(r => setTimeout(r, 300));
-        const canvas = await html2canvas(canvasRef.current, {
-          backgroundColor: '#FFFFFF', scale: 2, useCORS: true, allowTaint: true,
-          logging: false, foreignObjectRendering: false, imageTimeout: 5000,
-        });
+        const canvas = await renderMemeCanvas(state.elements, 2);
         const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
         if (blob) {
           await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -155,7 +259,6 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           setCopyToast(t('copyImageFailed'));
         }
         setTimeout(() => setCopyToast(null), 3000);
-        if (prevSelected) dispatch({ type: 'SELECT_ELEMENT', id: prevSelected });
       } catch (err) {
         console.error('Copy canvas failed:', err);
         setCopyToast(t('copyImageFailed'));
@@ -170,44 +273,65 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     }
   };
 
-  const handleUploadPanda = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string; if (!dataUrl) return;
-      const img = new window.Image();
-      img.onload = () => {
-        state.elements.filter(isPanda).forEach(el => dispatch({ type: 'REMOVE_ELEMENT', id: el.id }));
-        const element: ImageElement = { id: generateId(), type: 'image', src: dataUrl, name: `upload-panda-${Date.now()}`, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false };
-        dispatch({ type: 'ADD_ELEMENT', element });
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file); e.target.value = '';
+  const handleCopyPreview = async () => {
+    if (state.elements.length === 0) {
+      alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+      return;
+    }
+
+    try {
+      const canvas = await renderMemeCanvas(state.elements, 2);
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        setCopyToast(t('copyImageSuccess'));
+      } else {
+        setCopyToast(t('copyImageFailed'));
+      }
+    } catch (err) {
+      console.error('Copy preview failed:', err);
+      setCopyToast(t('copyImageFailed'));
+    }
+
+    setTimeout(() => setCopyToast(null), 3000);
   };
 
-  const handleUploadFace = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string; if (!dataUrl) return;
-      const img = new window.Image();
-      img.onload = () => {
-        state.elements.filter(isFace).forEach(el => dispatch({ type: 'REMOVE_ELEMENT', id: el.id }));
-        const currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
-        if (!currentPanda) {
-          dispatch({ type: 'ADD_ELEMENT', element: { id: generateId(), type: 'image', src: './assets/panda-head.png', name: 'panda-head', x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false } });
-        }
-        const pandaId = currentPanda?.name ?? 'panda-head';
-        const offset = getPandaFaceOffset(pandaId);
-        setTimeout(() => {
-          const element: ImageElement = { id: generateId(), type: 'image', src: dataUrl, name: `upload-face-${Date.now()}`, x: offset.x, y: offset.y, width: offset.w, height: offset.h, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
-          dispatch({ type: 'ADD_ELEMENT', element });
-        }, 10);
+  const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const error = validateImageFile(file, state.language);
+    if (error) {
+      alert(error);
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const image = await loadImage(dataUrl);
+      const maxWidth = 320;
+      const maxHeight = 320;
+      const scale = Math.min(maxWidth / image.naturalWidth, maxHeight / image.naturalHeight, 1);
+      const width = Math.max(40, Math.round(image.naturalWidth * scale));
+      const height = Math.max(40, Math.round(image.naturalHeight * scale));
+      const element: ImageElement = {
+        id: generateId(),
+        type: 'image',
+        src: dataUrl,
+        name: `upload-asset-${Date.now()}`,
+        x: Math.round((CAPTURE_SIZE - width) / 2),
+        y: Math.round((CAPTURE_SIZE - height) / 2),
+        width,
+        height,
+        rotation: 0,
+        opacity: 1,
+        zIndex: 0,
+        flipX: false,
       };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file); e.target.value = '';
+      dispatch({ type: 'ADD_ELEMENT', element });
+    } catch (err) {
+      console.error('Upload asset failed:', err);
+      alert(state.language === 'zh' ? '图片读取失败，请重试' : 'Failed to read image, please try again');
+    }
   };
 
   const handleCustomFaceConfirm = (dataUrl: string, facePos?: { x: number; y: number; w: number; h: number }) => {
@@ -222,31 +346,47 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element: currentPanda });
     }
     const offset = facePos || getPandaFaceOffset(currentPanda.name);
-    setTimeout(() => {
-      const element: ImageElement = {
-        id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
-        x: offset.x, y: offset.y, width: offset.w, height: offset.h,
-        rotation: 0, opacity: 1, zIndex: 1, flipX: false,
-      };
-      dispatch({ type: 'ADD_ELEMENT', element });
-    }, 10);
+    const element: ImageElement = {
+      id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
+      x: offset.x, y: offset.y, width: offset.w, height: offset.h,
+      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+    };
+    dispatch({ type: 'ADD_ELEMENT', element });
     setModalOpen(false);
     if (isMobile) setSheetOpen(false);
   };
 
   const handleRefreshPreview = useCallback(async () => {
-    if (!canvasRef.current) return;
-    const prevSelected = state.selectedId;
-    dispatch({ type: 'SELECT_ELEMENT', id: null });
-    await new Promise(r => setTimeout(r, 150));
+    if (state.elements.length === 0) {
+      setPreviewUrl('');
+      return;
+    }
+
+    const requestId = ++previewRequestIdRef.current;
     try {
-      const canvas = await html2canvas(canvasRef.current, { backgroundColor: '#FFFFFF', scale: 1, useCORS: true, allowTaint: true, removeContainer: true, logging: false });
-      setPreviewUrl(canvas.toDataURL('image/png'));
+      const canvas = await renderMemeCanvas(state.elements, 1);
+      if (previewRequestIdRef.current === requestId) {
+        setPreviewUrl(canvas.toDataURL('image/png'));
+      }
     } catch (err) { console.error('Preview failed:', err); }
-    if (prevSelected) dispatch({ type: 'SELECT_ELEMENT', id: prevSelected });
-  }, [canvasRef, state.selectedId, dispatch]);
+  }, [state.elements]);
+
+  useEffect(() => {
+    if (state.elements.length === 0) {
+      previewRequestIdRef.current += 1;
+      setPreviewUrl('');
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void handleRefreshPreview();
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [state.elements, handleRefreshPreview]);
 
   const selectedElement = state.selectedId ? state.elements.find(e => e.id === state.selectedId) : undefined;
+  const layerElements = [...state.elements].sort((a, b) => b.zIndex - a.zIndex);
 
   // ===== MOBILE: Bottom Sheet =====
   if (isMobile) {
@@ -284,6 +424,15 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   </div>
                 )}
               </div>
+              <button
+                onClick={handleCopyPreview}
+                disabled={state.elements.length === 0}
+                className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
+                style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+              >
+                <Copy size={14} />
+                {t('copyPreview')}
+              </button>
             </div>
 
             {/* Transform (if image selected) */}
@@ -301,6 +450,11 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                     style={{ backgroundColor: '#2a2a2a' }}
                   >{state.language === 'zh' ? '旋转90°' : 'Rotate 90°'}</button>
                 </div>
+                <button
+                  onClick={() => { const el = state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined; if (el) dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: 0 } }); }}
+                  className="w-full mb-2 py-2 rounded-lg text-xs font-medium text-white"
+                  style={{ backgroundColor: '#2a2a2a' }}
+                >{state.language === 'zh' ? '复原角度' : 'Reset Rotation'}</button>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px]" style={{ color: '#888' }}>{state.language === 'zh' ? '旋转' : 'Rotate'}</span>
                   <input type="range" min={-180} max={180} step={1}
@@ -399,12 +553,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               {!state.museumEditMode && (
                 <>
                   <label className="py-3 rounded-lg text-sm font-semibold text-white cursor-pointer flex items-center justify-center gap-1" style={{ backgroundColor: '#8B5CF6' }}>
-                    <Upload size={14} />{state.language === 'zh' ? '上传熊猫头' : 'Upload Panda'}
-                    <input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadPanda} className="hidden" />
-                  </label>
-                  <label className="py-3 rounded-lg text-sm font-semibold text-white cursor-pointer flex items-center justify-center gap-1" style={{ backgroundColor: '#EC4899' }}>
-                    <Upload size={14} />{state.language === 'zh' ? '上传人脸' : 'Upload Face'}
-                    <input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadFace} className="hidden" />
+                    <Upload size={14} />{t('uploadAsset')}
+                    <input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" />
                   </label>
                   <button onClick={() => setModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#F59E0B' }}>
                     <Camera size={14} />{t('customFace')}
@@ -478,6 +628,63 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             </div>
           )}
         </div>
+        <button
+          onClick={handleCopyPreview}
+          disabled={state.elements.length === 0}
+          className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
+          style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+        >
+          <Copy size={14} />
+          {t('copyPreview')}
+        </button>
+      </div>
+
+      <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
+          <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '图层' : 'Layers'}
+        </h3>
+        {layerElements.length === 0 ? (
+          <p className="text-[11px]" style={{ color: '#666' }}>
+            {state.language === 'zh' ? '画布为空，添加素材后可在这里切换选中图层' : 'Canvas is empty. Add elements to switch layers here.'}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {layerElements.map((element, index) => {
+              const isActive = element.id === state.selectedId;
+              return (
+                <button
+                  key={element.id}
+                  onClick={() => dispatch({ type: 'SELECT_ELEMENT', id: element.id })}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left"
+                  style={{
+                    backgroundColor: isActive ? 'rgba(255,94,0,0.12)' : '#1a1a1a',
+                    border: isActive ? '1px solid #FF5E00' : '1px solid #2a2a2a',
+                    color: isActive ? '#fff' : '#ccc',
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold truncate">{getLayerLabel(element, state.language)}</div>
+                    <div className="text-[10px]" style={{ color: isActive ? '#ffb37a' : '#777' }}>
+                      {element.type === 'text'
+                        ? (state.language === 'zh' ? '文字' : 'Text')
+                        : (isPanda(element) ? (state.language === 'zh' ? '熊猫头' : 'Panda') : isFace(element) ? (state.language === 'zh' ? '人脸' : 'Face') : (state.language === 'zh' ? '图片' : 'Image'))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="text-[10px] font-mono" style={{ color: isActive ? '#FFB347' : '#888' }}>
+                      {state.language === 'zh' ? `层 ${layerElements.length - index}` : `L${layerElements.length - index}`}
+                    </span>
+                    {isActive && (
+                      <span className="text-[10px]" style={{ color: '#FF5E00' }}>
+                        {state.language === 'zh' ? '已选中' : 'Selected'}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Transform / Text Edit */}
@@ -490,6 +697,13 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { flipX: !el.flipX } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}>{state.language === 'zh' ? '左右翻转' : 'Flip Horizontal'}</button>
             <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: (el.rotation + 90) % 360 } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}>{state.language === 'zh' ? '旋转90°' : 'Rotate 90°'}</button>
           </div>
+          <button
+            onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: 0 } }); }}
+            className="w-full flex items-center justify-center gap-1.5 py-2 mt-2 rounded-lg text-xs font-medium"
+            style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+          >
+            {state.language === 'zh' ? '复原角度' : 'Reset Rotation'}
+          </button>
           <div className="mt-2">
             <div className="flex justify-between mb-1">
               <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#888' }}>{state.language === 'zh' ? '旋转角度' : 'Rotation'}</label>
@@ -608,12 +822,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           <button onClick={handleAddText} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#9333EA' }}><Type size={16} />{state.language === 'zh' ? '添加文字' : 'Add Text'}</button>
           {!state.museumEditMode && (
             <>
-              <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#8B5CF6' }}><Upload size={16} />{state.language === 'zh' ? '上传熊猫头' : 'Upload Panda'}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadPanda} className="hidden" /></label>
-              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '替换当前熊猫头' : 'Replace current panda'}</p>
-              <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#EC4899' }}><Upload size={16} />{state.language === 'zh' ? '上传人脸' : 'Upload Face'}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadFace} className="hidden" /></label>
-              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '替换当前人脸' : 'Replace current face'}</p>
+              <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#8B5CF6' }}><Upload size={16} />{t('uploadAsset')}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" /></label>
+              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '支持拖拽素材到画布' : 'Drag assets onto the canvas'}</p>
               <button onClick={() => setModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#F59E0B' }}><Camera size={16} />{t('customFace')}</button>
-              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸' : 'Upload photo to auto-generate face'}</p>
+              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸 · 支持 JPG / PNG / GIF' : 'Upload photo to auto-generate panda face · Supports JPG / PNG / GIF'}</p>
             </>
           )}
         </div>

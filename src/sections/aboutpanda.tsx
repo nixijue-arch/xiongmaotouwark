@@ -123,7 +123,7 @@ function OriginSection() {
 
           <div className="about-origin-card">
             <div className="about-origin-year">2012+</div>
-            <h3>{lang === 'zh' ? '从悼念到爆红' : 'From Memorial to Viral'}</h3>
+            <h3>{lang === 'zh' ? '从爆红到经典' : 'From Viral Fame to Classic Status'}</h3>
             <p>{lang === 'zh'
               ? '没人想到，几年后这只熊猫头会成为红遍中文网络的国民表情包。它从朋友间的私人玩笑，逐渐演变为全网通用的情绪表达工具。'
               : 'No one expected this private joke between friends to evolve into a universal emotional expression tool across the entire Chinese internet years later.'}
