@@ -1149,8 +1149,11 @@
   }
 
   .museum-header {
-    padding: 14px 12px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 12px;
+    padding: 14px 12px 12px;
   }
 
   .museum-window-titlebar {
@@ -1158,9 +1161,18 @@
   }
 
   .museum-back-btn {
+    grid-column: 1 / -1;
+    width: fit-content;
+    max-width: 100%;
     min-height: 40px;
     padding: 0 14px;
     font-size: 12px;
+  }
+
+  .museum-title-panel {
+    grid-column: 1 / 2;
+    gap: 10px;
+    min-width: 0;
   }
 
   .museum-title-icon-wrap {
@@ -1174,14 +1186,21 @@
   }
 
   .museum-title {
-    font-size: 22px;
+    font-size: clamp(18px, 7vw, 22px);
+    line-height: 0.96;
   }
 
   .museum-title-note {
     font-size: 11px;
+    line-height: 1.3;
+    flex-wrap: wrap;
   }
 
   .museum-count {
+    grid-column: 2 / 3;
+    margin-left: 0;
+    justify-self: end;
+    white-space: nowrap;
     min-height: 44px;
     padding: 0 14px;
     font-size: 14px;
@@ -1215,6 +1234,25 @@
   .museum-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .museum-header {
+    grid-template-columns: 1fr;
+  }
+
+  .museum-title-panel,
+  .museum-count {
+    grid-column: 1 / -1;
+  }
+
+  .museum-count {
+    justify-self: start;
+  }
+
+  .museum-title {
+    font-size: 18px;
   }
 }
 
@@ -3265,6 +3303,49 @@ textarea {
   .lang-toggle,
   .ca-badge {
     min-height: 34px;
+  }
+
+  .header-right {
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .ca-badge {
+    gap: 4px;
+    padding: 0 8px;
+    max-width: 132px;
+    overflow: hidden;
+  }
+
+  .ca-star {
+    display: none;
+  }
+
+  .ca-label {
+    display: inline;
+    flex-shrink: 0;
+  }
+
+  .ca-abbrev {
+    display: inline;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ca-copy-icon,
+  .ca-badge .lucide-check-circle-2,
+  .ca-badge svg:last-child {
+    flex-shrink: 0;
+  }
+
+  .ca-badge:hover .ca-abbrev {
+    display: inline;
+  }
+
+  .ca-badge:hover .ca-full,
+  .ca-badge .ca-full {
+    display: none !important;
   }
 
   .win7-window {
