@@ -14,6 +14,11 @@ const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gi
 const CAPTURE_SIZE = 500;
 const PREVIEW_CROP_MIN_SIZE = 48;
 const PREVIEW_CROP_PADDING = 16;
+const PANEL_BORDER = '#8cabd8';
+const PANEL_BG = '#edf5ff';
+const PANEL_SURFACE = '#ffffff';
+const PANEL_TEXT = '#22415f';
+const PANEL_MUTED = '#6b86a7';
 
 type CropRect = {
   x: number;
@@ -894,8 +899,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   return (
     <aside className="desktop-sidebar-right">
       {/* Preview */}
-      <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
+      <div className="p-4 win7-panel">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
           <Sparkles size={14} color="#FF5E00" />{t('preview')}
         </h3>
         <div
@@ -954,13 +959,13 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         </div>
         {previewUrl && (
           <div className="mt-2 flex items-center justify-between gap-2">
-            <p className="text-[10px]" style={{ color: '#777' }}>
+            <p className="text-[10px]" style={{ color: PANEL_MUTED }}>
               {state.language === 'zh' ? '默认自动贴边，可拖动或拉角调整复制范围' : 'Auto-trim by default. Drag or resize the box before copying.'}
             </p>
             <button
               onClick={() => void resetPreviewCrop()}
               className="shrink-0 px-2 py-1 rounded text-[10px] font-medium"
-              style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+              style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}
             >
               {state.language === 'zh' ? '重置范围' : 'Reset Crop'}
             </button>
@@ -970,22 +975,22 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           onClick={handleCopyPreview}
           disabled={state.elements.length === 0}
           className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
-          style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+          style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}
         >
           <Copy size={14} />
           {t('copyPreview')}
         </button>
       </div>
 
-      <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
+      <div className="p-4 win7-panel">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
           <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '图层' : 'Layers'}
         </h3>
-        <p className="text-[10px] mb-3" style={{ color: '#666' }}>
+        <p className="text-[10px] mb-3" style={{ color: PANEL_MUTED }}>
           {state.language === 'zh' ? '拖动图层卡片可调整前后顺序' : 'Drag layer cards to reorder front/back stacking'}
         </p>
         {layerElements.length === 0 ? (
-          <p className="text-[11px]" style={{ color: '#666' }}>
+          <p className="text-[11px]" style={{ color: PANEL_MUTED }}>
             {state.language === 'zh' ? '画布为空，添加素材后可在这里切换选中图层' : 'Canvas is empty. Add elements to switch layers here.'}
           </p>
         ) : (
@@ -1030,11 +1035,11 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   style={{
                     backgroundColor: isDragging
                       ? 'rgba(255,94,0,0.18)'
-                      : isActive ? 'rgba(255,94,0,0.12)' : '#1a1a1a',
+                      : isActive ? 'rgba(255,94,0,0.12)' : PANEL_SURFACE,
                     border: isDropTarget
                       ? '1px solid #FFB347'
-                      : isActive ? '1px solid #FF5E00' : '1px solid #2a2a2a',
-                    color: isActive ? '#fff' : '#ccc',
+                      : isActive ? '1px solid #FF5E00' : `1px solid ${PANEL_BORDER}`,
+                    color: PANEL_TEXT,
                     opacity: isDragging ? 0.7 : 1,
                     cursor: 'grab',
                   }}
@@ -1042,14 +1047,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   <LayerThumbnail element={element} />
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold truncate">{getLayerLabel(element, state.language)}</div>
-                    <div className="text-[10px]" style={{ color: isActive ? '#ffb37a' : '#777' }}>
+                    <div className="text-[10px]" style={{ color: isActive ? '#cc6d00' : PANEL_MUTED }}>
                       {element.type === 'text'
                         ? (state.language === 'zh' ? '文字' : 'Text')
                         : (isPanda(element) ? (state.language === 'zh' ? '熊猫头' : 'Panda') : isFace(element) ? (state.language === 'zh' ? '人脸' : 'Face') : (state.language === 'zh' ? '图片' : 'Image'))}
                     </div>
                   </div>
                   <div className="flex flex-col items-end shrink-0">
-                    <span className="text-[10px] font-mono" style={{ color: isActive ? '#FFB347' : '#888' }}>
+                    <span className="text-[10px] font-mono" style={{ color: isActive ? '#cc6d00' : PANEL_MUTED }}>
                       {state.language === 'zh' ? `层 ${layerElements.length - index}` : `L${layerElements.length - index}`}
                     </span>
                     {isActive && (
@@ -1067,27 +1072,27 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
       {/* Transform / Text Edit */}
       {selectedElement?.type === 'image' && (
-        <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
-          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
+        <div className="p-4 transform-panel-section win7-panel">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
             <Settings2 size={14} color="#FF5E00" />{state.language === 'zh' ? '调整素材' : 'Transform'}
           </h3>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { flipX: !el.flipX } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}>{state.language === 'zh' ? '左右翻转' : 'Flip Horizontal'}</button>
-            <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: (el.rotation + 90) % 360 } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}>{state.language === 'zh' ? '旋转90°' : 'Rotate 90°'}</button>
+            <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { flipX: !el.flipX } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}>{state.language === 'zh' ? '左右翻转' : 'Flip Horizontal'}</button>
+            <button onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: (el.rotation + 90) % 360 } }); }} className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}>{state.language === 'zh' ? '旋转90°' : 'Rotate 90°'}</button>
           </div>
           <button
             onClick={() => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: 0 } }); }}
             className="w-full flex items-center justify-center gap-1.5 py-2 mt-2 rounded-lg text-xs font-medium"
-            style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+            style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}
           >
             {state.language === 'zh' ? '复原角度' : 'Reset Rotation'}
           </button>
-          <div className="mt-2">
-            <div className="flex justify-between mb-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#888' }}>{state.language === 'zh' ? '旋转角度' : 'Rotation'}</label>
-              <span className="text-[10px] font-mono" style={{ color: '#ccc' }}>{(selectedElement as ImageElement).rotation}°</span>
+          <div className="mt-2 transform-range-block">
+            <div className="flex justify-between mb-1 transform-range-head">
+              <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '旋转角度' : 'Rotation'}</label>
+              <span className="text-[10px] font-mono transform-range-value" style={{ color: PANEL_TEXT }}>{(selectedElement as ImageElement).rotation}°</span>
             </div>
-            <input type="range" min={-180} max={180} step={1} value={(selectedElement as ImageElement).rotation} onChange={e => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: Number(e.target.value) } }); }} className="w-full" style={{ accentColor: '#FF5E00' }} />
+            <input type="range" min={-180} max={180} step={1} value={(selectedElement as ImageElement).rotation} onChange={e => { const el = selectedElement as ImageElement; dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: Number(e.target.value) } }); }} className="w-full transform-range-slider" style={{ accentColor: '#FF5E00' }} />
           </div>
           <button
             onClick={() => { dispatch({ type: 'REMOVE_ELEMENT', id: selectedElement.id }); }}
@@ -1100,52 +1105,52 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       )}
 
       {selectedElement?.type === 'text' && (
-        <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
-          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#fff' }}>
+        <div className="p-4 win7-panel">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
             <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '编辑文字' : 'Edit Text'}
           </h3>
           <div className="space-y-3">
             {/* Text content */}
             <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: '#888' }}>{state.language === 'zh' ? '文字内容' : 'Content'}</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '文字内容' : 'Content'}</label>
               <input
                 type="text"
                 value={(selectedElement as TextElement).text}
                 onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { text: e.target.value } })}
                 className="w-full px-2.5 py-2 rounded-lg text-xs"
-                style={{ backgroundColor: '#1a1a1a', color: '#fff', border: '1px solid #333' }}
+                style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}
               />
             </div>
             {/* Font size */}
             <div>
               <div className="flex justify-between mb-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#888' }}>{state.language === 'zh' ? '字号' : 'Size'}</label>
-                <span className="text-[10px] font-mono" style={{ color: '#ccc' }}>{(selectedElement as TextElement).fontSize}px</span>
+                <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '字号' : 'Size'}</label>
+                <span className="text-[10px] font-mono" style={{ color: PANEL_TEXT }}>{(selectedElement as TextElement).fontSize}px</span>
               </div>
               <input type="range" min={8} max={80} step={1} value={(selectedElement as TextElement).fontSize} onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { fontSize: Number(e.target.value) } })} className="w-full" style={{ accentColor: '#FF5E00' }} />
             </div>
             {/* Colors row */}
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: '#888' }}>{state.language === 'zh' ? '文字色' : 'Color'}</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '文字色' : 'Color'}</label>
                 <div className="flex items-center gap-2">
                   <input type="color" value={(selectedElement as TextElement).fillColor} onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { fillColor: e.target.value } })} className="w-7 h-7 rounded cursor-pointer" style={{ padding: 0, border: 'none', background: 'none' }} />
-                  <span className="text-[10px] font-mono" style={{ color: '#888' }}>{(selectedElement as TextElement).fillColor}</span>
+                  <span className="text-[10px] font-mono" style={{ color: PANEL_MUTED }}>{(selectedElement as TextElement).fillColor}</span>
                 </div>
               </div>
               <div className="flex-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: '#888' }}>{state.language === 'zh' ? '描边色' : 'Stroke'}</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider mb-1 block" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '描边色' : 'Stroke'}</label>
                 <div className="flex items-center gap-2">
                   <input type="color" value={(selectedElement as TextElement).strokeColor} onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { strokeColor: e.target.value } })} className="w-7 h-7 rounded cursor-pointer" style={{ padding: 0, border: 'none', background: 'none' }} />
-                  <span className="text-[10px] font-mono" style={{ color: '#888' }}>{(selectedElement as TextElement).strokeColor}</span>
+                  <span className="text-[10px] font-mono" style={{ color: PANEL_MUTED }}>{(selectedElement as TextElement).strokeColor}</span>
                 </div>
               </div>
             </div>
             {/* Stroke width */}
             <div>
               <div className="flex justify-between mb-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#888' }}>{state.language === 'zh' ? '描边宽度' : 'Stroke Width'}</label>
-                <span className="text-[10px] font-mono" style={{ color: '#ccc' }}>{(selectedElement as TextElement).strokeWidth}px</span>
+                <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '描边宽度' : 'Stroke Width'}</label>
+                <span className="text-[10px] font-mono" style={{ color: PANEL_TEXT }}>{(selectedElement as TextElement).strokeWidth}px</span>
               </div>
               <input type="range" min={0} max={8} step={0.5} value={(selectedElement as TextElement).strokeWidth} onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { strokeWidth: Number(e.target.value) } })} className="w-full" style={{ accentColor: '#FF5E00' }} />
             </div>
@@ -1157,9 +1162,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   onClick={() => dispatch({ type: 'UPDATE_ELEMENT', id: selectedElement.id, updates: { textAlign: align } })}
                   className="flex-1 flex items-center justify-center py-2 rounded-lg text-xs font-medium transition-all"
                   style={{
-                    backgroundColor: (selectedElement as TextElement).textAlign === align ? '#FF5E00' : '#1a1a1a',
-                    color: (selectedElement as TextElement).textAlign === align ? '#fff' : '#ccc',
-                    border: '1px solid #2a2a2a',
+                    backgroundColor: (selectedElement as TextElement).textAlign === align ? '#FFB938' : PANEL_SURFACE,
+                    color: PANEL_TEXT,
+                    border: `1px solid ${PANEL_BORDER}`,
                   }}
                 >
                   {align === 'left' && <AlignLeft size={14} />}
@@ -1174,9 +1179,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                 }}
                 className="flex-1 flex items-center justify-center py-2 rounded-lg text-xs font-medium transition-all"
                 style={{
-                  backgroundColor: (selectedElement as TextElement).fontWeight === 'bold' ? '#FF5E00' : '#1a1a1a',
-                  color: (selectedElement as TextElement).fontWeight === 'bold' ? '#fff' : '#ccc',
-                  border: '1px solid #2a2a2a',
+                  backgroundColor: (selectedElement as TextElement).fontWeight === 'bold' ? '#FFB938' : PANEL_SURFACE,
+                  color: PANEL_TEXT,
+                  border: `1px solid ${PANEL_BORDER}`,
                 }}
               >
                 <Bold size={14} />
@@ -1195,7 +1200,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       )}
 
       {/* Actions */}
-      <div className="p-4" style={{ borderBottom: '1px solid #2a2a2a' }}>
+      <div className="p-4 win7-panel">
         <div className="space-y-2">
           {!state.museumEditMode && (
             <>
@@ -1208,21 +1213,21 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           {!state.museumEditMode && (
             <>
               <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#8B5CF6' }}><Upload size={16} />{t('uploadAsset')}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" /></label>
-              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '支持拖拽素材到画布' : 'Drag assets onto the canvas'}</p>
+              <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '支持拖拽素材到画布' : 'Drag assets onto the canvas'}</p>
               <button onClick={() => setModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#F59E0B' }}><Camera size={16} />{t('customFace')}</button>
-              <p className="text-[10px] text-center" style={{ color: '#555' }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸 · 支持 JPG / PNG / GIF' : 'Upload photo to auto-generate panda face · Supports JPG / PNG / GIF'}</p>
+              <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸 · 支持 JPG / PNG / GIF' : 'Upload photo to auto-generate panda face · Supports JPG / PNG / GIF'}</p>
             </>
           )}
         </div>
       </div>
 
       {/* Social Share + Footer Actions */}
-      <div className="p-4 space-y-2 mt-auto">
-        <button onClick={handleClearCanvas} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-30" style={{ backgroundColor: '#1a1a1a', color: '#888', border: '1px solid #2a2a2a' }}><Trash2 size={14} />{t('clearCanvas')}</button>
+      <div className="p-4 space-y-2 mt-auto win7-panel win7-panel-footer">
+        <button onClick={handleClearCanvas} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-30" style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}><Trash2 size={14} />{t('clearCanvas')}</button>
         <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.02] disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}><Download size={16} />{isExporting ? '...' : t('download')}</button>
 
         {/* Social Share Buttons - icon only with tooltip */}
-        <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: '1px solid #2a2a2a' }}>
+        <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: `1px solid ${PANEL_BORDER}` }}>
           <button
             onClick={() => handleShare('x')}
             disabled={state.elements.length === 0}

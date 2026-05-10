@@ -71,5 +71,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 24%),
+      linear-gradient(180deg, #79b9ff 0%, #a7d4ff 16%, #c7e4ff 100%);
   }
 }

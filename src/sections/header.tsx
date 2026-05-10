@@ -5,6 +5,7 @@ import { useState } from 'react';
 export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about'; setPage: (page: 'editor' | 'museum' | 'about') => void }) {
   const { state, dispatch, t } = useMeme();
   const [copied, setCopied] = useState(false);
+  const activeLinkClass = 'header-link header-link-active';
 
   const switchLang = () => {
     dispatch({ type: 'SET_LANGUAGE', lang: state.language === 'zh' ? 'en' : 'zh' });
@@ -38,12 +39,14 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
           <span className="brand-name">$熊猫头</span>
           <span className="brand-tag">{t('subtitle')}</span>
         </div>
+        <div className="brand-bubble">
+          <span className="brand-bubble-title">{state.language === 'zh' ? '做表情，不内耗！' : 'Make memes, not stress.'}</span>
+          <span className="brand-bubble-note">{state.language === 'zh' ? '人人都能做自己的梗图工坊。' : 'A playful studio for fast meme-making.'}</span>
+        </div>
 
-        {/* Page Switcher */}
         <button
           onClick={() => setPage('editor')}
-          className="header-link"
-          style={page === 'editor' ? { backgroundColor: 'rgba(0,204,102,0.2)', borderColor: '#00CC66', color: '#00CC66' } : {}}
+          className={page === 'editor' ? activeLinkClass : 'header-link'}
           title={state.language === 'zh' ? '表情包编辑器' : 'Meme Editor'}
         >
           <PenTool size={14} />
@@ -51,8 +54,7 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
         </button>
         <button
           onClick={() => setPage('museum')}
-          className="header-link"
-          style={page === 'museum' ? { backgroundColor: 'rgba(0,204,102,0.2)', borderColor: '#00CC66', color: '#00CC66' } : {}}
+          className={page === 'museum' ? activeLinkClass : 'header-link'}
           title={t('museum')}
         >
           <Image size={14} />
@@ -60,8 +62,7 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
         </button>
         <button
           onClick={() => setPage('about')}
-          className="header-link"
-          style={page === 'about' ? { backgroundColor: 'rgba(0,204,102,0.2)', borderColor: '#00CC66', color: '#00CC66' } : {}}
+          className={page === 'about' ? activeLinkClass : 'header-link'}
           title={state.language === 'zh' ? '了解熊猫头' : 'About Panda Meme'}
         >
           <BookOpen size={14} />
@@ -95,15 +96,13 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
         </a>
 
       </div>
-
-      {/* Right side: CA + Lang */}
       <div className="header-right">
-        {/* CA Badge */}
         <button
           onClick={copyCA}
           className="ca-badge group"
           title="Click to copy CA"
         >
+          <span className="ca-star">★</span>
           <span className="ca-label">CA:</span>
           <span className="ca-abbrev">0xf35...4444</span>
           <span className="ca-full">0xf3525965a4ad3ca0ac13f4d2f237113691194444</span>
