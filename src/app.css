@@ -2727,6 +2727,10 @@ textarea {
 
 .desktop-sidebar-right {
   width: 310px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: visible;
+  padding-right: 2px;
 }
 
 .win7-panel {
@@ -3028,10 +3032,27 @@ textarea {
 
 .desktop-sidebar-right > .win7-panel {
   margin-bottom: 0;
+  flex-shrink: 0;
 }
 
 .desktop-sidebar-right > .win7-panel h3:first-child {
   margin: -16px -16px 12px;
+}
+
+.right-sidebar-static-panel {
+  flex-shrink: 0;
+}
+
+.right-sidebar-layers-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 168px;
+}
+
+.right-sidebar-layers-list {
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .desktop-sidebar-right > .win7-panel:last-child {

@@ -899,7 +899,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   return (
     <aside className="desktop-sidebar-right">
       {/* Preview */}
-      <div className="p-4 win7-panel">
+      <div className="p-4 win7-panel right-sidebar-static-panel">
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
           <Sparkles size={14} color="#FF5E00" />{t('preview')}
         </h3>
@@ -982,7 +982,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         </button>
       </div>
 
-      <div className="p-4 win7-panel">
+      <div className="p-4 win7-panel right-sidebar-layers-panel">
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
           <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '图层' : 'Layers'}
         </h3>
@@ -994,7 +994,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             {state.language === 'zh' ? '画布为空，添加素材后可在这里切换选中图层' : 'Canvas is empty. Add elements to switch layers here.'}
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 right-sidebar-layers-list">
             {layerElements.map((element, index) => {
               const isActive = element.id === state.selectedId;
               const isDragging = element.id === draggedLayerId;
@@ -1072,7 +1072,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
       {/* Transform / Text Edit */}
       {selectedElement?.type === 'image' && (
-        <div className="p-4 transform-panel-section win7-panel">
+        <div className="p-4 transform-panel-section win7-panel right-sidebar-static-panel">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
             <Settings2 size={14} color="#FF5E00" />{state.language === 'zh' ? '调整素材' : 'Transform'}
           </h3>
@@ -1105,7 +1105,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       )}
 
       {selectedElement?.type === 'text' && (
-        <div className="p-4 win7-panel">
+        <div className="p-4 win7-panel right-sidebar-static-panel">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: PANEL_TEXT }}>
             <Type size={14} color="#FF5E00" />{state.language === 'zh' ? '编辑文字' : 'Edit Text'}
           </h3>
@@ -1200,7 +1200,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       )}
 
       {/* Actions */}
-      <div className="p-4 win7-panel">
+      <div className="p-4 win7-panel right-sidebar-static-panel">
         <div className="space-y-2">
           {!state.museumEditMode && (
             <>
