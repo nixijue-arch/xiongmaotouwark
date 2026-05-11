@@ -40,9 +40,24 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   return p;
 }
 
-type Bbox = [number, number, number, number]; // [x1, y1, x2, y2]
+export type Bbox = [number, number, number, number]; // [x1, y1, x2, y2]
 
 const _bboxCache = new Map<string, Bbox>();
+
+// 把 face PNG 按 alpha>50 的 bbox 抠出来 → 紧凑 dataURL, 加上 padding 防边缘 alpha-clip
+// 编辑器加 face 元素时用 — 元素尺寸 = bbox 而不是 naturalWidth 含的大量透明 padding
+// 这样 face 在 panda anchor 里精确就位, 不会因为 PNG 含 padding 撑得过大
+export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: string; w: number; h: number }> {
+  const img = await loadImage(src);
+  const [x1, y1, x2, y2] = getContentBbox(img);
+  const cw = Math.max(1, x2 - x1);
+  const ch = Math.max(1, y2 - y1);
+  const c = document.createElement('canvas');
+  c.width = cw + padPx * 2;
+  c.height = ch + padPx * 2;
+  c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  return { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height };
+}
 
 // 检测 PNG 内 alpha>thresh 像素的 bounding box
 // 共用给 panda（去 whitespace padding）和 face（找五官 content bbox 当 content_center）

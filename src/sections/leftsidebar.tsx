@@ -3,7 +3,7 @@ import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
-import { calcEditorFaceLayout } from '@/lib/composeMeme';
+import { calcEditorFaceLayout, bboxCropImage } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
@@ -136,7 +136,9 @@ export function LeftSidebar() {
     if (isMobile) setSheetOpen(false);
   };
 
-  // 加 face — 用 calcEditorFaceLayout 按 panda anchor 算 content_center 位置（跟 QuickMode/Collection 一致）
+  // 加 face — 先 bbox-crop 原 face PNG 去掉透明 padding, 再用 cropped 尺寸算 anchor 内位置
+  // 这样保证 face 元素尺寸 = 实际内容尺寸, 在 panda anchor 区域里精确就位
+  // (修 sunglasses/extreme padding face 在编辑器里"过大或错位"的 bug)
   const handleAddFace = async (src: string, id: string) => {
     let pandaId = 'panda-head';
     const currentPanda = getTargetPanda(state.elements, state.selectedId);
@@ -151,16 +153,41 @@ export function LeftSidebar() {
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
     const anchorPanda = ALL_PANDAS.find(p => p.id === pandaId);
-    const layout = anchorPanda
-      ? await calcEditorFaceLayout({
-          pandaSrc: anchorPanda.src,
-          faceSrc: src,
-          faceOffset350: getLivePandaFaceOffset(anchorPanda),
-        })
-      : { x: 100, y: 70, width: 250, height: 250 };
+    // 1. bbox 紧凑裁剪 face PNG (去透明边)
+    let croppedSrc = src;
+    let croppedW = 0, croppedH = 0;
+    try {
+      const cropped = await bboxCropImage(src);
+      croppedSrc = cropped.dataUrl;
+      croppedW = cropped.w;
+      croppedH = cropped.h;
+    } catch { /* 失败用原 src 兜底 */ }
+
+    // 2. 算元素在 panda anchor 里的位置 + 尺寸 (按 cropped 比例 contain 进 anchor)
+    let layout = { x: 100, y: 70, width: 250, height: 250 };
+    if (anchorPanda && croppedW > 0 && croppedH > 0) {
+      const anchor = getLivePandaFaceOffset(anchorPanda);
+      const faceFill = 0.95;
+      const fScale = Math.min(anchor.w / croppedW, anchor.h / croppedH) * faceFill;
+      const dispW = Math.round(croppedW * fScale);
+      const dispH = Math.round(croppedH * fScale);
+      // panda 元素左上角 (75,50) + anchor 中心 - 元素中心 = 元素左上角
+      const elX = Math.round(75 + anchor.x + anchor.w / 2 - dispW / 2);
+      const elY = Math.round(50 + anchor.y + anchor.h / 2 - dispH / 2);
+      layout = { x: elX, y: elY, width: dispW, height: dispH };
+    } else if (anchorPanda) {
+      // bbox crop 失败的兜底 — 用旧 calcEditorFaceLayout
+      const fallback = await calcEditorFaceLayout({
+        pandaSrc: anchorPanda.src,
+        faceSrc: src,
+        faceOffset350: getLivePandaFaceOffset(anchorPanda),
+      });
+      layout = fallback;
+    }
+
     const faceCount = state.elements.filter(isFace).length;
     const faceElement: ImageElement = {
-      id: generateId(), type: 'image', src, name: id,
+      id: generateId(), type: 'image', src: croppedSrc, name: id,
       x: layout.x + faceCount * 6, y: layout.y + faceCount * 6, width: layout.width, height: layout.height,
       rotation: 0, opacity: 1, zIndex: 1, flipX: false,
     };

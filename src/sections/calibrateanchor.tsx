@@ -551,59 +551,74 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
               />
             </div>
 
-            {/* captionOffset slider — 解决 wide-shape panda 底部到 caption 距离感觉太远 */}
+            {/* captionOffset slider — 移动 panda 图片本身 (caption 位置不动) */}
             <div style={{ marginBottom: 14, padding: 10, background: 'rgba(255,94,0,0.07)', border: '1px dashed #FF5E00', borderRadius: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ color: '#ccc', fontWeight: 600 }}>📐 caption 距离</span>
+                <span style={{ color: '#ccc', fontWeight: 600 }}>📐 图片上下偏移</span>
                 <span style={{ color: '#FF5E00', fontVariantNumeric: 'tabular-nums' }}>{captionOffset >= 0 ? '+' : ''}{captionOffset}px</span>
               </div>
               <input
                 type="range"
-                min={-30} max={80} step={1}
+                min={-60} max={100} step={1}
                 value={captionOffset}
                 onChange={(e) => setCaptionOffset(Number(e.target.value))}
                 style={{ width: '100%' }}
               />
               <div style={{ fontSize: 10, color: '#888', marginTop: 4, lineHeight: 1.4 }}>
-                正数 = caption 往上挪贴近 panda 底部; 负数 = 拉远。
+                正数 = panda 图片往下移 (贴近 caption); 负数 = 往上移 (远离 caption)。
+                <br />caption 位置始终不动。
               </div>
-              {/* 实时文字预览 — 让用户看到当前 captionOffset 数值的效果 */}
+              {/* 实时预览 — 100% 复现 QuickMode 的渲染:
+                  width:400, padding:18 18 22, panda-frame:364x364 flex-end, caption margin-top:10 */}
               <div
                 style={{
                   marginTop: 10,
-                  background: 'linear-gradient(180deg, #fffdf7 0%, #f7f1e3 100%)',
+                  background: '#fff',
                   border: '2px solid #0a4e97',
                   borderRadius: 8,
-                  padding: 8,
+                  padding: '18px 18px 22px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
+                  boxSizing: 'border-box',
+                  // 缩到 240 宽以便侧栏装下, 内部按比例缩
+                  width: 240,
+                  transform: 'scale(0.8)',
+                  transformOrigin: 'top left',
                 }}
               >
-                <div style={{ fontSize: 9, color: '#456', alignSelf: 'flex-start', fontWeight: 600 }}>
-                  📌 文字示例 (跟随上方 slider 实时变化):
+                <div style={{ fontSize: 9, color: '#456', alignSelf: 'flex-start', fontWeight: 600, marginBottom: 4 }}>
+                  📌 实时预览 (与 QuickMode 完全一致):
                 </div>
                 <div
                   style={{
-                    width: '100%',
-                    height: 140,
+                    width: 200,
+                    height: 200,
                     display: 'flex',
                     alignItems: 'flex-end',
                     justifyContent: 'center',
-                    overflow: 'hidden',
                   }}
                 >
                   <img
                     src={panda.src}
                     alt={panda.id}
                     draggable={false}
-                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: '50% 100%', userSelect: 'none' }}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      objectPosition: '50% 100%',
+                      userSelect: 'none',
+                      // panda 上下偏移 (与 QuickMode 同款 transform translateY)
+                      // QuickMode 实际 frame=350, 这里 200 → 缩放比例 200/350=0.571
+                      transform: `translateY(${Math.round(captionOffset * 0.571)}px)`,
+                    }}
                   />
                 </div>
                 <div
                   style={{
-                    marginTop: 6 - captionOffset,
-                    fontSize: 18,
+                    marginTop: 6,
+                    fontSize: 16,
                     fontWeight: 700,
                     color: '#000',
                     fontFamily: '"Noto Sans SC", system-ui, sans-serif',

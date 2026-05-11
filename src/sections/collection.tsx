@@ -2,7 +2,7 @@
 // 数据源完全统一到 memecontext 的 draftSlots (与编辑器左上角"本地草稿"共享)
 // Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { useMeme } from '@/context/memecontext';
 import type { DraftSlot, ImageElement, MemeElement, TextElement } from '@/context/memecontext';
@@ -303,6 +303,10 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
   const previewRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(slot.name || info.text || '');
+  // 每次打开 rename 编辑 都从最新 slot.name 同步, 防多次改名时残留旧值
+  useEffect(() => {
+    if (editing) setNameDraft(slot.name || info.text || '');
+  }, [editing, slot.name, info.text]);
 
   const tilt = useMemo(() => {
     let h = 0;
@@ -375,14 +379,12 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
             alt={info.panda.id}
             className="draft-panda-img"
             size={512}
+            // 校准: panda 图片上下移, caption 位置不动 (用 350-coord ratio 缩到 draft 尺寸)
+            // draft-panda-frame 184px / qm-panda-frame 350px, 比例 ≈ 0.526
+            style={{ transform: `translateY(${Math.round(getLiveCaptionOffset(info.panda.id) * 0.526)}px)` }}
           />
         </div>
-        {info.text && (
-          <div
-            className="draft-caption"
-            style={{ marginTop: Math.max(0, 4 - Math.round(getLiveCaptionOffset(info.panda.id) / 2)) }}
-          >{info.text}</div>
-        )}
+        {info.text && <div className="draft-caption">{info.text}</div>}
       </div>
 
       <div className="draft-meta" onClick={(e) => e.stopPropagation()}>

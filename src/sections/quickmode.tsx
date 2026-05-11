@@ -20,7 +20,7 @@ import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { PhotoCropModal } from '@/components/photocropmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
-import { calcEditorFaceLayout } from '@/lib/composeMeme';
+import { calcEditorFaceLayout, composeMeme } from '@/lib/composeMeme';
 import { Camera } from 'lucide-react';
 import {
   Sparkles, Copy, Download, Heart, Wand2, ArrowRight, Type,
@@ -126,25 +126,70 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
 
   const onFlipH = useCallback(() => setFaceFlipX((f) => !f), []);
 
+  // 用 composeMeme bbox-cropped 合成 + 临时 DOM 节点 → 复制/下载得到紧凑的图
+  // 之前直接 captureNode(previewRef) = 拍 .quickmode-preview (400x480 含白边/留白) 太大
+  // 现在拍一个临时构造的 tight 节点 (跟 Collection 批量打 ZIP 同款做法)
+  const buildTightExportNode = useCallback(async (): Promise<HTMLDivElement> => {
+    const composedDataUrl = await composeMeme({
+      pandaSrc: panda.src,
+      faceSrc: face.src,
+      faceOffset: getLivePandaFaceOffset(panda),
+      rotation: faceRotation,
+      flipX: faceFlipX,
+      size: 1024,
+    });
+    const capOff = getLiveCaptionOffset(panda);
+    const node = document.createElement('div');
+    node.style.cssText = [
+      'position:absolute',
+      'left:-99999px',
+      'top:0',
+      'width:400px',
+      'background:#fff',
+      'display:flex',
+      'flex-direction:column',
+      'align-items:center',
+      'padding:18px 18px 22px',
+      'box-sizing:border-box',
+    ].join(';');
+    const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // panda translateY = captionOffset (panda 移, caption 不动), 跟 QuickMode 预览一致
+    node.innerHTML = `
+      <div style="width:364px;height:364px;display:flex;align-items:flex-end;justify-content:center;">
+        <img src="${composedDataUrl}" style="display:block;max-width:100%;max-height:100%;object-fit:contain;object-position:50% 100%;transform:translateY(${capOff}px);" />
+      </div>
+      ${escapedText ? `<div style="margin-top:10px;width:100%;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;padding:0 12px;line-height:1.15;word-break:break-word;font-family:${fontStack};">${escapedText}</div>` : ''}
+    `;
+    document.body.appendChild(node);
+    await new Promise((r) => setTimeout(r, 80));
+    return node;
+  }, [panda, face, faceRotation, faceFlipX, text, fontStack]);
+
   const onCopy = useCallback(async () => {
-    if (!previewRef.current) return;
+    let node: HTMLDivElement | null = null;
     try {
-      await copyImageToClipboard(previewRef.current);
+      node = await buildTightExportNode();
+      await copyImageToClipboard(node);
       toast.success(t('quickCopied'));
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'unknown';
       toast.error(`${t('quickCopyFail')}: ${msg}`);
+    } finally {
+      if (node && node.parentNode) node.parentNode.removeChild(node);
     }
-  }, [t]);
+  }, [buildTightExportNode, t]);
 
   const onDownload = useCallback(async () => {
-    if (!previewRef.current) return;
+    let node: HTMLDivElement | null = null;
     try {
-      await downloadImage(previewRef.current, `panda-${pandaId}-${faceId}-${Date.now()}.png`);
+      node = await buildTightExportNode();
+      await downloadImage(node, `panda-${pandaId}-${faceId}-${Date.now()}.png`);
     } catch (e) {
       toast.error(`Download failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    } finally {
+      if (node && node.parentNode) node.parentNode.removeChild(node);
     }
-  }, [pandaId, faceId]);
+  }, [buildTightExportNode, pandaId, faceId]);
 
   // 心一按 = 写入 draftSlot (这是 Collection + 编辑器本地草稿的唯一数据源)
   // 心再按 (已亮) = 删除该 slot
@@ -306,17 +351,15 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   flipX={deferredFlipX}
                   alt={panda.id}
                   className="qm-panda-img"
+                  // 校准: panda 图片整体上下移, caption 位置不动
+                  // 正数 = panda 往下挪 (贴近 caption, 缩小间距); 负数 = panda 往上挪
+                  style={{ transform: `translateY(${getLiveCaptionOffset(panda)}px)` }}
                 />
               </div>
               {text && (
                 <div
                   className="qm-caption"
-                  style={{
-                    fontFamily: fontStack,
-                    // 校准工具的 captionOffset 让用户手动微调每个 panda 的 caption 距离
-                    // 正数 = 往上挪贴近 panda 内容底部
-                    marginTop: 6 - getLiveCaptionOffset(panda),
-                  }}
+                  style={{ fontFamily: fontStack }}
                 >{text}</div>
               )}
             </div>

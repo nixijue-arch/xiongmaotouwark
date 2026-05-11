@@ -454,6 +454,8 @@
 
 .sidebar-scroll {
   overflow-y: auto;
+  /* 锁死横向: 不允许水平滚动 (修中键拖出现左右滚动 + 底部横向滚动条的 bug) */
+  overflow-x: hidden;
   flex: 1;
   padding: 0 12px 12px;
   /* 细滚动条 — 用户反馈需要看到滚动指示, 但又不希望抢太多宽度 */
@@ -480,6 +482,12 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
+  /* 防 grid cell 的 content (如长 label / 长 tag) 撑爆容器导致横向滚动 */
+  min-width: 0;
+}
+.sidebar-grid > * {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .material-card {
