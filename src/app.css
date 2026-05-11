@@ -456,6 +456,27 @@
   overflow-y: auto;
   flex: 1;
   padding: 0 12px 12px;
+  /* 隐藏滚动条 — 让 panda/face 面板内容宽度与 draft 面板严格对齐
+     (scrollbar-gutter 只能让自己保留空间, 但 draft 不滚动 → 永远差 15px)
+     滚动仍可通过 鼠标滚轮 / 触摸 / 键盘箭头使用 */
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* IE / Edge legacy */
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;               /* Chrome / Safari / Edge */
+}
+
+/* 通用：所有声明 .hide-scrollbar 的滚动容器都隐藏滚动条 */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .sidebar-grid {

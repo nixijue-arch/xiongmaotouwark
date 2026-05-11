@@ -305,29 +305,80 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </button>
           </div>
 
-          {/* Transform row 米白卡 */}
-          <div className="about-banner-card" style={{ padding: '12px 22px', width: '100%', maxWidth: 600 }}>
-            <div className="quickmode-transform-row" style={{ flex: 1 }}>
-              <RotationDot value={faceRotation} onChange={setFaceRotation} />
-              <button onClick={onFlipH} className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')} title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}>
-                <FlipHorizontal size={16} />
-              </button>
-              <button onClick={onResetTransform} className="qm-icon-btn" title={lang === 'zh' ? '重置' : 'Reset'}>
-                <RotateCcw size={14} />
-              </button>
-              <span className="qm-rotation-display">
-                {faceRotation > 0 ? '+' : ''}{faceRotation}°
-                {faceFlipX && ' ⇋'}
-              </span>
-            </div>
-            <span className="about-chip" style={{ padding: '4px 10px', fontSize: 11 }}>
-              {lang === 'zh' ? '拖圆点旋转' : 'Drag dot'}
+          {/* Transform row 米白卡 — 宽度与上方 preview (maxWidth: 460) 对齐 */}
+          <div
+            className="about-banner-card quickmode-transform-card"
+            style={{
+              padding: '10px 16px',
+              width: '100%',
+              maxWidth: 460,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'nowrap',
+              boxSizing: 'border-box',
+            }}
+          >
+            <RotationDot value={faceRotation} onChange={setFaceRotation} />
+            <span className="qm-rotation-display" title={lang === 'zh' ? '当前旋转角度' : 'Current rotation'}>
+              {faceRotation > 0 ? '+' : ''}{faceRotation}°
+              {faceFlipX && ' ⇋'}
             </span>
+            <button
+              onClick={onFlipH}
+              className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')}
+              title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}
+            >
+              <FlipHorizontal size={14} />
+            </button>
+            <button
+              onClick={onResetTransform}
+              className="qm-icon-btn"
+              title={lang === 'zh' ? '重置' : 'Reset'}
+            >
+              <RotateCcw size={14} />
+            </button>
           </div>
         </main>
 
-        {/* ===== 右栏: 文字编辑 + 随机 ===== */}
+        {/* ===== 右栏: 操作 → 上传/提取 → 文字（user 指定顺序） ===== */}
         <aside style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Sparkles size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '操作' : 'Actions'}</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={onRandomize} className="about-arcade-btn" style={{ width: '100%' }}>
+                <Wand2 size={14} /> {t('quickRandom')}
+              </button>
+              <button onClick={onToEditor} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
+                {t('quickToEditor')} <ArrowRight size={14} />
+              </button>
+            </div>
+          </section>
+
+          {/* 上传 / 智能提取人脸 — 输出后直接套到 Quick 当前 panda 上 */}
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Camera size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '上传 / 提取' : 'Upload / Extract'}</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => setCustomFaceModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
+                <Camera size={14} /> {t('customFace')}
+              </button>
+              <button onClick={() => setSmartModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)', borderColor: '#0a6e50' }}>
+                <Sparkles size={14} /> {t('smartExtract')}
+              </button>
+              {customFace && (
+                <button onClick={() => setCustomFace(null)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d', fontSize: 12, padding: '8px 14px' }}>
+                  <X size={12} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
+                </button>
+              )}
+            </div>
+          </section>
+
           <section className="about-panel">
             <div className="about-panel-title">
               <span className="about-panel-badge"><Type size={18} /></span>
@@ -392,42 +443,6 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
                 ))}
               </select>
-            </div>
-          </section>
-
-          <section className="about-panel">
-            <div className="about-panel-title">
-              <span className="about-panel-badge"><Sparkles size={18} /></span>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '操作' : 'Actions'}</h3>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={onRandomize} className="about-arcade-btn" style={{ width: '100%' }}>
-                <Wand2 size={14} /> {t('quickRandom')}
-              </button>
-              <button onClick={onToEditor} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
-                {t('quickToEditor')} <ArrowRight size={14} />
-              </button>
-            </div>
-          </section>
-
-          {/* 上传 / 智能提取人脸 — 输出后直接套到 Quick 当前 panda 上 */}
-          <section className="about-panel">
-            <div className="about-panel-title">
-              <span className="about-panel-badge"><Camera size={18} /></span>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '上传 / 提取' : 'Upload / Extract'}</h3>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={() => setCustomFaceModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
-                <Camera size={14} /> {t('customFace')}
-              </button>
-              <button onClick={() => setSmartModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)', borderColor: '#0a6e50' }}>
-                <Sparkles size={14} /> {t('smartExtract')}
-              </button>
-              {customFace && (
-                <button onClick={() => setCustomFace(null)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d', fontSize: 12, padding: '8px 14px' }}>
-                  <X size={12} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
-                </button>
-              )}
             </div>
           </section>
         </aside>

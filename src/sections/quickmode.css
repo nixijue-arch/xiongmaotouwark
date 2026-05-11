@@ -66,10 +66,13 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  /* 关键：把 panda 内容锚到 frame 底部 — 解决不同 shell 透明 padding 不一
+     导致 caption 距离差太多的问题（之前 wide-shaped panda 居中 → 底部留白） */
+  object-position: 50% 100%;
   user-select: none;
 }
 .quickmode-preview .qm-caption {
-  margin-top: 14px;
+  margin-top: 6px;
   width: 100%;
   max-width: 360px;
   text-align: center;
@@ -338,15 +341,21 @@
 
 /* === v2 增强 === */
 
-/* Face transform row */
+/* Face transform row — 宽度由父 .quickmode-transform-card 控制 (与 preview 同宽 460) */
 .quickmode-transform-row {
-  max-width: 720px;
-  margin: 16px auto 4px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.quickmode-transform-card {
+  border-radius: 14px;
+}
+.quickmode-transform-card .qm-rotation-track {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
 }
 .quickmode-hint {
   text-align: center;
@@ -411,14 +420,21 @@
   box-shadow: inset 0 0 0 2px rgba(255,255,255,0.28) !important;
 }
 
-/* rotation 数值显示 */
+/* rotation 数值显示 — 紧贴 track 右侧的小芯片 */
 .qm-rotation-display {
-  min-width: 50px;
-  text-align: right;
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: center;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
   color: #0a356d;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1.5px solid #0a4e97;
+  border-radius: 8px;
+  padding: 3px 6px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 /* 文字语言切换（双 / 中 / EN） */

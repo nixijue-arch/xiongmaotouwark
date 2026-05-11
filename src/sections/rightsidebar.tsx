@@ -6,7 +6,7 @@ import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, U
 import { PANDA_HEADS, ALL_PANDAS, ALL_FACES, getPandaFaceOffset, getLivePandaFaceOffset } from '@/data/materials';
 import { PhotoCropModal } from '@/components/photocropmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
-import { useQuickFavs, makeFavKey } from '@/hooks/useQuickFavs';
+import { useQuickFavs } from '@/hooks/useQuickFavs';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
 import { toast } from 'sonner';
 
@@ -301,7 +301,7 @@ function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
 }
 
 export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
-  const { state, dispatch, t, generateId } = useMeme();
+  const { state, dispatch, t, generateId, draftSlots, saveDraft } = useMeme();
   const isMobile = useIsMobile();
   const [isExporting, setIsExporting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -311,7 +311,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [sheetOpen, setSheetOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [smartModalOpen, setSmartModalOpen] = useState(false);
-  const { toggle: toggleFav } = useQuickFavs();
+  const { upsert: upsertFav } = useQuickFavs();
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const previewRequestIdRef = useRef(0);
@@ -352,7 +352,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleClearCanvas = () => dispatch({ type: 'CLEAR_CANVAS' });
 
-  // 保存当前编辑器内容为草图 — 上传/智能提取的素材 src 也存进 fav 防丢失
+  // 保存当前编辑器内容为草图 — 同步两边：useQuickFavs (草图本 / Collection) + useMeme draftSlots (左上角本地草稿)
+  // 上传/智能提取的素材 src 也存进 fav 防丢失
   const handleSaveDraft = useCallback(() => {
     const pandaEl = state.elements.find(isPanda) as ImageElement | undefined;
     const faceEl = state.elements.find(isFace) as ImageElement | undefined;
@@ -365,18 +366,22 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const faceId = faceEl.name;
     const text = textEl?.text ?? '';
     const fontFamily = textEl?.fontFamily ?? 'sans-serif';
-    const id = makeFavKey(pandaId, faceId, text, fontFamily);
+    // 1) 生成新的 draft slot id — 跟 LeftSidebar 同 schema 让左上角"本地草稿"也出现一格
+    const slotId = `draft-${Date.now()}-${draftSlots.length + 1}`;
+    void saveDraft(slotId);
+    // 2) 同步到 useQuickFavs — fav id 与 slot id 1:1 对应（upsert，不 toggle）
+    const favId = `editor-${slotId}`;
     const isCustomPanda = pandaId.startsWith('upload-panda-');
     const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
-    const fav: Parameters<typeof toggleFav>[0] = { id, pandaId, faceId, text, fontFamily };
+    const fav: Parameters<typeof upsertFav>[0] = { id: favId, pandaId, faceId, text, fontFamily };
     if (isCustomPanda) {
       fav.pandaSrc = pandaEl.src;
       fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
     }
     if (isCustomFace) fav.faceSrc = faceEl.src;
-    toggleFav(fav);
-    toast.success(state.language === 'zh' ? '已存到草图' : 'Saved to drafts');
-  }, [state.elements, state.language, toggleFav]);
+    upsertFav(fav);
+    toast.success(state.language === 'zh' ? '已存到草图（左上角本地草稿同步）' : 'Saved (also in Local Draft top-left)');
+  }, [state.elements, state.language, upsertFav, saveDraft, draftSlots.length]);
 
   // 预览自动刷新 — elements 变化后 debounce 600ms 重生成（user 反馈手动按钮繁琐）
   const elementsKey = state.elements.map(e => e.id + ':' + ((e as ImageElement).src ?? '') + ':' + (e.type === 'text' ? (e as TextElement).text : '')).join('|');

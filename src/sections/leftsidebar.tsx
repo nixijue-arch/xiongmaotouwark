@@ -309,7 +309,7 @@ export function LeftSidebar() {
             {lang === 'zh' ? '还没有已保存草稿，先保存一份当前编辑内容' : 'No saved drafts yet. Save the current edit first.'}
           </p>
         ) : (
-          <div className="draft-slot-grid" style={{ maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+          <div className="draft-slot-grid hide-scrollbar" style={{ maxHeight: 360, overflowY: 'auto' }}>
             {savedDraftSlots.map(slot => {
             const draftTime = slot.updatedAt
               ? new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {

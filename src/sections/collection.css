@@ -87,9 +87,12 @@
 .col-grid {
   max-width: 1180px;
   margin: 0 auto;
+  /* 与 hero card 之间留足距离 — 卡片有 transform: rotate 倾斜 + outline 3px 蓝框
+     如果间距太小 倾斜的卡片角 + outline 会盖到 hero 文字上 */
+  padding-top: 28px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 32px 22px;
+  gap: 38px 22px;
   justify-items: center;
 }
 
@@ -150,10 +153,12 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  /* 与 QuickMode 一致：锚到 frame 底部 — caption 视觉距离稳定 */
+  object-position: 50% 100%;
   user-select: none;
 }
 .draft-caption {
-  margin-top: 6px;
+  margin-top: 4px;
   width: 100%;
   text-align: center;
   font-size: 16px;
@@ -204,61 +209,81 @@
   min-width: 0;
 }
 .draft-rename-ok, .draft-rename-cancel {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid #ddd;
-  color: #666;
-  border-radius: 4px;
+  background: linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%);
+  border: 1.5px solid #0a4e97;
+  color: #0a356d;
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 140ms ease;
 }
-.draft-rename-ok:hover { color: #00CC66; border-color: #00CC66; }
-.draft-rename-cancel:hover { color: #E97B7B; border-color: #E97B7B; }
+.draft-rename-ok:hover {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+  color: #fff;
+  border-color: #0a6e50;
+}
+.draft-rename-cancel:hover {
+  background: linear-gradient(180deg, #f06868 0%, #cb2a2a 100%);
+  color: #fff;
+  border-color: #911b1b;
+}
 
 /* Actions row */
 .draft-actions {
-  margin-top: 6px;
+  margin-top: 8px;
   display: flex;
   justify-content: center;
-  gap: 4px;
-  opacity: 0.6;
-  transition: opacity 200ms ease;
-}
-.draft-card:hover .draft-actions {
+  gap: 6px;
+  /* icons 重新做了对比度，默认显示满，不再 fade */
   opacity: 1;
 }
+/* draft icon buttons — 米白卡片底色对比度低，必须用深蓝实色描边 + 实色填充
+   之前 transparent + #ddd 边 + #666 色 在 #fffdf7 卡片上 几乎不可见 */
 .draft-icon-btn {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid #ddd;
-  color: #666;
-  border-radius: 6px;
+  background: linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%);
+  border: 1.5px solid #0a4e97;
+  color: #0a356d;
+  border-radius: 7px;
   cursor: pointer;
-  transition: all 160ms ease;
+  transition: all 140ms ease;
   padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55), 0 1px 2px rgba(7, 48, 95, 0.18);
 }
 .draft-icon-btn:hover {
-  background: #f4f4f4;
-  color: #2B2826;
-  border-color: #999;
+  background: linear-gradient(180deg, #1f92f8 0%, #116bcc 100%);
+  color: #fff;
+  border-color: #09498f;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), 0 3px 8px rgba(7, 48, 95, 0.3);
+}
+.draft-icon-btn-accent {
+  background: linear-gradient(180deg, #ffffff 0%, #ddf5e8 100%);
+  border-color: #0a8552;
+  color: #0a5c39;
 }
 .draft-icon-btn-accent:hover {
-  background: rgba(0, 204, 102, 0.15);
-  color: #00CC66;
-  border-color: #00CC66;
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+  border-color: #0a6e50;
+  color: #fff;
+}
+.draft-icon-btn-danger {
+  background: linear-gradient(180deg, #ffffff 0%, #fbe1e1 100%);
+  border-color: #a74040;
+  color: #8a2424;
 }
 .draft-icon-btn-danger:hover {
-  background: rgba(233, 123, 123, 0.15);
-  color: #E97B7B;
-  border-color: #E97B7B;
+  background: linear-gradient(180deg, #f06868 0%, #cb2a2a 100%);
+  border-color: #911b1b;
+  color: #fff;
 }
 
 /* Mobile (≤ 720px) */
@@ -333,11 +358,18 @@
 }
 .draft-card-selected {
   border-color: #1f92f8 !important;
-  outline: 3px solid #1f92f8;
-  outline-offset: 0;
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.7), 0 0 0 3px rgba(31, 146, 248, 0.25), 0 8px 20px rgba(7, 48, 95, 0.35) !important;
+  /* 选中态用 2px outline + outline-offset:2 — 之前 3px outline + 0 offset 加上 transform:rotate
+     会把蓝框延伸到上方 hero 区域 */
+  outline: 2px solid #1f92f8;
+  outline-offset: 1px;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.7), 0 0 0 2px rgba(31, 146, 248, 0.25), 0 6px 16px rgba(7, 48, 95, 0.25) !important;
 }
-.draft-card { position: relative; }
+.draft-card {
+  position: relative;
+  /* 选中态不能溢出去盖 hero — 给一个 stacking context 顶到 grid 内 */
+  z-index: 1;
+}
+.draft-card-selected { z-index: 2; }
 
 /* Floating action bar (固定底部居中) */
 .col-action-bar {
