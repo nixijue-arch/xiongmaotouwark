@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ALL_PANDAS, ALL_FACES } from '@/data/materials';
 import { PandaCanvas } from '@/components/pandacanvas';
-import { loadImage } from '@/lib/composeMeme';
+import { loadImage, bboxCropImage } from '@/lib/composeMeme';
 import {
   readAnchorOverrides,
   saveAnchorOverride,
@@ -115,6 +115,17 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [savedTick, setSavedTick] = useState(0); // 触发"已保存"指示动画
   const [overrideMapVer, setOverrideMapVer] = useState(0); // 触发左侧列表重渲染
+  // bbox-cropped panda for caption preview — 跟 QuickMode 用同款 bbox-tight 图
+  // 这样 translateY 在 calibrate 和 QuickMode 行为 100% 一致 (不受原 PNG 透明 padding 影响)
+  const [croppedPandaSrc, setCroppedPandaSrc] = useState<string>('');
+  useEffect(() => {
+    let cancelled = false;
+    setCroppedPandaSrc('');
+    bboxCropImage(panda.src).then(({ dataUrl }) => {
+      if (!cancelled) setCroppedPandaSrc(dataUrl);
+    }).catch(() => { /* fall back to raw */ });
+    return () => { cancelled = true; };
+  }, [panda.src]);
 
   // 撤销/重做栈
   const historyRef = useRef<{ stack: { off: FaceOff; fill: number }[]; idx: number }>({ stack: [], idx: -1 });
@@ -602,7 +613,7 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                   }}
                 >
                   <img
-                    src={panda.src}
+                    src={croppedPandaSrc || panda.src}
                     alt={panda.id}
                     draggable={false}
                     style={{
@@ -613,6 +624,8 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                       userSelect: 'none',
                       // panda 上下偏移 (与 QuickMode 同款 transform translateY)
                       // QuickMode 实际 frame=350, 这里 200 → 缩放比例 200/350=0.571
+                      // ⚠️ src 必须用 bbox-cropped 版本: QuickMode 经 composeMeme bbox-crop,
+                      // 这里如果用原 PNG (含透明 padding), translateY 视觉位置会不一致.
                       transform: `translateY(${Math.round(captionOffset * 0.571)}px)`,
                     }}
                   />
