@@ -36,10 +36,22 @@ function sanitizeEntry(e: unknown): CaptionEntry | null {
   return { text: o.text, tags };
 }
 
+// 输出单引号字符串 — 跟原文件风格一致, diff 友好
+// 处理: \\, \', \n, \r, \t 转义
+function singleQuoteString(s: string): string {
+  return "'" + s
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t')
+    + "'";
+}
+
 function formatArrayBody(arr: CaptionEntry[]): string {
   return arr.map((c) => {
     const tagsCode = c.tags.length ? c.tags.map((t) => `'${t}'`).join(', ') : "'roast'";
-    return `  { text: ${JSON.stringify(c.text)}, tags: [${tagsCode}] },`;
+    return `  { text: ${singleQuoteString(c.text)}, tags: [${tagsCode}] },`;
   }).join('\n');
 }
 
@@ -110,6 +122,14 @@ export function devSyncPlugin(): Plugin {
             const raw = JSON.parse(body) as { zh?: unknown[]; en?: unknown[] };
             const zh = (Array.isArray(raw.zh) ? raw.zh : []).map(sanitizeEntry).filter((e): e is CaptionEntry => e !== null);
             const en = (Array.isArray(raw.en) ? raw.en : []).map(sanitizeEntry).filter((e): e is CaptionEntry => e !== null);
+
+            // 防误清空: 两个数组都为 0 直接拒绝, 避免误清掉整个文案库
+            if (zh.length === 0 && en.length === 0) {
+              res.statusCode = 400;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'refused_empty_payload', hint: '至少保留一条 caption, 不然会清空整个池子' }));
+              return;
+            }
 
             const filePath = path.resolve(server.config.root, TEXTS_FILE_REL);
             let content = fs.readFileSync(filePath, 'utf-8');
