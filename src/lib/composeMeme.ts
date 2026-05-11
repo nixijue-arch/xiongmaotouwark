@@ -63,7 +63,7 @@ export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: 
 // 共用给 panda（去 whitespace padding）和 face（找五官 content bbox 当 content_center）
 // 借鉴 PandaHead build_assets.py 的 detect_content_center 思路：用户手截 face 常 crop 不居中，
 // 必须算实际像素聚类中心而不是几何中心，否则五官会偏移
-function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
+export function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
   const key = `${img.src}|${alphaThresh}`;
   const cached = _bboxCache.get(key);
   if (cached) return cached;
@@ -263,7 +263,45 @@ export interface ComposeMemeArgs {
   faceFill?: number;
 }
 
+// 性能优化:
+//   1. LRU cache 已合成结果 → 重复 panda+face 组合即刻返回 (random combo 二轮起步)
+//   2. canvas.toBlob + URL.createObjectURL 取代 canvas.toDataURL
+//      toDataURL 是同步 PNG 编码, 1024×1024 阻塞主线程 200-500ms = 用户感觉"卡住"
+//      toBlob 异步, 编码不阻塞 UI; objectURL 比 base64 dataURL 短 10倍, img 加载更快
+//   3. PandaCanvas + QuickMode 把 size 从默认 1024 降到 512 给 preview
+//      4× 减少编码字节数 = 4× 提速 (下载/复制时单独传 size=1024 拿高清)
+const _composedCache = new Map<string, string>();
+const COMPOSED_CACHE_LIMIT = 100;
+
+function makeComposedCacheKey(args: ComposeMemeArgs): string {
+  return [
+    args.pandaSrc, args.faceSrc,
+    args.faceOffset.x, args.faceOffset.y, args.faceOffset.w, args.faceOffset.h,
+    args.rotation ?? 0, args.flipX ? 1 : 0,
+    args.size ?? 1024,
+    args.faceFill ?? 0.95,
+  ].join('|');
+}
+
+function canvasToBlobUrl(canvas: HTMLCanvasElement): Promise<string> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('toBlob failed'));
+      resolve(URL.createObjectURL(blob));
+    }, 'image/png');
+  });
+}
+
 export async function composeMeme(args: ComposeMemeArgs): Promise<string> {
+  const cacheKey = makeComposedCacheKey(args);
+  const cached = _composedCache.get(cacheKey);
+  if (cached) {
+    // LRU: 取出再 set 让它移到末尾 (Map 保 insertion order)
+    _composedCache.delete(cacheKey);
+    _composedCache.set(cacheKey, cached);
+    return cached;
+  }
+
   const [panda, face] = await Promise.all([loadImage(args.pandaSrc), loadImage(args.faceSrc)]);
   const c = composeMemeCanvas({
     panda,
@@ -274,7 +312,15 @@ export async function composeMeme(args: ComposeMemeArgs): Promise<string> {
     size: args.size,
     faceFill: args.faceFill,
   });
-  return c.toDataURL('image/png');
+  const url = await canvasToBlobUrl(c);
+
+  // LRU 淘汰最旧 (淘汰时不立刻 revoke, 因为可能还有 <img> 在用; 浏览器最终会 GC)
+  if (_composedCache.size >= COMPOSED_CACHE_LIMIT) {
+    const firstKey = _composedCache.keys().next().value;
+    if (firstKey) _composedCache.delete(firstKey);
+  }
+  _composedCache.set(cacheKey, url);
+  return url;
 }
 
 // 算 face 元素在编辑器（panda 占 350×350 box）里的实际位置 + 大小

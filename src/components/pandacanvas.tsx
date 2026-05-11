@@ -135,6 +135,9 @@ function PandaCanvasInner(props: Props) {
       alt={alt}
       draggable={draggable}
       className={className}
+      // 性能: 让浏览器异步 decode 不阻塞主线程; fetchpriority high 让组合图优先解码
+      decoding="async"
+      fetchPriority="high"
       onLoad={(e) => {
         const im = e.currentTarget;
         if (onRendered) onRendered({ naturalW: im.naturalWidth, naturalH: im.naturalHeight });
