@@ -390,14 +390,6 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   };
 
   // 一键换图 — 切 panda 时 face 跟着重新定位到新 panda anchor
-  // 视觉无参差: 先 preload 新图 (decode 完成) 再 dispatch, 不然 src 变了但 img 还在加载,
-  // 旧图先按新 x/y/w/h 重排显示一帧 = 抖动
-  const preloadImg = (src: string) => new Promise<void>((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve();
-    img.onerror = () => resolve();
-    img.src = src;
-  });
   const handleSwitchImage = async () => {
     const currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
     const currentFace = state.elements.find(isFace) as ImageElement | undefined;
@@ -408,22 +400,6 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const newFace = currentFace
       ? (() => { const others = ALL_FACES.filter(f => f.id !== currentFace.name); return others.length ? others[Math.floor(Math.random() * others.length)] : null; })()
       : null;
-    // 并行 preload 新图 + 算 layout, 全就绪再 dispatch
-    const preloads: Promise<unknown>[] = [];
-    if (newPanda) preloads.push(preloadImg(newPanda.src));
-    if (newFace) preloads.push(preloadImg(newFace.src));
-    let faceLayout: { x: number; y: number; width: number; height: number } | null = null;
-    let anchorPandaForFace: typeof ALL_PANDAS[number] | undefined;
-    if (newFace && currentFace) {
-      anchorPandaForFace = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda?.name);
-      if (anchorPandaForFace) {
-        preloads.push(
-          calcEditorFaceLayout({ pandaSrc: anchorPandaForFace.src, faceSrc: newFace.src, faceOffset350: getLivePandaFaceOffset(anchorPandaForFace) })
-            .then((l) => { faceLayout = l; })
-        );
-      }
-    }
-    await Promise.all(preloads);
     if (newPanda && currentPanda) {
       // 换 panda 后图层方案可能变 (透明 ↔ 不透明)
       const lay = getShellLayering(newPanda.id);
@@ -434,16 +410,17 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       }
     }
     if (newFace && currentFace) {
-      if (anchorPandaForFace && faceLayout) {
-        const lay = getShellLayering(anchorPandaForFace.id);
-        const l = faceLayout as { x: number; y: number; width: number; height: number };
-        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: l.x, y: l.y, width: l.width, height: l.height, zIndex: lay.faceZ, blendMode: lay.faceBlend } });
+      const anchorPanda = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda?.name);
+      if (anchorPanda) {
+        const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: newFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
+        const lay = getShellLayering(anchorPanda.id);
+        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, zIndex: lay.faceZ, blendMode: lay.faceBlend } });
       } else {
         dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id } });
       }
     }
     if (currentPanda && !currentFace) {
-      const anchorPanda = ALL_PANDAS.find(p => p.id === currentPanda.name);
+      const anchorPanda = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda.name);
       const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
       if (anchorPanda) {
         const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: randomFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
@@ -458,6 +435,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: 100 } });
       }
     });
+    if (isMobile) setSheetOpen(false);
   };
 
   const handleRecommendText = () => {
