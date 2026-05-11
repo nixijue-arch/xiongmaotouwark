@@ -108,6 +108,8 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
   // 当前 anchor + faceFill state（首次从 localStorage 读）
   const [offset, setOffset] = useState<FaceOff>(() => readAnchorOverrides()[panda.id]?.faceOffset ?? panda.faceOffset);
   const [faceFill, setFaceFill] = useState<number>(() => readAnchorOverrides()[panda.id]?.faceFill ?? FACE_FILL_DEFAULT);
+  // captionOffset: px (350-coord), 正数 = caption 往上挪贴近 panda 内容底部
+  const [captionOffset, setCaptionOffset] = useState<number>(() => readAnchorOverrides()[panda.id]?.captionOffset ?? 0);
   const [previewDispW, setPreviewDispW] = useState(0);
   const [previewDispH, setPreviewDispH] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -122,8 +124,10 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
     const ov = readAnchorOverrides()[panda.id];
     const off = ov?.faceOffset ?? panda.faceOffset;
     const fill = ov?.faceFill ?? FACE_FILL_DEFAULT;
+    const capOff = ov?.captionOffset ?? 0;
     setOffset(off);
     setFaceFill(fill);
+    setCaptionOffset(capOff);
     historyRef.current = { stack: [{ off: { ...off }, fill }], idx: 0 };
   }, [panda.id, panda.faceOffset]);
 
@@ -161,12 +165,16 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      saveAnchorOverride(panda.id, { faceOffset: offset, faceFill });
+      saveAnchorOverride(panda.id, {
+        faceOffset: offset,
+        faceFill,
+        captionOffset: captionOffset === 0 ? undefined : captionOffset,
+      });
       setSavedTick((n) => n + 1);
       setOverrideMapVer((v) => v + 1);
     }, AUTO_SAVE_DEBOUNCE_MS);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [panda.id, offset.x, offset.y, offset.w, offset.h, faceFill]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [panda.id, offset.x, offset.y, offset.w, offset.h, faceFill, captionOffset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const onPreviewRendered = useCallback(() => {
@@ -252,6 +260,7 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
     removeAnchorOverride(panda.id);
     setOffset(panda.faceOffset);
     setFaceFill(FACE_FILL_DEFAULT);
+    setCaptionOffset(0);
     historyRef.current = { stack: [{ off: { ...panda.faceOffset }, fill: FACE_FILL_DEFAULT }], idx: 0 };
     setOverrideMapVer((v) => v + 1);
     toast.info(`已重置 ${panda.id}`);
@@ -285,6 +294,7 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
     clearAllAnchorOverrides();
     setOffset(panda.faceOffset);
     setFaceFill(FACE_FILL_DEFAULT);
+    setCaptionOffset(0);
     setOverrideMapVer((v) => v + 1);
     toast.info('已清空所有 override');
   }, [panda.faceOffset]);
@@ -539,6 +549,25 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                 onTouchEnd={() => pushHistory(offset, faceFill)}
                 style={{ width: '100%' }}
               />
+            </div>
+
+            {/* captionOffset slider — 解决 wide-shape panda 底部到 caption 距离感觉太远 */}
+            <div style={{ marginBottom: 14, padding: 10, background: 'rgba(255,94,0,0.07)', border: '1px dashed #FF5E00', borderRadius: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ color: '#ccc', fontWeight: 600 }}>📐 caption 距离</span>
+                <span style={{ color: '#FF5E00', fontVariantNumeric: 'tabular-nums' }}>{captionOffset >= 0 ? '+' : ''}{captionOffset}px</span>
+              </div>
+              <input
+                type="range"
+                min={-30} max={80} step={1}
+                value={captionOffset}
+                onChange={(e) => setCaptionOffset(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <div style={{ fontSize: 10, color: '#888', marginTop: 4, lineHeight: 1.4 }}>
+                正数 = caption 往上挪贴近 panda 底部; 负数 = 拉远。<br />
+                用于修不同 shell 透明 padding 不均, caption 距离不一致的 case。
+              </div>
             </div>
 
             {/* 操作按钮 */}

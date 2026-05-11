@@ -12,9 +12,9 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeme } from '@/context/MemeContext';
-import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, type Material } from '@/data/materials';
+import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, type Material } from '@/data/materials';
 import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN } from '@/data/quickModeTexts';
-import { useQuickFavs, makeFavKey } from '@/hooks/useQuickFavs';
+import { makeFavKey } from '@/hooks/useQuickFavs';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
 import { PandaCanvas } from '@/components/pandacanvas';
@@ -46,7 +46,7 @@ interface QuickModeProps {
 }
 
 export function QuickMode({ onOpenEditor }: QuickModeProps) {
-  const { state, dispatch, t, generateId, saveDraftWithState, clearDraft } = useMeme();
+  const { state, dispatch, t, generateId, draftSlots, saveDraftWithState, clearDraft, renameDraft } = useMeme();
   const lang = state.language;
   // DEV: 校准工具改 anchor 时触发 re-render，让预览实时显示新值
   useLiveAnchor();
@@ -80,7 +80,6 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
 
   const previewRef = useRef<HTMLDivElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
-  const { favs, toggle, rename } = useQuickFavs();
 
   const panda = useMemo(
     () => PANDA_HEADS.find((p) => p.id === pandaId) ?? PANDA_HEADS[0],
@@ -98,7 +97,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   }, []);
   const fontStack = FONT_OPTIONS.find((f) => f.id === fontKey)?.stack ?? FONT_OPTIONS[0].stack;
   const favKey = makeFavKey(pandaId, faceId, text, fontKey);
-  const isFavored = Boolean(favs[favKey]);
+  // 心是否亮 = 同 favKey 派生的 draftSlot 是否存在 (Collection / 编辑器本地草稿都看的同一个池)
+  const favSlotId = `quick-${favKey}`;
+  const isFavored = useMemo(() => draftSlots.some(s => s.id === favSlotId), [draftSlots, favSlotId]);
 
   // -------- actions --------
 
@@ -145,22 +146,14 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     }
   }, [pandaId, faceId]);
 
-  // 收藏 = 写 useQuickFavs (Collection 看得到) + 写 draftSlots (编辑器本地草稿看得到)
-  // 取消收藏 = 同步删两边
-  // 让"快速生图收藏"和"编辑器本地草稿"打通成同一个池子
+  // 心一按 = 写入 draftSlot (这是 Collection + 编辑器本地草稿的唯一数据源)
+  // 心再按 (已亮) = 删除该 slot
   const onFav = useCallback(async () => {
-    const wasOn = isFavored;
-    toggle({ id: favKey, pandaId, faceId, text, fontFamily: fontKey });
-    // 派生 slotId — 同一个 favKey 永远对应同一个 slot, 重复收藏不重复创建草稿
-    const slotId = `quick-${favKey}`;
-
-    if (wasOn) {
-      clearDraft(slotId);
+    if (isFavored) {
+      clearDraft(favSlotId);
       toast.info(t('quickUnsaved'));
       return;
     }
-
-    // 心 ON: 构造编辑器 elements 写入 draftSlot, 跟点"进编辑器精修"逻辑一致
     try {
       const offset350 = getLivePandaFaceOffset(panda);
       const faceLayout = await calcEditorFaceLayout({
@@ -191,21 +184,20 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         });
       }
       const slotName = text.trim() || `快速·${panda.labelCn}`;
-      await saveDraftWithState(slotId, { elements, selectedId: null, language: lang }, slotName);
+      await saveDraftWithState(favSlotId, { elements, selectedId: null, language: lang }, slotName);
+      setPendingFavName(text || '');
+      setNamePopoverOpen(true);
+      toast.success(t('quickSaved'));
     } catch (e) {
-      // 不阻断 fav, draft 写失败仍然显示 fav 心
-      console.warn('[QuickMode] saveDraftWithState failed:', e);
+      toast.error(`${t('quickCopyFail')}: ${e instanceof Error ? e.message : 'unknown'}`);
     }
+  }, [isFavored, favSlotId, panda, face, faceRotation, faceFlipX, text, fontStack, lang, generateId, saveDraftWithState, clearDraft, t]);
 
-    setPendingFavName(text || '');
-    setNamePopoverOpen(true);
-    toast.success(t('quickSaved'));
-  }, [isFavored, toggle, favKey, pandaId, faceId, text, fontKey, panda, face, faceRotation, faceFlipX, fontStack, lang, generateId, saveDraftWithState, clearDraft, t]);
-
+  // 改名 — 直接改 draftSlot 的 name (Collection 也会同步显示)
   const onSaveName = useCallback((name: string) => {
-    if (name.trim()) rename(favKey, name.trim());
+    if (name.trim()) renameDraft(favSlotId, name.trim());
     setNamePopoverOpen(false);
-  }, [favKey, rename]);
+  }, [favSlotId, renameDraft]);
 
   const onToEditor = useCallback(async () => {
     // 用 calcEditorFaceLayout 让编辑器里 face 元素位置/大小跟 QuickMode 预览视觉一致
@@ -317,7 +309,15 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                 />
               </div>
               {text && (
-                <div className="qm-caption" style={{ fontFamily: fontStack }}>{text}</div>
+                <div
+                  className="qm-caption"
+                  style={{
+                    fontFamily: fontStack,
+                    // 校准工具的 captionOffset 让用户手动微调每个 panda 的 caption 距离
+                    // 正数 = 往上挪贴近 panda 内容底部
+                    marginTop: 6 - getLiveCaptionOffset(panda),
+                  }}
+                >{text}</div>
               )}
             </div>
           </div>

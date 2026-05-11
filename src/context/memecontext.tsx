@@ -336,6 +336,7 @@ interface MemeContextType {
   ) => Promise<void>;
   loadDraft: (slotId: string) => void;
   clearDraft: (slotId: string) => void;
+  renameDraft: (slotId: string, name: string) => void;
 }
 
 const MemeContext = createContext<MemeContextType | null>(null);
@@ -476,6 +477,15 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   const clearDraft = useCallback((slotId: string) => {
     // Dynamic schema：直接移除 slot（不再保留 state=null 的占位）
     const nextDraftSlots = draftSlots.filter(slot => slot.id !== slotId);
+    persistDraftSlots(nextDraftSlots);
+  }, [draftSlots, persistDraftSlots]);
+
+  const renameDraft = useCallback((slotId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const nextDraftSlots = draftSlots.map(slot => (
+      slot.id === slotId ? { ...slot, name: trimmed } : slot
+    ));
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots]);
 

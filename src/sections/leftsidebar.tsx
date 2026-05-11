@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
+import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
-import { useQuickFavs } from '@/hooks/useQuickFavs';
+import { PandaCanvas } from '@/components/pandacanvas';
 import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
@@ -51,9 +52,28 @@ function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): M
   });
 }
 
+// 从 draftSlot 抽出 panda 信息给预览渲染用
+function getSlotPreviewInfo(slot: DraftSlot) {
+  const elements = slot.state?.elements ?? [];
+  const pandaEl = elements.find(e => e.type === 'image' && isPanda(e)) as ImageElement | undefined;
+  const faceEl = elements.find(e => e.type === 'image' && isFace(e)) as ImageElement | undefined;
+  if (!pandaEl) return null;
+  const pandaInPool = ALL_PANDAS.find(p => p.id === pandaEl.name);
+  const faceOffset = pandaInPool
+    ? getLivePandaFaceOffset(pandaInPool)
+    : (faceEl
+        ? { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height }
+        : { x: 100, y: 70, w: 250, h: 250 });
+  return {
+    pandaSrc: pandaInPool?.src ?? pandaEl.src,
+    pandaId: pandaInPool?.id ?? pandaEl.name,
+    faceSrc: faceEl ? (ALL_FACES.find(f => f.id === faceEl.name)?.src ?? faceEl.src) : '',
+    faceOffset,
+  };
+}
+
 export function LeftSidebar() {
   const { state, dispatch, generateId, draftSlots, saveDraft, loadDraft, clearDraft } = useMeme();
-  const { upsert: upsertFav, remove: removeFav } = useQuickFavs();
 
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -81,31 +101,7 @@ export function LeftSidebar() {
     return { nextDraftSlotId: oldest.id, nextDraftLabel: oldest.name };
   }, [draftSlots]);
 
-  // 存到草图本 — 用 upsert（不 toggle），fav id 跟 draft slot id 1:1，确保多次保存不互相抵消
-  const handleSaveToCollection = (slotId: string) => {
-    const pandaEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isPanda(e));
-    const faceEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isFace(e));
-    if (!pandaEl) {
-      // 按钮 disabled 时不会触发；fallback 静默跳过
-      return;
-    }
-    const textEl = state.elements.find(e => e.type === 'text') as { text: string; fontFamily: string } | undefined;
-    const text = textEl?.text ?? '';
-    const fontFamily = textEl?.fontFamily ?? 'sans-serif';
-    const pandaId = pandaEl.name;
-    const faceId = faceEl?.name ?? 'face-01';
-    // 用 slot id 派生 fav id — 编辑器草图与草图本一一对应（slot 删 → 对应 fav 也清）
-    const id = `editor-${slotId}`;
-    const isCustomPanda = pandaId.startsWith('upload-panda-');
-    const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
-    const fav: Parameters<typeof upsertFav>[0] = { id, pandaId, faceId, text, fontFamily };
-    if (isCustomPanda) {
-      fav.pandaSrc = pandaEl.src;
-      if (faceEl) fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
-    }
-    if (isCustomFace && faceEl) fav.faceSrc = faceEl.src;
-    upsertFav(fav);
-  };
+  // 已不需要单独"存到草图本"逻辑 — saveDraft 写入的 draftSlot 就是 Collection 的数据源
 
   const handleUseDraft = (slotId: string, slotName: string) => {
     const confirmed = window.confirm(
@@ -125,8 +121,6 @@ export function LeftSidebar() {
     );
     if (!confirmed) return;
     clearDraft(slotId);
-    // 同步删除草图本里对应的 fav（与 saveDraft 配对，保持双向一致）
-    removeFav(`editor-${slotId}`);
   };
 
   const handleAddPandaHead = (src: string, id: string) => {
@@ -282,17 +276,15 @@ export function LeftSidebar() {
           <span className="draft-card-icon">💾</span>
           <span className="draft-card-title">{lang === 'zh' ? '本地草稿' : 'Local Draft'}</span>
         </div>
-        {/* 一键打通: 保存到草稿N 同时进草图本 (顶部"草图" tab 也能看) */}
+        {/* 保存草稿 = 在草图 tab 也立刻可见 (同一个 draftSlots 数据源) */}
         <button
           className="draft-save-current-btn"
           onClick={() => {
             void saveDraft(nextDraftSlotId);
-            // 同时存到 useQuickFavs — slot 与 fav 1:1 对应（upsert，不 toggle）
-            handleSaveToCollection(nextDraftSlotId);
             toast.success(
               lang === 'zh'
-                ? `已存为${nextDraftLabel}（草图本可见）`
-                : `Saved as ${nextDraftLabel.replace('草稿', 'Draft ')} (visible in Drafts)`
+                ? `已存为${nextDraftLabel}（草图本同步可见）`
+                : `Saved as ${nextDraftLabel.replace('草稿', 'Draft ')} (visible in Drafts tab)`
             );
           }}
           disabled={state.elements.filter(isPanda).length === 0}
@@ -311,7 +303,7 @@ export function LeftSidebar() {
             {lang === 'zh' ? '还没有已保存草稿，先保存一份当前编辑内容' : 'No saved drafts yet. Save the current edit first.'}
           </p>
         ) : (
-          <div className="draft-slot-grid hide-scrollbar" style={{ maxHeight: 360, overflowY: 'auto' }}>
+          <div className="draft-slot-grid" style={{ maxHeight: 360, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarGutter: 'stable' }}>
             {savedDraftSlots.map(slot => {
             const draftTime = slot.updatedAt
               ? new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
@@ -322,6 +314,7 @@ export function LeftSidebar() {
                 }).format(new Date(slot.updatedAt))
               : '';
 
+            const preview = getSlotPreviewInfo(slot);
             return (
               <div key={slot.id} className="draft-slot-card">
                 <button
@@ -329,7 +322,23 @@ export function LeftSidebar() {
                   onClick={() => handleUseDraft(slot.id, slot.name)}
                   title={lang === 'zh' ? '点击使用草稿' : 'Click to use this draft'}
                 >
-                  <img src={slot.previewUrl} alt={slot.name} className="draft-slot-image" />
+                  {/* 用 PandaCanvas 渲染缩略图 — 跟 Collection / QuickMode 共享同款 composeMeme
+                      锚点对齐, 所以编辑器侧栏与草图 tab 的缩略图视觉一致 */}
+                  {preview && preview.faceSrc ? (
+                    <PandaCanvas
+                      pandaSrc={preview.pandaSrc}
+                      pandaId={preview.pandaId}
+                      faceSrc={preview.faceSrc}
+                      faceOffset={preview.faceOffset}
+                      alt={slot.name}
+                      className="draft-slot-image"
+                      size={256}
+                    />
+                  ) : slot.previewUrl ? (
+                    <img src={slot.previewUrl} alt={slot.name} className="draft-slot-image" />
+                  ) : (
+                    <div className="draft-slot-image" style={{ background: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#888' }}>—</div>
+                  )}
                 </button>
                 <div className="draft-slot-info">
                   <div className="draft-slot-name">{lang === 'zh' ? slot.name : slot.name.replace('草稿', 'Draft ')}</div>

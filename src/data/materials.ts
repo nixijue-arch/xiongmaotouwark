@@ -168,3 +168,18 @@ export function getLivePandaFaceOffset(panda: Material): { x: number; y: number;
   }
   return panda.faceOffset;
 }
+
+// 字幕偏移 (px, 350-coord 空间) — 校准工具改, 正数让 caption 往上移贴近 panda 内容底部
+// 修不同 shell 透明 padding 不均, caption 距离感觉不一致的问题
+export function getLiveCaptionOffset(pandaOrId: Material | string): number {
+  if (typeof window === 'undefined') return 0;
+  const id = typeof pandaOrId === 'string' ? pandaOrId : pandaOrId.id;
+  try {
+    const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
+    const ov = stored[id];
+    if (typeof ov?.captionOffset === 'number') return ov.captionOffset;
+  } catch {
+    /* ignore */
+  }
+  return 0;
+}

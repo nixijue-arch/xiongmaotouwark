@@ -456,27 +456,24 @@
   overflow-y: auto;
   flex: 1;
   padding: 0 12px 12px;
-  /* 隐藏滚动条 — 让 panda/face 面板内容宽度与 draft 面板严格对齐
-     (scrollbar-gutter 只能让自己保留空间, 但 draft 不滚动 → 永远差 15px)
-     滚动仍可通过 鼠标滚轮 / 触摸 / 键盘箭头使用 */
-  scrollbar-width: none;       /* Firefox */
-  -ms-overflow-style: none;    /* IE / Edge legacy */
+  /* 细滚动条 — 用户反馈需要看到滚动指示, 但又不希望抢太多宽度 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(10, 78, 151, 0.45) transparent;
+  /* 始终保留滚动条空间 (让有/无滚动时内容宽度都一致) */
+  scrollbar-gutter: stable;
 }
 .sidebar-scroll::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;               /* Chrome / Safari / Edge */
+  width: 7px;
 }
-
-/* 通用：所有声明 .hide-scrollbar 的滚动容器都隐藏滚动条 */
-.hide-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
-.hide-scrollbar::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(10, 78, 151, 0.4);
+  border-radius: 4px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(10, 78, 151, 0.65);
 }
 
 .sidebar-grid {

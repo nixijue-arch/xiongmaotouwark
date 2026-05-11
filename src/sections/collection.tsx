@@ -1,14 +1,15 @@
-// Collection v2 — 草图管理板块（批量选 + ZIP 导出 + filter）
+// Collection v3 — 草图管理板块
+// 数据源完全统一到 memecontext 的 draftSlots (与编辑器左上角"本地草稿"共享)
 // Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';
-import { useMeme } from '@/context/MemeContext';
-import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
-import { useQuickFavs, type QuickFav } from '@/hooks/useQuickFavs';
+import { useMeme } from '@/context/memecontext';
+import type { DraftSlot, ImageElement, MemeElement, TextElement } from '@/context/memecontext';
+import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getLiveCaptionOffset } from '@/data/materials';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { captureNode, copyImageToClipboard, downloadImage } from '@/lib/exportImage';
-import { composeMeme, calcEditorFaceLayout } from '@/lib/composeMeme';
+import { composeMeme } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import {
   FolderOpen, Copy, Download, Trash2, SquarePen, Sparkles, Edit2, Check, X,
@@ -24,9 +25,63 @@ interface CollectionProps {
 
 type Filter = 'all' | 'recent';
 
+// 判定 element 是不是 panda / face — 跟 leftsidebar / quickmode 同款
+function isPanda(e: MemeElement): boolean {
+  if (e.type !== 'image') return false;
+  const name = (e as ImageElement).name;
+  return name === 'panda-head'
+    || ALL_PANDAS.some(p => p.id === name)
+    || name.startsWith('upload-panda-');
+}
+function isFace(e: MemeElement): boolean {
+  if (e.type !== 'image') return false;
+  const name = (e as ImageElement).name;
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-');
+}
+
+// 从 slot 抽出 panda / face / text 信息, 给预览渲染 + ZIP 打包用
+interface SlotInfo {
+  panda: { src: string; id: string; faceOffset: { x: number; y: number; w: number; h: number } } | null;
+  face: { src: string; id: string } | null;
+  text: string;
+  fontFamily: string;
+}
+function extractSlotInfo(slot: DraftSlot): SlotInfo {
+  const elements = slot.state?.elements ?? [];
+  const pandaEl = elements.find((e): e is ImageElement => e.type === 'image' && isPanda(e));
+  const faceEl = elements.find((e): e is ImageElement => e.type === 'image' && isFace(e));
+  const textEl = elements.find((e): e is TextElement => e.type === 'text');
+
+  let panda: SlotInfo['panda'] = null;
+  if (pandaEl) {
+    const matched = ALL_PANDAS.find(p => p.id === pandaEl.name);
+    if (matched) {
+      panda = { src: matched.src, id: matched.id, faceOffset: getLivePandaFaceOffset(matched) };
+    } else {
+      // 上传 / 旧 schema 的兜底 — 用 element 位置反推 faceOffset
+      const fo = faceEl && pandaEl
+        ? { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height }
+        : { x: 100, y: 70, w: 250, h: 250 };
+      panda = { src: pandaEl.src, id: pandaEl.name, faceOffset: fo };
+    }
+  }
+  let face: SlotInfo['face'] = null;
+  if (faceEl) {
+    const matched = ALL_FACES.find(f => f.id === faceEl.name);
+    face = matched ? { src: matched.src, id: matched.id } : { src: faceEl.src, id: faceEl.name };
+  }
+  return {
+    panda,
+    face,
+    text: textEl?.text ?? '',
+    fontFamily: textEl?.fontFamily ?? 'sans-serif',
+  };
+}
+
 export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
-  const { state, dispatch, generateId } = useMeme();
-  const { favs, remove, rename } = useQuickFavs();
+  const { state, draftSlots, loadDraft, clearDraft, renameDraft } = useMeme();
   const lang = state.language;
   // DEV: 校准工具改 anchor 时触发 re-render
   useLiveAnchor();
@@ -35,11 +90,12 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const offscreenContainerRef = useRef<HTMLDivElement>(null);
 
-  const items = useMemo<QuickFav[]>(() => {
-    let list = Object.values(favs).sort((a, b) => b.ts - a.ts);
+  // 草图列表 = draftSlots (按 updatedAt 倒序)
+  const items = useMemo<DraftSlot[]>(() => {
+    let list = [...draftSlots].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     if (filter === 'recent') list = list.slice(0, 12);
     return list;
-  }, [favs, filter]);
+  }, [draftSlots, filter]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelected((s) => {
@@ -54,52 +110,48 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   const onBatchDelete = useCallback(() => {
-    Array.from(selected).forEach((id) => remove(id));
+    const count = selected.size;
+    Array.from(selected).forEach((id) => clearDraft(id));
     setSelected(new Set());
-    toast.success(lang === 'zh' ? `已删除 ${selected.size} 张` : `Deleted ${selected.size}`);
-  }, [selected, remove, lang]);
+    toast.success(lang === 'zh' ? `已删除 ${count} 张` : `Deleted ${count}`);
+  }, [selected, clearDraft, lang]);
 
-  // 批量打 ZIP — 每张草图渲染到离屏 element → captureNode → blob → zip.file
+  // 批量 ZIP — 用 composeMeme 渲染 panda+face → 临时 DOM 加 caption → captureNode → 加进 zip
   const onBatchZip = useCallback(async () => {
     if (selected.size === 0) return;
-    const itemsToPack = items.filter((it) => selected.has(it.id));
-    if (!itemsToPack.length) return;
-    if (!offscreenContainerRef.current) return;
+    const slotsToPack = items.filter((s) => selected.has(s.id));
+    if (!slotsToPack.length || !offscreenContainerRef.current) return;
 
-    toast.info(lang === 'zh' ? `打包 ${itemsToPack.length} 张...` : `Packing ${itemsToPack.length}...`);
+    toast.info(lang === 'zh' ? `打包 ${slotsToPack.length} 张...` : `Packing ${slotsToPack.length}...`);
 
     try {
       const zip = new JSZip();
-      // 离屏渲染容器：每张草图 render → captureNode → 加进 zip
-      // 用 composeMeme 预合成 panda+face data URL（含白色 mask 裁切），再嵌入 DOM 让 captureNode 加上 caption
       const container = offscreenContainerRef.current;
-      for (let i = 0; i < itemsToPack.length; i++) {
-        const fav = itemsToPack[i];
-        const panda = ALL_PANDAS.find((p) => p.id === fav.pandaId);
-        const face = ALL_FACES.find((f) => f.id === fav.faceId);
-        if (!panda || !face) continue;
+      for (let i = 0; i < slotsToPack.length; i++) {
+        const slot = slotsToPack[i];
+        const info = extractSlotInfo(slot);
+        if (!info.panda || !info.face) continue;
         const composedDataUrl = await composeMeme({
-          pandaSrc: panda.src,
-          faceSrc: face.src,
-          faceOffset: getLivePandaFaceOffset(panda),
+          pandaSrc: info.panda.src,
+          faceSrc: info.face.src,
+          faceOffset: info.panda.faceOffset,
           size: 1024,
         });
         const node = document.createElement('div');
-        // v4: 与预览/草图一致的 flex 列布局 — caption 紧贴 panda 下方，间距等比例
         node.style.cssText =
           'position:absolute;left:-99999px;top:0;width:400px;background:#fff;display:flex;flex-direction:column;align-items:center;padding:25px 25px 30px;';
         node.innerHTML = `
           <img src="${composedDataUrl}" style="display:block;max-width:350px;max-height:350px;object-fit:contain;" />
           ${
-            fav.text
-              ? `<div style="margin-top:22px;width:100%;max-width:360px;text-align:center;font-size:32px;font-weight:700;color:#000;padding:0 16px;line-height:1.2;word-break:break-word;font-family:${fav.fontFamily || 'sans-serif'};">${fav.text}</div>`
+            info.text
+              ? `<div style="margin-top:22px;width:100%;max-width:360px;text-align:center;font-size:32px;font-weight:700;color:#000;padding:0 16px;line-height:1.2;word-break:break-word;font-family:${info.fontFamily || 'sans-serif'};">${info.text}</div>`
               : ''
           }
         `;
         container.appendChild(node);
-        await new Promise((r) => setTimeout(r, 80)); // data URL 已就绪，仅等 layout
+        await new Promise((r) => setTimeout(r, 80));
         const blob = await captureNode(node);
-        const safeName = (fav.name || fav.text || `panda-${i + 1}`).replace(/[^\w一-龥-]/g, '_').slice(0, 40);
+        const safeName = (slot.name || info.text || `panda-${i + 1}`).replace(/[^\w一-龥-]/g, '_').slice(0, 40);
         zip.file(`${String(i + 1).padStart(2, '0')}-${safeName}.png`, blob);
         container.removeChild(node);
       }
@@ -115,75 +167,25 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }, 100);
-      toast.success(lang === 'zh' ? `已打包 ${itemsToPack.length} 张 ZIP` : `Packed ${itemsToPack.length} as ZIP`);
+      toast.success(lang === 'zh' ? `已打包 ${slotsToPack.length} 张 ZIP` : `Packed ${slotsToPack.length} as ZIP`);
     } catch (e) {
       toast.error(lang === 'zh' ? `打包失败: ${e instanceof Error ? e.message : 'unknown'}` : `Pack failed`);
     }
   }, [selected, items, lang]);
 
-  // 进编辑器精修单张 — 用 calcEditorFaceLayout 让 face 元素位置/大小跟草图卡片视觉一致
-  // (之前直接用 350-coord faceOffset 当 face 元素 x/y/w/h，face PNG 含透明 padding 视觉位移)
-  const onSendToEditor = useCallback(async (fav: QuickFav) => {
-    // 优先用 fav 自带 src（上传/智能提取素材），fallback 到 ALL_* 池 — 跟 DraftCard 同样逻辑
-    const pandaInPool = ALL_PANDAS.find((p) => p.id === fav.pandaId);
-    const faceInPool = ALL_FACES.find((f) => f.id === fav.faceId);
-    const panda = pandaInPool
-      ?? (fav.pandaSrc
-        ? { id: fav.pandaId, src: fav.pandaSrc, labelCn: '上传', labelEn: 'Upload', tags: [], tagsEn: [], faceOffset: fav.pandaFaceOffset ?? { x: 100, y: 70, w: 250, h: 250 } }
-        : null);
-    const face = faceInPool
-      ?? (fav.faceSrc
-        ? { id: fav.faceId, src: fav.faceSrc, labelCn: '上传', labelEn: 'Upload', tags: [], tagsEn: [], faceOffset: { x: 0, y: 0, w: 0, h: 0 } }
-        : null);
-    if (!panda || !face) {
-      toast.error(lang === 'zh' ? '素材丢失（旧草图无 src 数据，需重新存一次）' : 'Material missing (old draft, please re-save)');
+  // 进编辑器 = loadDraft(slotId) + 切到 editor 页
+  // 不再像之前那样拆元素手动 dispatch — 直接用 slot 已保存的 elements
+  const onSendToEditor = useCallback((slot: DraftSlot) => {
+    if (!slot.state) {
+      toast.error(lang === 'zh' ? '草图数据丢失' : 'Draft data missing');
       return;
     }
-    // 用 live faceOffset (含校准工具改动) + 算 face 元素的实际显示位置
-    const offset350 = getLivePandaFaceOffset(panda);
-    const faceLayout = await calcEditorFaceLayout({
-      pandaSrc: panda.src,
-      faceSrc: face.src,
-      faceOffset350: offset350,
-    });
-    dispatch({ type: 'CLEAR_CANVAS' });
-    dispatch({
-      type: 'ADD_ELEMENT',
-      element: {
-        id: generateId(), type: 'image' as const, src: panda.src, name: panda.id,
-        x: 75, y: 50, width: 350, height: 350,
-        rotation: 0, opacity: 1, zIndex: 0, flipX: false,
-      },
-    });
-    setTimeout(() => {
-      dispatch({
-        type: 'ADD_ELEMENT',
-        element: {
-          id: generateId(), type: 'image' as const, src: face.src, name: face.id,
-          x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
-          rotation: 0, opacity: 1, zIndex: 1, flipX: false,
-        },
-      });
-      if (fav.text) {
-        dispatch({
-          type: 'ADD_ELEMENT',
-          element: {
-            id: generateId(), type: 'text' as const, text: fav.text,
-            x: 60, y: 410, width: 380, height: 56,
-            rotation: 0, opacity: 1, zIndex: 2,
-            fontFamily: fav.fontFamily || 'sans-serif',
-            fontSize: 32, fontWeight: 'bold' as const,
-            textAlign: 'center' as const,
-            fillColor: '#000000', strokeColor: '#ffffff', strokeWidth: 0,
-          },
-        });
-      }
-      onOpenEditor();
-    }, 30);
-  }, [dispatch, generateId, lang, onOpenEditor]);
+    loadDraft(slot.id);
+    setTimeout(() => onOpenEditor(), 30);
+  }, [loadDraft, lang, onOpenEditor]);
 
-  // 空 state — 套 LittleRed about- 风格
-  if (Object.keys(favs).length === 0) {
+  // 空 state
+  if (draftSlots.length === 0) {
     return (
       <div className="about-container about-arcade-shell col-root">
         <div className="about-page">
@@ -193,7 +195,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
               {lang === 'zh' ? '草图本是空的' : 'No drafts yet'}
             </h3>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: '#456' }}>
-              {lang === 'zh' ? '去快速生图收藏几张试试' : 'Open Quick mode and save some drafts'}
+              {lang === 'zh' ? '去快速生图收藏几张，或在编辑器里存草图' : 'Save from Quick or Editor'}
             </p>
             <button onClick={onOpenQuick} className="about-arcade-btn">
               <Sparkles size={14} />
@@ -217,7 +219,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
               <span className="about-chip" style={{ padding: '4px 10px', fontSize: 12 }}>{items.length}</span>
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: '#456' }}>
-              {lang === 'zh' ? '点卡片多选 → 批量打包 ZIP / 删除' : 'Click card to multi-select → batch ZIP / delete'}
+              {lang === 'zh' ? '点卡片多选 → 批量打包 ZIP / 删除 · 跟编辑器"本地草稿"是同一个池' : 'Click card to multi-select → batch ZIP / delete · Shared with editor "Local Draft"'}
             </p>
           </div>
         </div>
@@ -238,30 +240,28 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
       </section>
 
       <div className="col-grid">
-        {items.map((fav) => (
+        {items.map((slot) => (
           <DraftCard
-            key={fav.id}
-            fav={fav}
+            key={slot.id}
+            slot={slot}
             lang={lang}
-            isSelected={selected.has(fav.id)}
-            onToggleSelect={() => toggleSelect(fav.id)}
+            isSelected={selected.has(slot.id)}
+            onToggleSelect={() => toggleSelect(slot.id)}
             onDelete={() => {
-              remove(fav.id);
+              clearDraft(slot.id);
               toast.success(lang === 'zh' ? '已删除' : 'Deleted');
             }}
             onRename={(name) => {
-              rename(fav.id, name);
+              renameDraft(slot.id, name);
               toast.success(lang === 'zh' ? '已改名' : 'Renamed');
             }}
-            onSendToEditor={() => onSendToEditor(fav)}
+            onSendToEditor={() => onSendToEditor(slot)}
           />
         ))}
       </div>
 
-      {/* 离屏渲染容器（ZIP 打包时塞临时 preview node） */}
       <div ref={offscreenContainerRef} style={{ position: 'absolute', left: -99999, top: 0 }} />
 
-      {/* Floating action bar — 选中时浮动 */}
       {selected.size > 0 && (
         <div className="col-action-bar">
           <span className="col-bar-count">
@@ -289,7 +289,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
 }
 
 interface DraftCardProps {
-  fav: QuickFav;
+  slot: DraftSlot;
   lang: 'zh' | 'en';
   isSelected: boolean;
   onToggleSelect: () => void;
@@ -298,24 +298,20 @@ interface DraftCardProps {
   onSendToEditor: () => void;
 }
 
-function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, onSendToEditor }: DraftCardProps) {
-  // 优先用 fav 自带的 src（上传/智能提取素材），fallback 到 ALL_* 池
-  const pandaInPool = ALL_PANDAS.find((p) => p.id === fav.pandaId);
-  const faceInPool = ALL_FACES.find((f) => f.id === fav.faceId);
-  const panda = pandaInPool ?? (fav.pandaSrc ? { id: fav.pandaId, src: fav.pandaSrc, labelCn: '上传', labelEn: 'Upload', tags: [], tagsEn: [], faceOffset: fav.pandaFaceOffset ?? { x: 100, y: 70, w: 250, h: 250 } } : null);
-  const face = faceInPool ?? (fav.faceSrc ? { id: fav.faceId, src: fav.faceSrc, labelCn: '上传', labelEn: 'Upload', tags: [], tagsEn: [], faceOffset: { x: 0, y: 0, w: 0, h: 0 } } : null);
+function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename, onSendToEditor }: DraftCardProps) {
+  const info = useMemo(() => extractSlotInfo(slot), [slot]);
   const previewRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
-  const [nameDraft, setNameDraft] = useState(fav.name || fav.text || '');
+  const [nameDraft, setNameDraft] = useState(slot.name || info.text || '');
 
   const tilt = useMemo(() => {
     let h = 0;
-    for (const c of fav.id) h = (h * 31 + c.charCodeAt(0)) | 0;
+    for (const c of slot.id) h = (h * 31 + c.charCodeAt(0)) | 0;
     return ((h % 7) - 3) * 0.8;
-  }, [fav.id]);
+  }, [slot.id]);
 
-  // broken card：素材丢了 — 加删除按钮 + 选择框（之前 user 删不掉）
-  if (!panda || !face) {
+  // broken card (素材丢了)
+  if (!info.panda || !info.face) {
     return (
       <div
         className={'draft-card draft-card-broken ' + (isSelected ? 'draft-card-selected' : '')}
@@ -332,7 +328,7 @@ function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, 
           <Trash2 size={14} />
         </button>
         <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: 10, color: '#888' }}>
-          {fav.name || fav.text || lang === 'zh' ? `${fav.pandaId} + ${fav.faceId}` : `${fav.pandaId} + ${fav.faceId}`}
+          {slot.name || info.text || lang === 'zh' ? `${info.panda?.id ?? '?'} + ${info.face?.id ?? '?'}` : ''}
         </div>
       </div>
     );
@@ -351,10 +347,7 @@ function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, 
   const onDownload = async () => {
     if (!previewRef.current) return;
     try {
-      await downloadImage(
-        previewRef.current,
-        `panda-${fav.pandaId}-${fav.faceId}-${Date.now()}.png`
-      );
+      await downloadImage(previewRef.current, `panda-${info.panda!.id}-${info.face!.id}-${Date.now()}.png`);
     } catch {
       toast.error(lang === 'zh' ? '下载失败' : 'Download failed');
     }
@@ -375,16 +368,21 @@ function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, 
       <div ref={previewRef} className="draft-preview">
         <div className="draft-panda-frame">
           <PandaCanvas
-            pandaSrc={panda.src}
-            pandaId={panda.id}
-            faceSrc={face.src}
-            faceOffset={getLivePandaFaceOffset(panda)}
-            alt={panda.id}
+            pandaSrc={info.panda.src}
+            pandaId={info.panda.id}
+            faceSrc={info.face.src}
+            faceOffset={info.panda.faceOffset}
+            alt={info.panda.id}
             className="draft-panda-img"
             size={512}
           />
         </div>
-        {fav.text && <div className="draft-caption">{fav.text}</div>}
+        {info.text && (
+          <div
+            className="draft-caption"
+            style={{ marginTop: Math.max(0, 4 - Math.round(getLiveCaptionOffset(info.panda.id) / 2)) }}
+          >{info.text}</div>
+        )}
       </div>
 
       <div className="draft-meta" onClick={(e) => e.stopPropagation()}>
@@ -407,7 +405,7 @@ function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, 
           </div>
         ) : (
           <div className="draft-name-row">
-            <span className="draft-name">{fav.name || fav.text || (lang === 'zh' ? '未命名' : 'Untitled')}</span>
+            <span className="draft-name">{slot.name || info.text || (lang === 'zh' ? '未命名' : 'Untitled')}</span>
             <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} className="draft-icon-btn" title={lang === 'zh' ? '改名' : 'Rename'}>
               <Edit2 size={11} />
             </button>

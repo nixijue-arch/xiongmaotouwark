@@ -5,6 +5,9 @@
 export interface AnchorOverride {
   faceOffset: { x: number; y: number; w: number; h: number };
   faceFill?: number; // 0.7-1.1, default 0.95
+  // 字幕距离微调 (px, 350-coord 空间): 正数 = caption 往上挪贴近 panda, 负数 = 拉远
+  // 修 wide-shape panda 透明 padding 检测不够紧、caption 看着太远的 case
+  captionOffset?: number;
   ts: number;
 }
 
@@ -60,9 +63,31 @@ export function exportToTSCode(): string {
   for (const id of ids) {
     const o = all[id].faceOffset;
     const fill = all[id].faceFill;
-    const fillNote = fill && fill !== 0.95 ? ` // faceFill ${fill.toFixed(2)}` : '';
-    lines.push(`  '${id}': { x: ${o.x}, y: ${o.y}, w: ${o.w}, h: ${o.h} },${fillNote}`);
+    const cap = all[id].captionOffset;
+    const notes: string[] = [];
+    if (fill && fill !== 0.95) notes.push(`faceFill ${fill.toFixed(2)}`);
+    if (cap) notes.push(`captionOffset ${cap}`);
+    const tail = notes.length ? ` // ${notes.join(', ')}` : '';
+    lines.push(`  '${id}': { x: ${o.x}, y: ${o.y}, w: ${o.w}, h: ${o.h} },${tail}`);
   }
   lines.push('};');
   return lines.join('\n');
+}
+
+// 读单个 panda 的 caption offset (默认 0)
+export function readCaptionOffset(pandaId: string): number {
+  return readAnchorOverrides()[pandaId]?.captionOffset ?? 0;
+}
+
+export function saveCaptionOffset(pandaId: string, offset: number): void {
+  const all = readAnchorOverrides();
+  const existing = all[pandaId];
+  all[pandaId] = {
+    faceOffset: existing?.faceOffset ?? { x: 100, y: 70, w: 250, h: 250 },
+    faceFill: existing?.faceFill,
+    captionOffset: offset === 0 ? undefined : offset,
+    ts: Date.now(),
+  };
+  localStorage.setItem(KEY, JSON.stringify(all));
+  notify();
 }
