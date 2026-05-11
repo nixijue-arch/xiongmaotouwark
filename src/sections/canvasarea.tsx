@@ -201,7 +201,8 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
 
 function DraggableImage({ element, isSelected, onSelect, onStartEdit }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
-  const { dispatch } = useMeme();
+  const { dispatch, state } = useMeme();
+  const lang = state.language;
   const [visibleBounds, setVisibleBounds] = useState(DEFAULT_VISIBLE_BOUNDS);
   const rhNW = useResizeHandler(element, 'nw');
   const rhN  = useResizeHandler(element, 'n');
@@ -297,7 +298,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                   style={{ backgroundColor: '#0080FF' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  编辑
+                  {lang === 'zh' ? '编辑' : 'Edit'}
                 </button>
                 <button
                   onClick={(e) => {
@@ -309,7 +310,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                   style={{ backgroundColor: '#EF4444' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  删除
+                  {lang === 'zh' ? '删除' : 'Delete'}
                 </button>
               </div>
             </>
@@ -889,7 +890,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         {state.elements.length === 0 && !editingEl && (
           <div className="canvas-empty-state">
             <div className="canvas-empty-badge canvas-empty-badge-top">
-              连击 COMBO x3
+              {state.language === 'zh' ? '连击 COMBO x3' : 'COMBO x3'}
             </div>
             <div className="canvas-empty-center">
               <div className="canvas-empty-panda">🐼</div>
@@ -969,14 +970,14 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   style={{ backgroundColor: editTool === 'brush' ? '#FF5E00' : '#2a2a2a', color: '#fff' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  画笔
+                  {state.language === 'zh' ? '画笔' : 'Brush'}
                 </button>
                 <button
                   onClick={() => setEditTool('eraser')}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium"
                   style={{ backgroundColor: editTool === 'eraser' ? '#EF4444' : '#2a2a2a', color: '#fff' }}
                 >
-                  <Eraser size={10} />橡皮擦
+                  <Eraser size={10} />{state.language === 'zh' ? '橡皮擦' : 'Eraser'}
                 </button>
                 <input
                   type="color"
@@ -987,7 +988,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   disabled={editTool !== 'brush'}
                 />
                 <div className="flex items-center gap-1">
-                  <span className="text-[9px]" style={{ color: '#888' }}>粗细</span>
+                  <span className="text-[9px]" style={{ color: '#888' }}>{state.language === 'zh' ? '粗细' : 'Size'}</span>
                   <input
                     type="range"
                     min={2}
@@ -1007,33 +1008,33 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   onClick={handleFinishEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
                   style={{ backgroundColor: '#00CC66' }}
-                  title="完成编辑"
+                  title={state.language === 'zh' ? '完成编辑' : 'Finish'}
                 >
-                  <Save size={10} />完成
+                  <Save size={10} />{state.language === 'zh' ? '完成' : 'Done'}
                 </button>
                 <button
                   onClick={handleUndoEdit}
                   disabled={editHistory.length <= 1}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white disabled:opacity-30"
                   style={{ backgroundColor: '#0080FF' }}
-                  title="撤回上一步"
+                  title={state.language === 'zh' ? '撤回上一步' : 'Undo'}
                 >
-                  <Undo2 size={10} />撤回
+                  <Undo2 size={10} />{state.language === 'zh' ? '撤回' : 'Undo'}
                 </button>
                 <button
                   onClick={exitEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
                   style={{ backgroundColor: '#888' }}
                 >
-                  <LogOut size={10} />退出
+                  <LogOut size={10} />{state.language === 'zh' ? '退出' : 'Exit'}
                 </button>
                 <button
                   onClick={handleClearEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-white"
                   style={{ backgroundColor: '#2a2a2a' }}
-                  title="清空所有编辑"
+                  title={state.language === 'zh' ? '清空所有编辑' : 'Clear all'}
                 >
-                  <RotateCcw size={10} />清空
+                  <RotateCcw size={10} />{state.language === 'zh' ? '清空' : 'Clear'}
                 </button>
               </div>
             </div>

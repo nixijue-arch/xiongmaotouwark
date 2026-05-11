@@ -288,6 +288,70 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
   );
 }
 
+// 完全隔离的 rename UI — 自己管 state, 父只听 onSubmit/onCancel
+// 这样跟 DraftCard 的任何 props 变化 / re-render 解耦
+function RenameRow({
+  initialName,
+  placeholder,
+  onSubmit,
+  onCancel,
+}: {
+  initialName: string;
+  placeholder: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialName);
+  return (
+    <div
+      className="draft-rename-row"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onSubmit(value.trim());
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        placeholder={placeholder}
+        className="draft-rename-input"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          // eslint-disable-next-line no-console
+          console.log('[RenameRow] ✓ clicked, value=', value);
+          onSubmit(value.trim());
+        }}
+        className="draft-rename-ok"
+      >
+        <Check size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCancel();
+        }}
+        className="draft-rename-cancel"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
 interface DraftCardProps {
   slot: DraftSlot;
   lang: 'zh' | 'en';
@@ -302,8 +366,6 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
   const info = useMemo(() => extractSlotInfo(slot), [slot]);
   const previewRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
-  // 跟 PMW 同款 controlled state, 简单可靠
-  const [nameDraft, setNameDraft] = useState(slot.name || info.text || '');
 
   const tilt = useMemo(() => {
     let h = 0;
@@ -354,11 +416,6 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
     }
   };
 
-  const submitRename = () => {
-    if (nameDraft.trim()) onRename(nameDraft.trim());
-    setEditing(false);
-  };
-
   return (
     <div
       className={'draft-card ' + (isSelected ? 'draft-card-selected' : '')}
@@ -386,22 +443,22 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
 
       <div className="draft-meta" onClick={(e) => e.stopPropagation()}>
         {editing ? (
-          <div className="draft-rename-row">
-            <input
-              autoFocus
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitRename();
-                if (e.key === 'Escape') setEditing(false);
-              }}
-              placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
-              className="draft-rename-input"
-              onClick={(e) => e.stopPropagation()}
-            />
-            <button onClick={(e) => { e.stopPropagation(); submitRename(); }} className="draft-rename-ok"><Check size={12} /></button>
-            <button onClick={(e) => { e.stopPropagation(); setEditing(false); }} className="draft-rename-cancel"><X size={12} /></button>
-          </div>
+          <RenameRow
+            // key 让 RenameRow 在每次 editing=true 时 fresh mount
+            // 初始值用最新 slot.name, 子组件自己管 state, 不受父 re-render 影响
+            key={`rename-${slot.id}`}
+            initialName={slot.name || info.text || ''}
+            placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
+            onSubmit={(name) => {
+              // eslint-disable-next-line no-console
+              console.log('[DraftCard] onSubmit', { slotId: slot.id, name, currentName: slot.name });
+              if (name && name !== slot.name) {
+                onRename(name);
+              }
+              setEditing(false);
+            }}
+            onCancel={() => setEditing(false)}
+          />
         ) : (
           <div className="draft-name-row">
             <span className="draft-name">{slot.name || info.text || (lang === 'zh' ? '未命名' : 'Untitled')}</span>

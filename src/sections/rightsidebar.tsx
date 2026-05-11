@@ -842,9 +842,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                           backgroundColor: (state.elements.find(e => e.id === state.selectedId) as TextElement).textAlign === align ? '#FF5E00' : '#2a2a2a',
                           color: '#fff',
                         }}>
-                        {align === 'left' && '左'}
-                        {align === 'center' && '中'}
-                        {align === 'right' && '右'}
+                        {state.language === 'zh'
+                          ? (align === 'left' ? '左' : align === 'center' ? '中' : '右')
+                          : (align === 'left' ? 'L' : align === 'center' ? 'C' : 'R')}
                       </button>
                     ))}
                     <button
@@ -858,7 +858,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                         color: '#fff',
                       }}
                     >
-                      粗
+                      {state.language === 'zh' ? '粗' : 'B'}
                     </button>
                   </div>
                   <button

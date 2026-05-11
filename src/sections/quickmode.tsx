@@ -122,17 +122,38 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     setText((cur) => pickRandomText(textLang, cur));
   }, [textLang]);
 
-  const onRandomize = useCallback(() => {
+  // 防顿感: 先预合成新图 (composeMeme cache 里就绪) 再一次性切 state
+  // 不然 setPandaId/setFaceId/setText 立刻改, 但图还在 compose
+  // → 用户看到 text/caption 已动, 但 panda 还是旧的, 视觉错位
+  const onRandomize = useCallback(async () => {
     const otherPandas = PANDA_HEADS.filter((p) => p.id !== pandaId);
     const otherFaces = FACES.filter((f) => f.id !== faceId);
     const np = otherPandas.length ? otherPandas : PANDA_HEADS;
     const nf = otherFaces.length ? otherFaces : FACES;
-    setPandaId(np[Math.floor(Math.random() * np.length)].id);
-    setFaceId(nf[Math.floor(Math.random() * nf.length)].id);
-    setText((cur) => pickRandomText(textLang, cur));
+    const newPanda = np[Math.floor(Math.random() * np.length)];
+    const newFace = nf[Math.floor(Math.random() * nf.length)];
+    const newText = pickRandomText(textLang, text);
+
+    // 1. 预热: 在新 state 切换之前先把组合图扔进 composeMeme cache
+    try {
+      await composeMeme({
+        pandaSrc: newPanda.src,
+        faceSrc: newFace.src,
+        faceOffset: getLivePandaFaceOffset(newPanda),
+        size: 512,
+      });
+    } catch {
+      // 预热失败不阻断, 继续切 state (会走正常 cold 路径)
+    }
+
+    // 2. 一次性 batch 所有 state — PandaCanvas useEffect 再调 composeMeme
+    //    缓存命中, 同步返回, 文字/图片/位置 同帧更新, 无错位
+    setPandaId(newPanda.id);
+    setFaceId(newFace.id);
+    setText(newText);
     setFaceRotation(0);
     setFaceFlipX(false);
-  }, [pandaId, faceId, textLang]);
+  }, [pandaId, faceId, textLang, text]);
 
   const onResetTransform = useCallback(() => {
     setFaceRotation(0);
