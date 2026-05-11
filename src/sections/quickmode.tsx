@@ -121,20 +121,35 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     try { localStorage.setItem('pmw-quick-mode', mode); } catch { /* ignore */ }
   }, [mode]);
 
-  // 性能: 仅用浏览器图片预加载 (HTTP cache 热身)
-  // ⚠️ 重要: 不要在 onload 里跑 getContentBbox - 那会让 202 张图 onload 时
-  //    同步在主线程上排队执行 bbox 扫像素, 把主线程冻结 10+ 秒.
-  //    bbox 让 composeMeme 在需要时懒计算, 通过 _bboxCache 自动缓存.
+  // 性能 v2: requestIdleCallback 分批 fetch + decode 预热. 真 decode 后下次 compose 用 cached image,
+  // 避免生产端首次 random 时 decode 占 80-150ms.
+  // ⚠️ 不要在 onload 里跑 getContentBbox — 那会让 202 张图 onload 时同步主线程跑 bbox 扫像素 → 10+s 卡顿.
   useEffect(() => {
-    const items = [...PANDA_HEADS, ...FACES];
-    const timer = window.setTimeout(() => {
-      for (const item of items) {
+    const queue: Array<{ src: string }> = [...PANDA_HEADS, ...FACES];
+    let cancelled = false;
+    const processChunk = (deadline: IdleDeadline) => {
+      while (!cancelled && queue.length > 0 && deadline.timeRemaining() > 2) {
+        const item = queue.shift()!;
         const img = new Image();
         img.decoding = 'async';
-        img.src = item.src;  // 仅触发 HTTP fetch, 不挂 onload 不阻塞主线程
+        img.src = item.src;
+        // 真预 decode → 下次 composeMeme 用 cached HTMLImageElement, 无 decode 开销
+        img.decode().catch(() => { /* 失败不阻断 */ });
       }
-    }, 100); // 100ms 让初次 render commit 完, 不抢首屏渲染
-    return () => clearTimeout(timer);
+      if (!cancelled && queue.length > 0) {
+        requestIdleCallback(processChunk, { timeout: 2000 });
+      }
+    };
+    // 兜底: 浏览器不支持 requestIdleCallback (Safari <= 16)
+    const ric: (cb: (d: IdleDeadline) => void, opts?: { timeout: number }) => number =
+      typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback
+        : (cb) => window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline), 100) as unknown as number;
+    const handle = ric(processChunk, { timeout: 2000 });
+    return () => {
+      cancelled = true;
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(handle);
+    };
   }, []);
 
   const previewRef = useRef<HTMLDivElement>(null);
@@ -166,9 +181,12 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     setText((cur) => pickRandomText(textLang, mode, cur));
   }, [textLang, mode]);
 
-  // 视觉同步: imgReady 在 panda/face 切换瞬间置 false, PandaCanvas onRendered 完置 true
-  // caption/text 看到 imgReady=false 就藏起来, 等图就位再显示, 无错位
+  // 视觉同步 v2: 旧图全保持显示 (位置/caption/transform), 等新图 composeMeme 完后一起切.
+  // displayedText 跟 displayCaptionOffset 是 'lagging state', 只在 PandaCanvas onRendered 时更新.
+  // 这样不会 '旧 panda 先动位置 → 然后新图刷出' 的两步顿感, 完全是 '旧版整体保持 → 一帧切到新版'.
   const [imgReady, setImgReady] = useState(true);
+  const [displayedText, setDisplayedText] = useState(text);
+  const [displayCaptionOffset, setDisplayCaptionOffset] = useState(() => getLiveCaptionOffset(panda));
 
   const onRandomize = useCallback(() => {
     const otherPandas = PANDA_HEADS.filter((p) => p.id !== pandaId);
@@ -442,20 +460,24 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   flipX={faceFlipX}
                   alt={panda.id}
                   className="qm-panda-img"
-                  // 性能: preview 显示 350×350, 用 512 足够 (1024 编码慢 4x)
-                  // 复制/下载时单独 composeMeme(size:1024) 拿高清
-                  size={512}
-                  onRendered={() => setImgReady(true)}
-                  // 校准: panda 图片整体上下移, caption 位置不动
-                  // 正数 = panda 往下挪 (贴近 caption, 缩小间距); 负数 = panda 往上挪
-                  style={{ transform: `translateY(${getLiveCaptionOffset(panda)}px)`, opacity: imgReady ? 1 : 0.5, transition: 'opacity 120ms ease-out' }}
+                  size={384}
+                  // v2 同步切换: onRendered = panda 实际显示 (img onLoad) 后才触发
+                  // 一起切 displayed* (caption + transform), 旧版本完整保持到这一刻
+                  onRendered={() => {
+                    setImgReady(true);
+                    setDisplayedText(text);
+                    setDisplayCaptionOffset(getLiveCaptionOffset(panda));
+                  }}
+                  // transform 用 displayCaptionOffset (旧值保持到 onRendered 才切)
+                  // 不再加 opacity 抖动 → 旧 panda 始终 1.0 直到新 panda 真出现
+                  style={{ transform: `translateY(${displayCaptionOffset}px)` }}
                 />
               </div>
-              {text && (
+              {displayedText && (
                 <div
                   className="qm-caption"
-                  style={{ fontFamily: fontStack, visibility: imgReady ? 'visible' : 'hidden' }}
-                >{text}</div>
+                  style={{ fontFamily: fontStack }}
+                >{displayedText}</div>
               )}
             </div>
           </div>
