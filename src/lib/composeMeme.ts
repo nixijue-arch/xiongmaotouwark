@@ -69,20 +69,27 @@ export function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
   if (cached) return cached;
   const W = img.naturalWidth;
   const H = img.naturalHeight;
+  // 性能: 先按 max 512 缩小到一个工作 canvas, 再扫像素
+  // 1024+ 的原图扫 1M+ 像素要 50-200ms, 缩到 ≤512 后扫 ≤262K 像素仅 5-20ms
+  // bbox 精度按缩放比例反推, 对 anchor 对齐够用 (允许 ±2px 误差)
+  const MAX_SCAN = 512;
+  const scanScale = Math.min(1, MAX_SCAN / Math.max(W, H));
+  const SW = Math.max(1, Math.round(W * scanScale));
+  const SH = Math.max(1, Math.round(H * scanScale));
   const c = document.createElement('canvas');
-  c.width = W;
-  c.height = H;
+  c.width = SW;
+  c.height = SH;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('canvas 2d ctx unavailable');
-  ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, W, H).data;
-  let x1 = W;
-  let y1 = H;
+  ctx.drawImage(img, 0, 0, SW, SH);
+  const data = ctx.getImageData(0, 0, SW, SH).data;
+  let x1 = SW;
+  let y1 = SH;
   let x2 = -1;
   let y2 = -1;
-  for (let y = 0; y < H; y++) {
-    const rowBase = y * W * 4;
-    for (let x = 0; x < W; x++) {
+  for (let y = 0; y < SH; y++) {
+    const rowBase = y * SW * 4;
+    for (let x = 0; x < SW; x++) {
       const a = data[rowBase + x * 4 + 3];
       if (a > alphaThresh) {
         if (x < x1) x1 = x;
@@ -92,7 +99,11 @@ export function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
       }
     }
   }
-  const bbox: Bbox = x2 < 0 ? [0, 0, W, H] : [x1, y1, x2 + 1, y2 + 1];
+  // 缩放还原到原图坐标系
+  const inv = 1 / scanScale;
+  const bbox: Bbox = x2 < 0
+    ? [0, 0, W, H]
+    : [Math.floor(x1 * inv), Math.floor(y1 * inv), Math.min(W, Math.ceil((x2 + 1) * inv)), Math.min(H, Math.ceil((y2 + 1) * inv))];
   _bboxCache.set(key, bbox);
   return bbox;
 }

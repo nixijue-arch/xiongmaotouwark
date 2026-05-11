@@ -483,11 +483,21 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const nextDraftSlots = draftSlots.map(slot => (
-      slot.id === slotId ? { ...slot, name: trimmed } : slot
-    ));
-    persistDraftSlots(nextDraftSlots);
-  }, [draftSlots, persistDraftSlots]);
+    // 用 functional setState 避免 stale closure: 即使 draftSlots ref 不是最新
+    // 也用最新值更新, 防止快速连续 rename / 与其他更新交叉时丢更新
+    setDraftSlots((prev) => {
+      const next = prev.map(slot => (
+        slot.id === slotId ? { ...slot, name: trimmed, updatedAt: Date.now() } : slot
+      ));
+      // 同时同步 localStorage (persistDraftSlots 的副作用部分)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
+        } catch { /* ignore */ }
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

@@ -10,7 +10,7 @@
 // 集成方式：独立 page，不入侵编辑器内部 LeftSidebar / RightSidebar / CanvasArea
 // "进编辑器精修"按钮 dispatch ADD_ELEMENT × 3 → setPage('editor')
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, type Material } from '@/data/materials';
 import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN } from '@/data/quickModeTexts';
@@ -66,11 +66,10 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   const [customFaceModalOpen, setCustomFaceModalOpen] = useState(false);
   const [smartModalOpen, setSmartModalOpen] = useState(false);
   const [customFace, setCustomFace] = useState<Material | null>(null);
-  // 防频闪：滚轮高频改 rotation 时，PandaCanvas 用 deferred 值
-  // → React 跳过中间帧，仅在用户停下时合成最终 canvas
-  // memory feedback_engineering.md '频闪用 useDeferredValue 防' SOP
-  const deferredRotation = useDeferredValue(faceRotation);
-  const deferredFlipX = useDeferredValue(faceFlipX);
+  // 注意: 之前用 useDeferredValue 防滚轮拖 rotation 频闪
+  // 但发现 random combo 时 deferred 滞后会让 PandaCanvas 双渲染 → 双 compose → 双慢
+  // 现在 composeMeme 已加 LRU 缓存 + 异步 toBlob, drag 也不会卡, 不再需要 deferred
+  // PandaCanvas 内部用 reqRef 中断陈旧请求, drag 期间也只显示最新结果
   const [namePopoverOpen, setNamePopoverOpen] = useState(false);
   const [pendingFavName, setPendingFavName] = useState('');
 
@@ -78,48 +77,20 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     try { localStorage.setItem('pmw-quick-textlang', textLang); } catch { /* ignore */ }
   }, [textLang]);
 
-  // 性能: QuickMode 一打开就用 idle time 预加载全部 panda+face PNG +
-  // 顺手 warm 一遍 getContentBbox 缓存 (bbox 检测是 composeMeme 里最重的 CPU 路径)
-  // 三层热身后, 后续 random 点击 cold path 从 ~500ms 缩到 ~80-120ms
+  // 性能: 仅用浏览器图片预加载 (HTTP cache 热身)
+  // ⚠️ 重要: 不要在 onload 里跑 getContentBbox - 那会让 202 张图 onload 时
+  //    同步在主线程上排队执行 bbox 扫像素, 把主线程冻结 10+ 秒.
+  //    bbox 让 composeMeme 在需要时懒计算, 通过 _bboxCache 自动缓存.
   useEffect(() => {
     const items = [...PANDA_HEADS, ...FACES];
-    let idleHandle: number | null = null;
-    const cancelTokens: HTMLImageElement[] = [];
-
-    const warmOne = (item: typeof items[number]) => {
-      const img = new Image();
-      img.decoding = 'async';
-      img.onload = () => {
-        // 热身 bbox cache — 同 origin 内存读像素, 跑一次 cold call 缓存住
-        // 后续 composeMeme 调 getContentBbox 直接 hit cache
-        try { getContentBbox(img); } catch { /* ignore */ }
-      };
-      img.src = item.src;
-      cancelTokens.push(img);
-    };
-
-    const preload = () => {
-      // 浏览器同 origin 默认 6 并发, 202 张图自动 pipeline 后台跑完
-      // bbox 热身是 onload 后的 ~30ms CPU work, 分摊在每张图加载完成时
+    const timer = window.setTimeout(() => {
       for (const item of items) {
-        warmOne(item);
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = item.src;  // 仅触发 HTTP fetch, 不挂 onload 不阻塞主线程
       }
-    };
-    type IdleCb = (cb: () => void, opts?: { timeout?: number }) => number;
-    const idleCb = (window as unknown as { requestIdleCallback?: IdleCb }).requestIdleCallback;
-    if (typeof idleCb === 'function') {
-      idleHandle = idleCb(preload, { timeout: 3000 });
-    } else {
-      idleHandle = window.setTimeout(preload, 800) as unknown as number;
-    }
-    return () => {
-      if (idleHandle !== null) {
-        const cancelIdleCb = (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback;
-        if (cancelIdleCb) cancelIdleCb(idleHandle); else clearTimeout(idleHandle);
-      }
-      // 中断未完成的 image 加载 (防卸载后还在跑后台)
-      cancelTokens.forEach(img => { img.src = ''; });
-    };
+    }, 100); // 100ms 让初次 render commit 完, 不抢首屏渲染
+    return () => clearTimeout(timer);
   }, []);
 
   const previewRef = useRef<HTMLDivElement>(null);
@@ -391,8 +362,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   pandaId={panda.id}
                   faceSrc={face.src}
                   faceOffset={getLivePandaFaceOffset(panda)}
-                  rotation={deferredRotation}
-                  flipX={deferredFlipX}
+                  rotation={faceRotation}
+                  flipX={faceFlipX}
                   alt={panda.id}
                   className="qm-panda-img"
                   // 性能: preview 显示 350×350, 用 512 足够 (1024 编码慢 4x)
