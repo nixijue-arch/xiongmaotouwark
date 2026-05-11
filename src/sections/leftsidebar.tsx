@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { useMeme } from '@/context/memecontext';
+import { useMemo, useState } from 'react';
+import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import { PANDA_HEADS, FACES, ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
-import { useQuickFavs, makeFavKey } from '@/hooks/useQuickFavs';
+import { useQuickFavs } from '@/hooks/useQuickFavs';
 import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
@@ -16,7 +16,8 @@ function isElementActive(elements: MemeElement[], itemId: string): boolean {
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  // 也认 'panda-head' fallback name（handleAddFace 兜底用）
+  return name === 'panda-head' || ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
@@ -52,33 +53,8 @@ function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): M
 
 export function LeftSidebar() {
   const { state, dispatch, generateId, draftSlots, saveDraft, loadDraft, clearDraft } = useMeme();
-  const { toggle: toggleFav } = useQuickFavs();
+  const { upsert: upsertFav, remove: removeFav } = useQuickFavs();
 
-  // 存到草图本 — 联通 useQuickFavs（跟 Quick / Collection 共享）
-  const handleSaveToCollection = () => {
-    const pandaEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isPanda(e));
-    const faceEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isFace(e));
-    if (!pandaEl) {
-      toast.error(lang === 'zh' ? '画布上至少要有一个熊猫头' : 'Need at least a panda');
-      return;
-    }
-    const textEl = state.elements.find(e => e.type === 'text') as { text: string; fontFamily: string } | undefined;
-    const text = textEl?.text ?? '';
-    const fontFamily = textEl?.fontFamily ?? 'sans-serif';
-    const pandaId = pandaEl.name;
-    const faceId = faceEl?.name ?? 'face-01';
-    const id = makeFavKey(pandaId, faceId, text, fontFamily);
-    const isCustomPanda = pandaId.startsWith('upload-panda-');
-    const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
-    const fav: Parameters<typeof toggleFav>[0] = { id, pandaId, faceId, text, fontFamily };
-    if (isCustomPanda) {
-      fav.pandaSrc = pandaEl.src;
-      if (faceEl) fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
-    }
-    if (isCustomFace && faceEl) fav.faceSrc = faceEl.src;
-    toggleFav(fav);
-    toast.success(lang === 'zh' ? '已存到草图本（去顶部 草图 tab 看）' : 'Saved to Drafts (see top "Drafts" tab)');
-  };
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'panda' | 'face'>('panda');
@@ -88,8 +64,46 @@ export function LeftSidebar() {
   const lang = state.language;
   const filteredPandas = filterMaterials(PANDA_HEADS, pandaSearch, lang);
   const filteredFaces = filterMaterials(FACES, faceSearch, lang);
-  const savedDraftSlots = draftSlots.filter(slot => slot.state);
-  const nextDraftSlot = draftSlots.find(slot => !slot.state) ?? draftSlots[draftSlots.length - 1];
+  // 动态 schema：所有 draftSlots 都已经 state !== null（loadDraftSlots 已过滤），直接全用
+  const savedDraftSlots = draftSlots;
+
+  // 下一个草稿 id：未满时新建；满 40 时覆盖最旧的
+  const { nextDraftSlotId, nextDraftLabel } = useMemo(() => {
+    if (draftSlots.length === 0) return { nextDraftSlotId: 'draft-1', nextDraftLabel: '草稿1' };
+    if (draftSlots.length < DRAFT_SLOT_MAX) {
+      const idx = draftSlots.length + 1;
+      return { nextDraftSlotId: `draft-${Date.now()}-${idx}`, nextDraftLabel: `草稿${idx}` };
+    }
+    // 已满 — 找最旧的覆盖
+    const oldest = draftSlots.reduce((min, slot) => ((slot.updatedAt ?? 0) < (min.updatedAt ?? 0) ? slot : min), draftSlots[0]);
+    return { nextDraftSlotId: oldest.id, nextDraftLabel: oldest.name };
+  }, [draftSlots]);
+
+  // 存到草图本 — 用 upsert（不 toggle），fav id 跟 draft slot id 1:1，确保多次保存不互相抵消
+  const handleSaveToCollection = (slotId: string) => {
+    const pandaEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isPanda(e));
+    const faceEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isFace(e));
+    if (!pandaEl) {
+      // 按钮 disabled 时不会触发；fallback 静默跳过
+      return;
+    }
+    const textEl = state.elements.find(e => e.type === 'text') as { text: string; fontFamily: string } | undefined;
+    const text = textEl?.text ?? '';
+    const fontFamily = textEl?.fontFamily ?? 'sans-serif';
+    const pandaId = pandaEl.name;
+    const faceId = faceEl?.name ?? 'face-01';
+    // 用 slot id 派生 fav id — 编辑器草图与草图本一一对应（slot 删 → 对应 fav 也清）
+    const id = `editor-${slotId}`;
+    const isCustomPanda = pandaId.startsWith('upload-panda-');
+    const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
+    const fav: Parameters<typeof upsertFav>[0] = { id, pandaId, faceId, text, fontFamily };
+    if (isCustomPanda) {
+      fav.pandaSrc = pandaEl.src;
+      if (faceEl) fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
+    }
+    if (isCustomFace && faceEl) fav.faceSrc = faceEl.src;
+    upsertFav(fav);
+  };
 
   const handleUseDraft = (slotId: string, slotName: string) => {
     const confirmed = window.confirm(
@@ -109,6 +123,8 @@ export function LeftSidebar() {
     );
     if (!confirmed) return;
     clearDraft(slotId);
+    // 同步删除草图本里对应的 fav（与 saveDraft 配对，保持双向一致）
+    removeFav(`editor-${slotId}`);
   };
 
   const handleAddPandaHead = (src: string, id: string) => {
@@ -268,13 +284,25 @@ export function LeftSidebar() {
         <button
           className="draft-save-current-btn"
           onClick={() => {
-            void saveDraft(nextDraftSlot.id);
-            // 同时存到 useQuickFavs — 草稿1 → 草图1 等价
-            handleSaveToCollection();
+            void saveDraft(nextDraftSlotId);
+            // 同时存到 useQuickFavs — slot 与 fav 1:1 对应（upsert，不 toggle）
+            handleSaveToCollection(nextDraftSlotId);
+            toast.success(
+              lang === 'zh'
+                ? `已存为${nextDraftLabel}（草图本可见）`
+                : `Saved as ${nextDraftLabel.replace('草稿', 'Draft ')} (visible in Drafts)`
+            );
           }}
           disabled={state.elements.filter(isPanda).length === 0}
+          title={
+            lang === 'zh'
+              ? `本地草稿上限 ${DRAFT_SLOT_MAX}，已存 ${draftSlots.length}`
+              : `Max ${DRAFT_SLOT_MAX} drafts, saved ${draftSlots.length}`
+          }
         >
-          {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
+          {lang === 'zh'
+            ? `保存当前到${nextDraftLabel}（${draftSlots.length}/${DRAFT_SLOT_MAX}）`
+            : `Save to ${nextDraftLabel.replace('草稿', 'Draft ')} (${draftSlots.length}/${DRAFT_SLOT_MAX})`}
         </button>
         {savedDraftSlots.length === 0 ? (
           <p className="draft-empty-hint">

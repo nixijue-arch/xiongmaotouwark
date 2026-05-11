@@ -88,11 +88,7 @@ const initialState: AppState = {
 
 const SESSION_STORAGE_KEY = 'xiongmaotou.editor-state.v1';
 const DRAFT_SLOTS_STORAGE_KEY = 'xiongmaotou.editor-drafts.v1';
-const DEFAULT_DRAFT_SLOTS: DraftSlot[] = [
-  { id: 'draft-1', name: '草稿1', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-  { id: 'draft-2', name: '草稿2', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-  { id: 'draft-3', name: '草稿3', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-];
+export const DRAFT_SLOT_MAX = 40;
 
 function isImageElement(element: MemeElement): element is ImageElement {
   return element.type === 'image';
@@ -197,29 +193,32 @@ function sanitizeStoredState(input: Pick<AppState, 'elements' | 'selectedId' | '
 }
 
 function loadDraftSlots(): DraftSlot[] {
-  if (typeof window === 'undefined') return DEFAULT_DRAFT_SLOTS;
+  if (typeof window === 'undefined') return [];
 
   try {
     const raw = window.localStorage.getItem(DRAFT_SLOTS_STORAGE_KEY);
-    if (!raw) return DEFAULT_DRAFT_SLOTS;
+    if (!raw) return [];
 
     const parsed = JSON.parse(raw) as DraftSlot[];
-    if (!Array.isArray(parsed)) return DEFAULT_DRAFT_SLOTS;
+    if (!Array.isArray(parsed)) return [];
 
-    return DEFAULT_DRAFT_SLOTS.map((fallbackSlot, index) => {
-      const slot = parsed[index];
-      const safeState = sanitizeStoredState(slot?.state);
-      return {
-        id: fallbackSlot.id,
-        name: fallbackSlot.name,
-        updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
-        previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
-        elementCount: safeState?.elements.length ?? 0,
-        state: safeState,
-      };
-    });
+    return parsed
+      .slice(0, DRAFT_SLOT_MAX)
+      .map((slot, index): DraftSlot => {
+        const safeState = sanitizeStoredState(slot?.state);
+        return {
+          id: typeof slot?.id === 'string' && slot.id ? slot.id : `draft-${index + 1}`,
+          name: typeof slot?.name === 'string' && slot.name ? slot.name : `草稿${index + 1}`,
+          updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
+          previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
+          elementCount: safeState?.elements.length ?? 0,
+          state: safeState,
+        };
+      })
+      // 兼容旧版 3-slot schema：filter 掉初始化时 state=null 但 updatedAt=null 的占位
+      .filter(slot => slot.state !== null);
   } catch {
-    return DEFAULT_DRAFT_SLOTS;
+    return [];
   }
 }
 
@@ -357,17 +356,43 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
       language: state.language,
     } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
 
-    const nextDraftSlots = draftSlots.map(slot => (
-      slot.id === slotId
-        ? {
-            ...slot,
-            updatedAt: Date.now(),
-            previewUrl,
-            elementCount: state.elements.length,
-            state: savedState,
-          }
-        : slot
-    ));
+    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
+    let nextDraftSlots: DraftSlot[];
+
+    if (existingIndex >= 0) {
+      // 覆盖已有 slot
+      nextDraftSlots = draftSlots.map(slot => (
+        slot.id === slotId
+          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+          : slot
+      ));
+    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
+      // 追加新 slot
+      const index = draftSlots.length + 1;
+      nextDraftSlots = [
+        ...draftSlots,
+        {
+          id: slotId,
+          name: `草稿${index}`,
+          updatedAt: Date.now(),
+          previewUrl,
+          elementCount: state.elements.length,
+          state: savedState,
+        },
+      ];
+    } else {
+      // 已满 40 — 覆盖最旧的（updatedAt 最小）
+      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
+        const cur = slot.updatedAt ?? 0;
+        const min = arr[minIdx].updatedAt ?? 0;
+        return cur < min ? idx : minIdx;
+      }, 0);
+      nextDraftSlots = draftSlots.map((slot, idx) => (
+        idx === oldestIndex
+          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+          : slot
+      ));
+    }
 
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots, state.elements, state.language, state.selectedId]);
@@ -386,11 +411,8 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [draftSlots]);
 
   const clearDraft = useCallback((slotId: string) => {
-    const nextDraftSlots = draftSlots.map(slot => (
-      slot.id === slotId
-        ? { ...slot, updatedAt: null, previewUrl: '', elementCount: 0, state: null }
-        : slot
-    ));
+    // Dynamic schema：直接移除 slot（不再保留 state=null 的占位）
+    const nextDraftSlots = draftSlots.filter(slot => slot.id !== slotId);
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots]);
 

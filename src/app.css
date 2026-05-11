@@ -2468,9 +2468,13 @@ body {
 }
 
 .draft-card {
-  padding: 14px;
+  /* padding 与 .sidebar-section-header(12px 12px 8px) + .sidebar-scroll(0 12px 12px) 对齐
+     这样 draft 内的按钮 / slot-grid 与下方 panda/face 卡片视觉同宽 */
+  padding: 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08));
   border-bottom: 1px solid var(--retro-stroke);
+  /* 防止 40 张草图把 panda/face 板块挤没 — draft-slot-grid 自带 overflow-y */
+  flex-shrink: 0;
 }
 
 .draft-card-header,
@@ -2962,7 +2966,8 @@ textarea {
 }
 
 .draft-card-header {
-  margin: -14px -14px 12px;
+  /* 与 .draft-card padding(12px) 反向相消，让 win7 titlebar 贴到面板边缘 */
+  margin: -12px -12px 12px;
 }
 
 .sidebar-section-header {

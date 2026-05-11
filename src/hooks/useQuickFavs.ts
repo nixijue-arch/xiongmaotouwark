@@ -54,6 +54,11 @@ export function useQuickFavs() {
     });
   }, []);
 
+  // upsert — 始终插入/覆盖（不像 toggle 会删除已有）。编辑器存草图用，保证多次保存不会互相抵消。
+  const upsert = useCallback((fav: Omit<QuickFav, 'ts'>) => {
+    setFavs((m) => ({ ...m, [fav.id]: { ...m[fav.id], ...fav, ts: Date.now() } }));
+  }, []);
+
   const remove = useCallback((id: string) => {
     setFavs((m) => {
       const next = { ...m };
@@ -66,5 +71,5 @@ export function useQuickFavs() {
     setFavs((m) => (m[id] ? { ...m, [id]: { ...m[id], name } } : m));
   }, []);
 
-  return { favs, isFav, toggle, remove, rename };
+  return { favs, isFav, toggle, upsert, remove, rename };
 }
