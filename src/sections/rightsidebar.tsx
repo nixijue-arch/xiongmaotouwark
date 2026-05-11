@@ -429,6 +429,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         dispatch({ type: 'ADD_ELEMENT', element: faceEl });
       }
     }
+    // 兜底: 老草稿里 text 可能是 zIndex < 100, 换图后会被新 panda(5) 盖. 强制拉顶
+    state.elements.forEach(el => {
+      if (el.type === 'text' && el.zIndex < 100) {
+        dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: 100 } });
+      }
+    });
   };
 
   const handleRecommendText = () => {
@@ -438,7 +444,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (existingText) {
       dispatch({ type: 'UPDATE_ELEMENT', id: existingText.id, updates: { text: randomText } });
     } else {
-      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
       dispatch({ type: 'ADD_ELEMENT', element: textEl });
     }
   };
@@ -448,7 +454,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const defaultText = state.language === 'zh' ? '点击输入文字' : 'Click to enter text';
     const text = window.prompt(promptText, defaultText);
     if (!text || text.trim() === '') return;
-    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     dispatch({ type: 'SELECT_ELEMENT', id: textEl.id });
   };
