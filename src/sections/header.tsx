@@ -1,5 +1,5 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '@/app';
 
@@ -86,19 +86,43 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
           <span className="link-label">{state.language === 'zh' ? '了解' : 'About'}</span>
         </button>
 
-        {/* DEV-only 校准工具入口 */}
+        {/* DEV-only 工具入口 — 校准 / 素材 / 文案 */}
         {import.meta.env.DEV && (
-          <button
-            onClick={() => setPage('calibrate')}
-            className="header-link"
-            style={page === 'calibrate'
-              ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' }
-              : { borderStyle: 'dashed', opacity: 0.7 }}
-            title="表情对齐工具 (DEV only)"
-          >
-            <Crosshair size={14} />
-            <span className="link-label">校准</span>
-          </button>
+          <>
+            <button
+              onClick={() => setPage('calibrate')}
+              className="header-link"
+              style={page === 'calibrate'
+                ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' }
+                : { borderStyle: 'dashed', opacity: 0.7 }}
+              title="表情对齐工具 (DEV only)"
+            >
+              <Crosshair size={14} />
+              <span className="link-label">校准</span>
+            </button>
+            <button
+              onClick={() => setPage('materials')}
+              className="header-link"
+              style={page === 'materials'
+                ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' }
+                : { borderStyle: 'dashed', opacity: 0.7 }}
+              title="素材管理 (DEV only)"
+            >
+              <Database size={14} />
+              <span className="link-label">素材</span>
+            </button>
+            <button
+              onClick={() => setPage('captions')}
+              className="header-link"
+              style={page === 'captions'
+                ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' }
+                : { borderStyle: 'dashed', opacity: 0.7 }}
+              title="文案管理 (DEV only)"
+            >
+              <FileText size={14} />
+              <span className="link-label">文案</span>
+            </button>
+          </>
         )}
 
         {/* X Community Link - desktop only */}

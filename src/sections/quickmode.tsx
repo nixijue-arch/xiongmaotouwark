@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, getShellLayering, type Material } from '@/data/materials';
-import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN } from '@/data/quickModeTexts';
+import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN, ALL_MODES, MODE_LABELS, nextMode, type Mode } from '@/data/quickModeTexts';
 import { makeFavKey } from '@/hooks/useQuickFavs';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
@@ -24,7 +24,7 @@ import { calcEditorFaceLayout, composeMeme, getContentBbox } from '@/lib/compose
 import { Camera } from 'lucide-react';
 import {
   Sparkles, Copy, Download, Heart, Wand2, ArrowRight, Type,
-  RotateCcw, FlipHorizontal, Check, X,
+  RotateCcw, FlipHorizontal, Check, X, RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import './quickmode.css';
@@ -35,10 +35,10 @@ const FONT_OPTIONS = [
   { id: 'mono',    labelKey: 'quickFontMono'    as const, stack: 'ui-monospace, SFMono-Regular, "Noto Sans SC", monospace' },
 ];
 
+// v2: 删掉 'both' 双语模式 — 默认跟 state.language, 中文 UI 也可手动切 EN
 const TEXT_LANG_OPTIONS = [
-  { id: 'both' as const, label: '双' },
-  { id: 'zh'   as const, label: '中' },
-  { id: 'en'   as const, label: 'EN' },
+  { id: 'zh' as const, label: '中' },
+  { id: 'en' as const, label: 'EN' },
 ];
 
 interface QuickModeProps {
@@ -57,10 +57,51 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     () => (lang === 'zh' ? RANDOM_TEXTS_ZH : RANDOM_TEXTS_EN)[0] ?? ''
   );
   const [fontKey, setFontKey] = useState<string>('default');
-  const [textLang, setTextLang] = useState<'both' | 'zh' | 'en'>(() => {
-    try { return (localStorage.getItem('pmw-quick-textlang') as 'both' | 'zh' | 'en') || 'both'; }
-    catch { return 'both'; }
+  // v2: textLang 默认跟 UI 语言, 取消 'both'. 用户手动切的话 localStorage 持久 (但忽略老 'both' 值)
+  const [textLang, setTextLang] = useState<'zh' | 'en'>(() => {
+    try {
+      const stored = localStorage.getItem('pmw-quick-textlang');
+      if (stored === 'zh' || stored === 'en') return stored;
+    } catch { /* ignore */ }
+    return lang;
   });
+  // v3: 模式 cycle 按钮 (操作面板里, 紧贴一键随机生图)
+  // 老 mode 值 ('daily'/'scold'/'chill'/'ct') 不在新 4 模式里, 走兜底 'all'
+  const [mode, setMode] = useState<Mode | 'all'>(() => {
+    try {
+      const stored = localStorage.getItem('pmw-quick-mode');
+      if (stored === 'all' || (ALL_MODES as string[]).includes(stored ?? '')) return stored as Mode | 'all';
+    } catch { /* ignore */ }
+    return 'all';
+  });
+  // cycleKey 每次点击 ++, 用作 cycle 角标的 React key, 强制 remount 触发 spin 动画
+  const [cycleKey, setCycleKey] = useState(0);
+  const cycleMode = useCallback(() => {
+    setMode((cur) => {
+      const next = nextMode(cur);
+      // 切 mode 同时 reroll 文字 (imperative, 比 useEffect 可靠)
+      setText((curText) => pickRandomText(textLang, next === 'all' ? 'all' : next as Mode, curText));
+      return next;
+    });
+    setCycleKey((k) => k + 1);
+  }, [textLang]);
+  // 切 textLang 时 reroll 文字 (imperative, 跟按钮 onClick 同步)
+  const handleSetTextLang = useCallback((nextLang: 'zh' | 'en') => {
+    setTextLang(nextLang);
+    setText((curText) => pickRandomText(nextLang, mode, curText));
+  }, [mode]);
+
+  // 顶栏 UI 语言切换 (state.language) → textLang 跟着切 + 文字 reroll 成对应语言
+  // skip 首次 mount 避免抢初始 text state
+  const isFirstUiLangSync = useRef(true);
+  useEffect(() => {
+    if (isFirstUiLangSync.current) {
+      isFirstUiLangSync.current = false;
+      return;
+    }
+    setTextLang(state.language);
+    setText((cur) => pickRandomText(state.language, mode, cur));
+  }, [state.language]);
   const [faceRotation, setFaceRotation] = useState(0);
   const [faceFlipX, setFaceFlipX] = useState(false);
   const [customFaceModalOpen, setCustomFaceModalOpen] = useState(false);
@@ -76,6 +117,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   useEffect(() => {
     try { localStorage.setItem('pmw-quick-textlang', textLang); } catch { /* ignore */ }
   }, [textLang]);
+  useEffect(() => {
+    try { localStorage.setItem('pmw-quick-mode', mode); } catch { /* ignore */ }
+  }, [mode]);
 
   // 性能: 仅用浏览器图片预加载 (HTTP cache 热身)
   // ⚠️ 重要: 不要在 onload 里跑 getContentBbox - 那会让 202 张图 onload 时
@@ -119,8 +163,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // -------- actions --------
 
   const onRandomText = useCallback(() => {
-    setText((cur) => pickRandomText(textLang, cur));
-  }, [textLang]);
+    setText((cur) => pickRandomText(textLang, mode, cur));
+  }, [textLang, mode]);
 
   // 视觉同步: imgReady 在 panda/face 切换瞬间置 false, PandaCanvas onRendered 完置 true
   // caption/text 看到 imgReady=false 就藏起来, 等图就位再显示, 无错位
@@ -133,7 +177,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     const nf = otherFaces.length ? otherFaces : FACES;
     const newPanda = np[Math.floor(Math.random() * np.length)];
     const newFace = nf[Math.floor(Math.random() * nf.length)];
-    const newText = pickRandomText(textLang, text);
+    // 一键随机生图: 文字跟随当前 mode (mode 自己不切换 — 用户点 Mode 角标才切)
+    const newText = pickRandomText(textLang, mode, text);
 
     // 不再 await 预合成 → 点击瞬间响应, 不卡 ~100-200ms
     // PandaCanvas onRendered 触发 setImgReady(true), caption 同帧出现
@@ -143,7 +188,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     setText(newText);
     setFaceRotation(0);
     setFaceFlipX(false);
-  }, [pandaId, faceId, textLang, text]);
+  }, [pandaId, faceId, textLang, mode, text]);
 
   const onResetTransform = useCallback(() => {
     setFaceRotation(0);
@@ -184,7 +229,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     const captionMargin = Math.max(2, 12 - capOff);
     node.innerHTML = `
       <img src="${composedDataUrl}" style="display:block;max-width:380px;max-height:380px;width:auto;height:auto;margin:0 auto;" />
-      ${escapedText ? `<div style="margin:${captionMargin}px auto 0;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;line-height:1.15;word-break:break-word;font-family:${fontStack};">${escapedText}</div>` : ''}
+      ${escapedText ? `<div style="margin:${captionMargin}px auto 0;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;line-height:1.15;word-break:break-word;white-space:pre-line;font-family:${fontStack};">${escapedText}</div>` : ''}
     `;
     document.body.appendChild(node);
     await new Promise((r) => setTimeout(r, 80));
@@ -474,9 +519,43 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '操作' : 'Actions'}</h3>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={onRandomize} className="about-arcade-btn" style={{ width: '100%' }}>
-                <Wand2 size={14} /> {t('quickRandom')}
-              </button>
+              {/* v5: 随机生图 0.85x, 模式 1.15x — 让 "模式: FOMO" 一行排齐, nowrap 兜底 */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <button
+                  onClick={onRandomize}
+                  className="about-arcade-btn"
+                  style={{ flex: '0.85 1 0', minWidth: 0, padding: '12px 12px', whiteSpace: 'nowrap' }}
+                >
+                  <Wand2 size={14} /> {t('quickRandom')}
+                </button>
+                <button
+                  onClick={cycleMode}
+                  className="about-arcade-btn qm-mode-cycle"
+                  style={{
+                    flex: '1.15 1 0', minWidth: 0,
+                    // v5: grid 50/50, "模式" 锁左半中心, 模式名锁右半中心
+                    // → 切 mode 时 "模式" 字位置零偏移, 模式名 center 锁住
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    alignItems: 'center',
+                    padding: '12px 8px',
+                    gap: 0,
+                    position: 'relative', // 容纳 absolute cycle 指示器
+                  }}
+                  title={lang === 'zh' ? '点击切换模式 (循环)' : 'Click to cycle mode'}
+                >
+                  {/* 角标 cycle 提示 — 橙色徽章, 每次点击通过 key remount 触发 spin 一圈 */}
+                  <span key={cycleKey} className="qm-mode-cycle-icon" aria-hidden="true">
+                    <RefreshCw size={13} strokeWidth={2.8} />
+                  </span>
+                  <span style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {lang === 'zh' ? '模式' : 'Mode'}
+                  </span>
+                  <span style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {lang === 'zh' ? MODE_LABELS[mode].zh : MODE_LABELS[mode].en}
+                  </span>
+                </button>
+              </div>
               <button onClick={onToEditor} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
                 {t('quickToEditor')} <ArrowRight size={14} />
               </button>
@@ -510,11 +589,12 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{t('quickText')}</h3>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <input
-                type="text"
+              {/* v4: textarea 支持多行 — 回车换行, 预览/导出走 white-space: pre-line */}
+              <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={t('quickTextPlaceholder')}
+                rows={2}
                 style={{
                   padding: '10px 12px',
                   borderRadius: 10,
@@ -524,6 +604,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   fontSize: 14,
                   fontFamily: 'inherit',
                   outline: 'none',
+                  resize: 'vertical',
+                  minHeight: 44,
+                  lineHeight: 1.4,
                 }}
               />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -534,7 +617,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   {TEXT_LANG_OPTIONS.map((opt) => (
                     <button
                       key={opt.id}
-                      onClick={() => setTextLang(opt.id)}
+                      onClick={() => handleSetTextLang(opt.id)}
                       style={{
                         padding: '6px 12px',
                         fontSize: 12,

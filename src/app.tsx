@@ -11,12 +11,18 @@ import { Collection } from '@/sections/collection';
 import { Toaster } from 'sonner';
 import './app.css';
 
-// 'calibrate' 仅 DEV mode 可达 — lazy + DEV conditional import 让 prod build 完全 tree-shake
+// DEV-only 工具页 — lazy + DEV conditional import 让 prod build 完全 tree-shake
 const CalibrateAnchorLazy = import.meta.env.DEV
   ? lazy(() => import('@/sections/calibrateanchor').then((m) => ({ default: m.CalibrateAnchor })))
   : null;
+const MaterialManageLazy = import.meta.env.DEV
+  ? lazy(() => import('@/sections/materialmanage').then((m) => ({ default: m.MaterialManage })))
+  : null;
+const CaptionManageLazy = import.meta.env.DEV
+  ? lazy(() => import('@/sections/captionmanage').then((m) => ({ default: m.CaptionManage })))
+  : null;
 
-export type Page = 'quick' | 'editor' | 'collection' | 'museum' | 'about' | 'calibrate';
+export type Page = 'quick' | 'editor' | 'collection' | 'museum' | 'about' | 'calibrate' | 'materials' | 'captions';
 
 function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -24,7 +30,8 @@ function App() {
     if (import.meta.env.DEV) {
       const url = new URLSearchParams(window.location.search);
       const p = url.get('page');
-      if (p === 'calibrate' || p === 'quick' || p === 'collection' || p === 'editor' || p === 'museum' || p === 'about') {
+      const allowed: Page[] = ['quick', 'editor', 'collection', 'museum', 'about', 'calibrate', 'materials', 'captions'];
+      if (p && (allowed as string[]).includes(p)) {
         return p as Page;
       }
     }
@@ -50,6 +57,14 @@ function App() {
         ) : page === 'calibrate' && CalibrateAnchorLazy ? (
           <Suspense fallback={<div style={{ flex: 1, padding: 32, color: '#888' }}>加载校准工具...</div>}>
             <CalibrateAnchorLazy onBack={() => setPage('editor')} />
+          </Suspense>
+        ) : page === 'materials' && MaterialManageLazy ? (
+          <Suspense fallback={<div style={{ flex: 1, padding: 32, color: '#888' }}>加载素材管理...</div>}>
+            <MaterialManageLazy onBack={() => setPage('editor')} />
+          </Suspense>
+        ) : page === 'captions' && CaptionManageLazy ? (
+          <Suspense fallback={<div style={{ flex: 1, padding: 32, color: '#888' }}>加载文案管理...</div>}>
+            <CaptionManageLazy onBack={() => setPage('editor')} />
           </Suspense>
         ) : (
           <AboutPanda onBack={() => setPage('editor')} />
