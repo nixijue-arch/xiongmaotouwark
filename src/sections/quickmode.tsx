@@ -386,7 +386,13 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             title={t('quickPickPanda')}
             items={PANDA_HEADS}
             value={pandaId}
-            onChange={(id) => { setImgReady(false); setPandaId(id); }}
+            onChange={(id) => {
+              // 点同一个 panda 直接 return — 避免 setImgReady(false) 但 setPandaId 是 noop
+              // PandaCanvas 不重渲染, onRendered 不触发, caption 永久隐藏
+              if (id === pandaId) return;
+              setImgReady(false);
+              setPandaId(id);
+            }}
             lang={lang}
           />
           <PickPanel
@@ -394,7 +400,13 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             title={t('quickPickFace')}
             items={FACES}
             value={customFace ? '__custom__' : faceId}
-            onChange={(id) => { setImgReady(false); setFaceId(id); setCustomFace(null); }}
+            onChange={(id) => {
+              // 同 face 且无 customFace 直接 return; customFace 存在则点同 id 也算切换 (清 customFace)
+              if (id === faceId && !customFace) return;
+              setImgReady(false);
+              setFaceId(id);
+              setCustomFace(null);
+            }}
             lang={lang}
           />
         </aside>
