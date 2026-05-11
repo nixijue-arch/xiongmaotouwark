@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { MemeProvider } from '@/context/memecontext';
 import { Header } from '@/sections/header';
 import { LeftSidebar } from '@/sections/leftsidebar';
@@ -6,17 +6,40 @@ import { RightSidebar } from '@/sections/rightsidebar';
 import { CanvasArea } from '@/sections/canvasarea';
 import { Museum } from '@/sections/museum';
 import { AboutPanda } from '@/sections/aboutpanda';
+import { QuickMode } from '@/sections/quickmode';
+import { Collection } from '@/sections/collection';
+import { Toaster } from 'sonner';
 import './app.css';
+
+// 'calibrate' 仅 DEV mode 可达 — lazy + DEV conditional import 让 prod build 完全 tree-shake
+const CalibrateAnchorLazy = import.meta.env.DEV
+  ? lazy(() => import('@/sections/calibrateanchor').then((m) => ({ default: m.CalibrateAnchor })))
+  : null;
+
+export type Page = 'quick' | 'editor' | 'collection' | 'museum' | 'about' | 'calibrate';
 
 function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
-  const [page, setPage] = useState<'editor' | 'museum' | 'about'>('editor');
+  const [page, setPage] = useState<Page>(() => {
+    if (import.meta.env.DEV) {
+      const url = new URLSearchParams(window.location.search);
+      const p = url.get('page');
+      if (p === 'calibrate' || p === 'quick' || p === 'collection' || p === 'editor' || p === 'museum' || p === 'about') {
+        return p as Page;
+      }
+    }
+    return 'editor';
+  });
 
   return (
     <MemeProvider>
       <div className="app-shell h-screen w-screen flex flex-col overflow-hidden">
         <Header page={page} setPage={setPage} />
-        {page === 'editor' ? (
+        {page === 'quick' ? (
+          <QuickMode onOpenEditor={() => setPage('editor')} />
+        ) : page === 'collection' ? (
+          <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
+        ) : page === 'editor' ? (
           <div className="editor-layout flex-1 flex overflow-hidden main-content">
             <LeftSidebar />
             <CanvasArea canvasRef={canvasRef} />
@@ -24,9 +47,14 @@ function App() {
           </div>
         ) : page === 'museum' ? (
           <Museum onBack={() => setPage('editor')} setPage={setPage} />
+        ) : page === 'calibrate' && CalibrateAnchorLazy ? (
+          <Suspense fallback={<div style={{ flex: 1, padding: 32, color: '#888' }}>加载校准工具...</div>}>
+            <CalibrateAnchorLazy onBack={() => setPage('editor')} />
+          </Suspense>
         ) : (
           <AboutPanda onBack={() => setPage('editor')} />
         )}
+        <Toaster position="top-right" theme="dark" richColors closeButton />
       </div>
     </MemeProvider>
   );

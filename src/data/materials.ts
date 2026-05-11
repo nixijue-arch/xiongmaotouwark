@@ -6,6 +6,9 @@ export interface Material {
   tags: string[];
   tagsEn: string[];
   faceOffset: { x: number; y: number; w: number; h: number };
+  // 字幕偏移 (px, 350-coord 空间): 正数 = panda 图片往下挪贴近 caption (缩小间距)
+  // 由校准工具调好后 export 到 panda-manual-overrides.ts 永久生效
+  captionOffset?: number;
 }
 
 const defaultOffset = { x: 100, y: 70, w: 250, h: 250 };
@@ -119,4 +122,142 @@ PANDA_HEADS.forEach(p => { pandaOffsetMap[p.id] = p.faceOffset; });
 
 export function getPandaFaceOffset(pandaId: string): { x: number; y: number; w: number; h: number } {
   return pandaOffsetMap[pandaId] || defaultOffset;
+}
+
+// ===== PandaHead 贡献的 46 panda + 65 face (来源 https://pandahead.fun) =====
+import { PANDAHEAD_PANDAS } from './panda-pandahead';
+import { PANDAHEAD_FACES } from './face-pandahead';
+
+/** 完整 panda 池：原 24 + PandaHead 贡献 46 = 70 */
+export const ALL_PANDAS: Material[] = [...PANDA_HEADS, ...PANDAHEAD_PANDAS];
+/** 完整 face 池：原 67 + PandaHead 贡献 65 = 132 */
+export const ALL_FACES: Material[] = [...FACES, ...PANDAHEAD_FACES];
+
+PANDAHEAD_PANDAS.forEach(p => { pandaOffsetMap[p.id] = p.faceOffset; });
+
+// ===== align_panda.py 自动检测的 24 个 native panda anchor overrides =====
+import { PANDA_ALIGN_OVERRIDES } from './panda-align-overrides';
+PANDA_HEADS.forEach(p => {
+  const override = PANDA_ALIGN_OVERRIDES[p.id];
+  if (override) {
+    p.faceOffset = override;
+    pandaOffsetMap[p.id] = override;
+  }
+});
+
+// ===== 手动校准 — 70 个 panda 全部肉眼校准的 anchor (最高优先级) =====
+// 必须迭代 [PANDA_HEADS, PANDAHEAD_PANDAS] 70 个全应用，不能只迭代 PANDA_HEADS
+import { PANDA_MANUAL_OVERRIDES, PANDA_CAPTION_OFFSETS } from './panda-manual-overrides';
+[...PANDA_HEADS, ...PANDAHEAD_PANDAS].forEach((p) => {
+  const manual = PANDA_MANUAL_OVERRIDES[p.id];
+  if (manual) {
+    p.faceOffset = manual;
+    pandaOffsetMap[p.id] = manual;
+  }
+  // 同名 record: caption 偏移 (校准工具 export 时输出, 老版本可能没有 → 兼容缺失)
+  const capOff = PANDA_CAPTION_OFFSETS?.[p.id];
+  if (typeof capOff === 'number') {
+    p.captionOffset = capOff;
+  }
+});
+
+// ===== DEV-only: 实时从 localStorage 读校准工具 override =====
+// 校准工具改了 localStorage 后 dispatch 'pmw-anchor-changed' event；消费方用 useLiveAnchor hook 自动 re-render
+// 注意：localStorage 按 origin 隔离，跨端口不同步（浏览器机制）
+export function getLivePandaFaceOffset(panda: Material): { x: number; y: number; w: number; h: number } {
+  if (import.meta.env.DEV) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
+      const ov = stored[panda.id];
+      if (ov?.faceOffset) return ov.faceOffset;
+    } catch {
+      /* ignore */
+    }
+  }
+  return panda.faceOffset;
+}
+
+// ===== shell 类型: 透明抠图 vs 不透明白底 =====
+// 句跃金抠的 45 张 panda-ph-001..045 都是透明 (face 区透明 + 背景透明, 仅黑廓)
+// 例外: panda-ph-046 没收到抠图, 还是原版不透明
+// LittleRed 原版 panda-01 .. 24 是不透明白底 (face 区是 opaque white)
+// 影响图层叠加: 透明 shell 把 panda 放上面 multiply; 不透明 shell 把 face 放上面 multiply
+const TRANSPARENT_SHELLS = new Set<string>();
+for (let i = 1; i <= 45; i++) {
+  TRANSPARENT_SHELLS.add(`panda-ph-${String(i).padStart(3, '0')}`);
+}
+
+export function isTransparentShell(pandaId: string): boolean {
+  return TRANSPARENT_SHELLS.has(pandaId);
+}
+
+// 给定 panda id, 返回它跟 face 配对时的图层方案
+// - 透明 panda: panda zIndex=5 (上, multiply), face zIndex=1 (下)
+// - 不透明 panda: face zIndex=5 (上, multiply), panda zIndex=1 (下)
+// text 永远 100 不变
+export function getShellLayering(pandaId: string): {
+  pandaZ: number;
+  faceZ: number;
+  pandaBlend: 'multiply' | 'normal';
+  faceBlend: 'multiply' | 'normal';
+} {
+  if (isTransparentShell(pandaId)) {
+    return { pandaZ: 5, faceZ: 1, pandaBlend: 'multiply', faceBlend: 'normal' };
+  }
+  return { pandaZ: 1, faceZ: 5, pandaBlend: 'normal', faceBlend: 'multiply' };
+}
+
+// ===== 素材元数据 (rename / hide) =====
+// DEV 校准工具的"素材管理"可视化改 — 写 localStorage 'pmw-material-meta-v1'
+// 这里只是 helper, 供 leftsidebar / quickmode 等 picker 调用过滤 + 拿覆盖后的 label
+export function getLiveMaterialLabel(m: Material, lang: 'zh' | 'en'): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const meta = JSON.parse(localStorage.getItem('pmw-material-meta-v1') || '{}');
+      const e = meta[m.id];
+      if (e) {
+        if (lang === 'zh' && e.labelCn) return e.labelCn;
+        if (lang === 'en' && e.labelEn) return e.labelEn;
+      }
+    } catch { /* ignore */ }
+  }
+  return lang === 'zh' ? m.labelCn : m.labelEn;
+}
+
+export function isMaterialHidden(m: Material): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const meta = JSON.parse(localStorage.getItem('pmw-material-meta-v1') || '{}');
+    return Boolean(meta[m.id]?.hidden);
+  } catch {
+    return false;
+  }
+}
+
+// 字幕偏移 (px, 350-coord 空间) — 校准工具改, 正数让 panda 图片往下挪
+// 优先级: DEV localStorage (实时校准) > Material.captionOffset (永久 shipped 值) > 0
+export function getLiveCaptionOffset(pandaOrId: Material | string): number {
+  if (typeof window === 'undefined') {
+    return typeof pandaOrId !== 'string' ? (pandaOrId.captionOffset ?? 0) : 0;
+  }
+  const id = typeof pandaOrId === 'string' ? pandaOrId : pandaOrId.id;
+  // 1. DEV 实时 localStorage (仅本地校准)
+  if (import.meta.env.DEV) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
+      const ov = stored[id];
+      if (typeof ov?.captionOffset === 'number') return ov.captionOffset;
+    } catch {
+      /* ignore */
+    }
+  }
+  // 2. Material 永久值 (panda-manual-overrides.ts shipped 到 prod)
+  if (typeof pandaOrId !== 'string' && typeof pandaOrId.captionOffset === 'number') {
+    return pandaOrId.captionOffset;
+  }
+  // 3. 通过 id 查找 (兜底, 给 collection 等只有 id 的调用方)
+  const all = [...PANDA_HEADS, ...PANDAHEAD_PANDAS];
+  const found = all.find(p => p.id === id);
+  if (found && typeof found.captionOffset === 'number') return found.captionOffset;
+  return 0;
 }

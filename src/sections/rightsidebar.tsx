@@ -2,13 +2,15 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
-import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, Upload, X, ChevronUp, Camera, Type, AlignLeft, AlignCenter, AlignRight, Bold, Copy } from 'lucide-react';
-import { PANDA_HEADS, FACES, getPandaFaceOffset } from '@/data/materials';
+import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, Upload, X, ChevronUp, Camera, Type, AlignLeft, AlignCenter, AlignRight, Bold, Copy, Heart } from 'lucide-react';
+import { PANDA_HEADS, ALL_PANDAS, ALL_FACES, getPandaFaceOffset, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
 import { PhotoCropModal } from '@/components/photocropmodal';
+import { SmartExtractModal } from '@/components/smartextractmodal';
+import { calcEditorFaceLayout } from '@/lib/composeMeme';
+// 编辑器推荐文字 / 随机文案 ← 与 QuickMode 共享同一个池
+import { RECOMMEND_TEXTS_ZH as ZH_TEXTS, RECOMMEND_TEXTS_EN as EN_TEXTS } from '@/data/quickModeTexts';
+import { toast } from 'sonner';
 
-const ZH_TEXTS = ['在？V我50','我不做人啦！','就这？','你不对劲','尊嘟假嘟','蚌埠住了','这波在大气层','笑死我了','开始你的表演','啊对对对','我真的会谢','无所谓我会出手','这就是中国速度','啊这','你在教我做事？','问题不大','我直接自信','这很合理','有内味了','气氛到这了','家人们谁懂啊','这班不上也罢','我说的是真的','这就是格局','我是废物','我裂开了','太对了哥','反杀反杀！','？？？','我先run了','上班哪有不疯的','这谁顶得住','差不多得了','这合理吗','我已经报警了','再装我就哭了','不可能的','你礼貌吗','给跪了','打工人打工魂','开摆','绷不住了','汗流浃背了','人间真实','笑不活了','绝了','6','小丑竟是我自己','速速撤退','毁灭吧','一键三连','下次一定','高产似那啥','cargo降落伞','我太难了','高手过招','有点意思','不太对劲','这就是实力','啊对对对','梦幻联动','血赚','亏麻了','原地起飞','给我整不会了','离谱','抽象','狠狠拿捏了','重拳出击','纯路人','理性讨论','有一说一','确实','龟龟','吓得我水都喷了','很有精神','一般般啦','祖安钢琴家','这波我必C','你完了','听我狡辩','满脸写着开心','为什么总是我','麻了','我悟了','佛了','杠精退散','老实人','正能量嗷','格局打开','毕竟我也不是什么恶魔','说出来你可能不信','此时一位靓仔路过','先赌为敬','重在参与','赢了会所嫩模','输了下海干活','问题不大'];
-
-const EN_TEXTS = ['V me 50 plz','I quit!','Really?','You sus','No cap fr fr','I cant even','Big brain move','LMAO','Show me what you got','Yeah sure buddy','Im dead','I got this','China speed','Oh no','You telling ME?','No problemo','Straight up confident','Makes sense','Thats the vibe','It is what it is','No shot','Thats crazy','Say less','Bet','Slay','I cant breathe','On god','Periodt','Not even close','Im out','Touch grass','Skill issue','Ratio','Cooked','GG no re','Shaking rn','Bruh','Who asked','Sir this is a Wendys','RIP','F in the chat','Just vibing','Built different','Unhinged','Delulu','Main character energy','Rent free','Gatekeeping','Gaslight gatekeep girlboss','Understood the assignment','Thats suspicious','Its giving','Yassified','Aesthetic','Sheesh','Bussin','Mid','Based','Cringe','Doomer','Goblin mode','Rizz','GigaChad','Absolute cinema','Im cooked','Down bad','W rizz','L take','NPC behavior','Caught in 4k','Hes so real','Not the main character','Fumble','Down horrendous','Its joever','Mogging','Looksmaxxing','Mewing','Huzz','Edging','Ohio','Only in Ohio','Griddy','Suiii','Carti better','Dreamybull','Ambatakum','Quandale dingle','What the sigma','Baby gronk','Livvy dunne rizzing up baby gronk','Fanum tax','Skibidi toilet','Gyatt','Looksmaxxed','Mog or be mogged','Edge or be edged','High T','Low value male','High value male','Alpha wolf','Beta cuck','Sigma grindset','Top G','Matrix is real','Wake up babe','New just dropped','Fake it till you make it','Suffering from success','Another one','You smart','You loyal','I appreciate you','Major key'];
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
 const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const CAPTURE_SIZE = 500;
@@ -215,13 +217,14 @@ function detectContentBounds(canvas: HTMLCanvasElement): CropRect {
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return PANDA_HEADS.some(p => p.id === name);
+  // 用 ALL_PANDAS (70 = 24 native + 46 ph) 不是只 PANDA_HEADS
+  return ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return FACES.some(f => f.id === name) || name.startsWith('custom-face-');
+  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
@@ -296,7 +299,7 @@ function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
 }
 
 export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
-  const { state, dispatch, t, generateId } = useMeme();
+  const { state, dispatch, t, generateId, draftSlots, saveDraft } = useMeme();
   const isMobile = useIsMobile();
   const [isExporting, setIsExporting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -305,6 +308,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [previewCrop, setPreviewCrop] = useState<CropRect>({ x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE });
   const [sheetOpen, setSheetOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [smartModalOpen, setSmartModalOpen] = useState(false);
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const previewRequestIdRef = useRef(0);
@@ -345,46 +349,115 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleClearCanvas = () => dispatch({ type: 'CLEAR_CANVAS' });
 
-  const handleRandomCombo = () => {
-    const randomPanda = PANDA_HEADS[Math.floor(Math.random() * PANDA_HEADS.length)];
-    const randomFace = FACES[Math.floor(Math.random() * FACES.length)];
+  // 保存当前编辑器内容为草图 — 写入 draftSlots (这是 Collection + 编辑器本地草稿的唯一数据源)
+  const handleSaveDraft = useCallback(() => {
+    const pandaEl = state.elements.find(isPanda) as ImageElement | undefined;
+    const faceEl = state.elements.find(isFace) as ImageElement | undefined;
+    if (!pandaEl || !faceEl) {
+      toast.error(state.language === 'zh' ? '需要至少有 panda 和 face 才能存草图' : 'Need at least panda + face to save');
+      return;
+    }
+    const slotId = `draft-${Date.now()}-${draftSlots.length + 1}`;
+    void saveDraft(slotId);
+    toast.success(state.language === 'zh' ? '已存到草图（左上角本地草稿 + 草图 tab 同步）' : 'Saved to drafts');
+  }, [state.elements, state.language, saveDraft, draftSlots.length]);
+
+  // 预览自动刷新 — elements 变化后 debounce 600ms 重生成（user 反馈手动按钮繁琐）
+  const elementsKey = state.elements.map(e => e.id + ':' + ((e as ImageElement).src ?? '') + ':' + (e.type === 'text' ? (e as TextElement).text : '')).join('|');
+  const prevKeyRef = useRef('');
+
+  // 随机组合 — 用 calcEditorFaceLayout 自动定位 face + 素材池 ALL_* (70+132 全集)
+  const handleRandomCombo = async () => {
+    const randomPanda = ALL_PANDAS[Math.floor(Math.random() * ALL_PANDAS.length)];
+    const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
     const texts = state.language === 'zh' ? ZH_TEXTS : EN_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
-    const offset = randomPanda.faceOffset;
-    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false };
-    const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: offset.x, y: offset.y, width: offset.w, height: offset.h, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
-    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    const faceLayout = await calcEditorFaceLayout({
+      pandaSrc: randomPanda.src,
+      faceSrc: randomFace.src,
+      faceOffset350: getLivePandaFaceOffset(randomPanda),
+    });
+    // 图层方案根据 panda 类型自动决定 (透明 ↔ 不透明)
+    const layering = getShellLayering(randomPanda.id);
+    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false };
+    const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height, rotation: 0, opacity: 1, zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: false };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'CLEAR_CANVAS' });
-    dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
     dispatch({ type: 'ADD_ELEMENT', element: faceEl });
+    dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     if (isMobile) setSheetOpen(false);
   };
 
-  const handleSwitchImage = () => {
+  // 一键换图 — 切 panda 时 face 跟着重新定位到新 panda anchor
+  // 视觉无参差: 先 preload 新图 (decode 完成) 再 dispatch, 不然 src 变了但 img 还在加载,
+  // 旧图先按新 x/y/w/h 重排显示一帧 = 抖动
+  const preloadImg = (src: string) => new Promise<void>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => resolve();
+    img.src = src;
+  });
+  const handleSwitchImage = async () => {
     const currentPanda = state.elements.find(isPanda) as ImageElement | undefined;
     const currentFace = state.elements.find(isFace) as ImageElement | undefined;
-    if (currentPanda) {
-      const otherPandas = PANDA_HEADS.filter(p => p.id !== currentPanda.name);
-      if (otherPandas.length > 0) {
-        const newPanda = otherPandas[Math.floor(Math.random() * otherPandas.length)];
-        dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: newPanda.src, name: newPanda.id } });
+    if (!currentPanda && !currentFace) { handleRandomCombo(); return; }
+    const newPanda = currentPanda
+      ? (() => { const others = ALL_PANDAS.filter(p => p.id !== currentPanda.name); return others.length ? others[Math.floor(Math.random() * others.length)] : null; })()
+      : null;
+    const newFace = currentFace
+      ? (() => { const others = ALL_FACES.filter(f => f.id !== currentFace.name); return others.length ? others[Math.floor(Math.random() * others.length)] : null; })()
+      : null;
+    // 并行 preload 新图 + 算 layout, 全就绪再 dispatch
+    const preloads: Promise<unknown>[] = [];
+    if (newPanda) preloads.push(preloadImg(newPanda.src));
+    if (newFace) preloads.push(preloadImg(newFace.src));
+    let faceLayout: { x: number; y: number; width: number; height: number } | null = null;
+    let anchorPandaForFace: typeof ALL_PANDAS[number] | undefined;
+    if (newFace && currentFace) {
+      anchorPandaForFace = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda?.name);
+      if (anchorPandaForFace) {
+        preloads.push(
+          calcEditorFaceLayout({ pandaSrc: anchorPandaForFace.src, faceSrc: newFace.src, faceOffset350: getLivePandaFaceOffset(anchorPandaForFace) })
+            .then((l) => { faceLayout = l; })
+        );
       }
     }
-    if (currentFace) {
-      const otherFaces = FACES.filter(f => f.id !== currentFace.name);
-      if (otherFaces.length > 0) {
-        const newFace = otherFaces[Math.floor(Math.random() * otherFaces.length)];
+    await Promise.all(preloads);
+    if (newPanda && currentPanda) {
+      // 换 panda 后图层方案可能变 (透明 ↔ 不透明)
+      const lay = getShellLayering(newPanda.id);
+      dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: newPanda.src, name: newPanda.id, zIndex: lay.pandaZ, blendMode: lay.pandaBlend } });
+      if (currentFace) {
+        // 同步更新 face 的图层
+        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { zIndex: lay.faceZ, blendMode: lay.faceBlend } });
+      }
+    }
+    if (newFace && currentFace) {
+      if (anchorPandaForFace && faceLayout) {
+        const lay = getShellLayering(anchorPandaForFace.id);
+        const l = faceLayout as { x: number; y: number; width: number; height: number };
+        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: l.x, y: l.y, width: l.width, height: l.height, zIndex: lay.faceZ, blendMode: lay.faceBlend } });
+      } else {
         dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id } });
       }
     }
-    if (!currentPanda && !currentFace) { handleRandomCombo(); return; }
     if (currentPanda && !currentFace) {
-      const offset = getPandaFaceOffset(currentPanda.name);
-      const newFace = FACES[Math.floor(Math.random() * FACES.length)];
-      const faceEl: ImageElement = { id: generateId(), type: 'image', src: newFace.src, name: newFace.id, x: offset.x, y: offset.y, width: offset.w, height: offset.h, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
-      dispatch({ type: 'ADD_ELEMENT', element: faceEl });
+      const anchorPanda = ALL_PANDAS.find(p => p.id === currentPanda.name);
+      const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
+      if (anchorPanda) {
+        const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: randomFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
+        const lay = getShellLayering(anchorPanda.id);
+        const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, rotation: 0, opacity: 1, zIndex: lay.faceZ, blendMode: lay.faceBlend, flipX: false };
+        dispatch({ type: 'ADD_ELEMENT', element: faceEl });
+      }
     }
+    // 兜底: 老草稿里 text 可能是 zIndex < 100, 换图后会被新 panda(5) 盖. 强制拉顶
+    state.elements.forEach(el => {
+      if (el.type === 'text' && el.zIndex < 100) {
+        dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: 100 } });
+      }
+    });
   };
 
   const handleRecommendText = () => {
@@ -394,7 +467,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (existingText) {
       dispatch({ type: 'UPDATE_ELEMENT', id: existingText.id, updates: { text: randomText } });
     } else {
-      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+      const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
       dispatch({ type: 'ADD_ELEMENT', element: textEl });
     }
   };
@@ -404,7 +477,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const defaultText = state.language === 'zh' ? '点击输入文字' : 'Click to enter text';
     const text = window.prompt(promptText, defaultText);
     if (!text || text.trim() === '') return;
-    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     dispatch({ type: 'SELECT_ELEMENT', id: textEl.id });
   };
@@ -507,18 +580,22 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     let currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (!currentPanda) {
       const defaultPanda = PANDA_HEADS[0];
+      const defaultLay = getShellLayering(defaultPanda.id);
       currentPanda = {
         id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
-        x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+        x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1,
+        zIndex: defaultLay.pandaZ, blendMode: defaultLay.pandaBlend, flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: currentPanda });
     }
     const offset = facePos || getPandaFaceOffset(currentPanda.name);
     const faceCount = state.elements.filter(isFace).length;
+    const customLay = getShellLayering(currentPanda.name);
     const element: ImageElement = {
       id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
       x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
-      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: customLay.faceZ, blendMode: customLay.faceBlend, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
     setModalOpen(false);
@@ -541,6 +618,19 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       }
     } catch (err) { console.error('Preview failed:', err); }
   }, [state.elements]);
+
+  // 预览自动跟随 elements 变化 (debounce 600ms 防频繁 render 抖动)
+  useEffect(() => {
+    if (elementsKey === prevKeyRef.current) return;
+    prevKeyRef.current = elementsKey;
+    if (state.elements.length === 0) {
+      if (previewUrl) setPreviewUrl('');
+      return;
+    }
+    const t = setTimeout(() => { handleRefreshPreview(); }, 600);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsKey]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -795,9 +885,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                           backgroundColor: (state.elements.find(e => e.id === state.selectedId) as TextElement).textAlign === align ? '#FF5E00' : '#2a2a2a',
                           color: '#fff',
                         }}>
-                        {align === 'left' && '左'}
-                        {align === 'center' && '中'}
-                        {align === 'right' && '右'}
+                        {state.language === 'zh'
+                          ? (align === 'left' ? '左' : align === 'center' ? '中' : '右')
+                          : (align === 'left' ? 'L' : align === 'center' ? 'C' : 'R')}
                       </button>
                     ))}
                     <button
@@ -811,7 +901,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                         color: '#fff',
                       }}
                     >
-                      粗
+                      {state.language === 'zh' ? '粗' : 'B'}
                     </button>
                   </div>
                   <button
@@ -828,10 +918,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 mb-4">
               {!state.museumEditMode && (
-                <>
-                  <button onClick={handleRandomCombo} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#FF5E00' }}>{t('randomCombo')}</button>
-                  <button onClick={handleSwitchImage} disabled={state.elements.filter(e => e.type === 'image').length === 0} className="py-3 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: '#0080FF' }}>{t('switchImage')}</button>
-                </>
+                <button onClick={handleSwitchImage} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#0080FF' }}>{t('switchImage')}</button>
               )}
               <button onClick={handleRecommendText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#00CC66' }}>{t('recommendText')}</button>
               <button onClick={handleAddText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#9333EA' }}>{t('addText')}</button>
@@ -844,8 +931,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   <button onClick={() => setModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#F59E0B' }}>
                     <Camera size={14} />{t('customFace')}
                   </button>
+                  <button onClick={() => setSmartModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#10B981' }}>
+                    <Sparkles size={14} />{state.language === 'zh' ? '智能提取' : 'Smart Extract'}
+                  </button>
                 </>
               )}
+              <button onClick={handleSaveDraft} disabled={state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: '#FF5E00' }}>
+                <Heart size={14} />{state.language === 'zh' ? '存草图' : 'Save'}
+              </button>
               <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}>
                 {isExporting ? '...' : t('download')}
               </button>
@@ -889,6 +982,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
           onConfirm={handleCustomFaceConfirm}
+          language={state.language}
+        />
+        <SmartExtractModal
+          isOpen={smartModalOpen}
+          onClose={() => setSmartModalOpen(false)}
+          onConfirm={(dataUrl) => handleCustomFaceConfirm(dataUrl)}
           language={state.language}
         />
       </>
@@ -1203,10 +1302,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       <div className="p-4 win7-panel right-sidebar-static-panel">
         <div className="space-y-2">
           {!state.museumEditMode && (
-            <>
-              <button onClick={handleRandomCombo} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}><Shuffle size={16} />{t('randomCombo')}</button>
-              <button onClick={handleSwitchImage} disabled={state.elements.filter(e => e.type === 'image').length === 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] disabled:opacity-40" style={{ backgroundColor: '#0080FF' }}><Image size={16} />{t('switchImage')}</button>
-            </>
+            <button onClick={handleSwitchImage} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}><Shuffle size={16} />{t('switchImage')}</button>
           )}
           <button onClick={handleRecommendText} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#00CC66' }}><MessageCircle size={16} />{t('recommendText')}</button>
           <button onClick={handleAddText} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#9333EA' }}><Type size={16} />{state.language === 'zh' ? '添加文字' : 'Add Text'}</button>
@@ -1215,6 +1311,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#8B5CF6' }}><Upload size={16} />{t('uploadAsset')}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" /></label>
               <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '支持拖拽素材到画布' : 'Drag assets onto the canvas'}</p>
               <button onClick={() => setModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#F59E0B' }}><Camera size={16} />{t('customFace')}</button>
+              <button onClick={() => setSmartModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#10B981' }}><Sparkles size={16} />{state.language === 'zh' ? '智能提取人脸' : 'Smart Extract'}</button>
               <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸 · 支持 JPG / PNG / GIF' : 'Upload photo to auto-generate panda face · Supports JPG / PNG / GIF'}</p>
             </>
           )}
@@ -1224,6 +1321,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       {/* Social Share + Footer Actions */}
       <div className="p-4 space-y-2 mt-auto win7-panel win7-panel-footer">
         <button onClick={handleClearCanvas} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-30" style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}><Trash2 size={14} />{t('clearCanvas')}</button>
+        <button onClick={handleSaveDraft} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] disabled:opacity-50" style={{ backgroundColor: '#FF5E00' }}><Heart size={14} />{state.language === 'zh' ? '存到草图' : 'Save to Drafts'}</button>
         <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.02] disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}><Download size={16} />{isExporting ? '...' : t('download')}</button>
 
         {/* Social Share Buttons - icon only with tooltip */}
@@ -1263,6 +1361,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConfirm={handleCustomFaceConfirm}
+        language={state.language}
+      />
+      <SmartExtractModal
+        isOpen={smartModalOpen}
+        onClose={() => setSmartModalOpen(false)}
+        onConfirm={(dataUrl) => handleCustomFaceConfirm(dataUrl)}
         language={state.language}
       />
     </aside>

@@ -454,14 +454,40 @@
 
 .sidebar-scroll {
   overflow-y: auto;
+  /* 锁死横向: 不允许水平滚动 (修中键拖出现左右滚动 + 底部横向滚动条的 bug) */
+  overflow-x: hidden;
   flex: 1;
   padding: 0 12px 12px;
+  /* 细滚动条 — 用户反馈需要看到滚动指示, 但又不希望抢太多宽度 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(10, 78, 151, 0.45) transparent;
+  /* 始终保留滚动条空间 (让有/无滚动时内容宽度都一致) */
+  scrollbar-gutter: stable;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 7px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(10, 78, 151, 0.4);
+  border-radius: 4px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(10, 78, 151, 0.65);
 }
 
 .sidebar-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
+  /* 防 grid cell 的 content (如长 label / 长 tag) 撑爆容器导致横向滚动 */
+  min-width: 0;
+}
+.sidebar-grid > * {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .material-card {
@@ -2468,9 +2494,14 @@ body {
 }
 
 .draft-card {
-  padding: 14px;
+  /* 关键: padding-right 比 left 多 7px 来匹配 panda/face 面板的 scrollbar-gutter (7px)
+     panda section 用 scrollbar-gutter:stable 永远保留 7px 右侧空隙
+     draft-card 没滚动条但要保持 content 右边和 panda content 右边对齐
+     不然按钮和下方 grid 看起来宽度不一致 */
+  padding: 12px 19px 12px 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08));
   border-bottom: 1px solid var(--retro-stroke);
+  flex-shrink: 0;
 }
 
 .draft-card-header,
@@ -2962,7 +2993,8 @@ textarea {
 }
 
 .draft-card-header {
-  margin: -14px -14px 12px;
+  /* 反向相消 padding: 12px 19px 12px 12px 让 titlebar 贴到面板边缘 */
+  margin: -12px -19px 12px -12px;
 }
 
 .sidebar-section-header {

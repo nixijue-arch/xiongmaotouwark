@@ -1,8 +1,9 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair } from 'lucide-react';
 import { useState } from 'react';
+import type { Page } from '@/app';
 
-export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about'; setPage: (page: 'editor' | 'museum' | 'about') => void }) {
+export function Header({ page, setPage }: { page: Page; setPage: (page: Page) => void }) {
   const { state, dispatch, t } = useMeme();
   const [copied, setCopied] = useState(false);
   const activeLinkClass = 'header-link header-link-active';
@@ -45,12 +46,28 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
         </div>
 
         <button
+          onClick={() => setPage('quick')}
+          className={page === 'quick' ? activeLinkClass : 'header-link'}
+          title={state.language === 'zh' ? '快速生图' : 'Quick'}
+        >
+          <Zap size={14} />
+          <span className="link-label">{state.language === 'zh' ? '快速' : 'Quick'}</span>
+        </button>
+        <button
           onClick={() => setPage('editor')}
           className={page === 'editor' ? activeLinkClass : 'header-link'}
           title={state.language === 'zh' ? '表情包编辑器' : 'Meme Editor'}
         >
           <PenTool size={14} />
           <span className="link-label">{state.language === 'zh' ? '编辑器' : 'Editor'}</span>
+        </button>
+        <button
+          onClick={() => setPage('collection')}
+          className={page === 'collection' ? activeLinkClass : 'header-link'}
+          title={state.language === 'zh' ? '草图' : 'Drafts'}
+        >
+          <FolderOpen size={14} />
+          <span className="link-label">{state.language === 'zh' ? '草图' : 'Drafts'}</span>
         </button>
         <button
           onClick={() => setPage('museum')}
@@ -68,6 +85,21 @@ export function Header({ page, setPage }: { page: 'editor' | 'museum' | 'about';
           <BookOpen size={14} />
           <span className="link-label">{state.language === 'zh' ? '了解' : 'About'}</span>
         </button>
+
+        {/* DEV-only 校准工具入口 */}
+        {import.meta.env.DEV && (
+          <button
+            onClick={() => setPage('calibrate')}
+            className="header-link"
+            style={page === 'calibrate'
+              ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' }
+              : { borderStyle: 'dashed', opacity: 0.7 }}
+            title="表情对齐工具 (DEV only)"
+          >
+            <Crosshair size={14} />
+            <span className="link-label">校准</span>
+          </button>
+        )}
 
         {/* X Community Link - desktop only */}
         <a

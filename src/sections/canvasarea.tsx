@@ -5,6 +5,10 @@ import { useIsMobile } from '@/hooks/usemediaquery';
 import Draggable from 'react-draggable';
 import { Eraser, RotateCcw, LogOut, Save, Undo2 } from 'lucide-react';
 
+// blendMode 直接读 element.blendMode (创建时已根据 shell 透明/不透明 决定)
+// 不再用硬编码 isPandaElement / isFaceElement 判定
+// 见 materials.ts 的 getShellLayering()
+
 /* ========== DraggableImage ========== */
 interface DraggableImageProps {
   element: ImageElement;
@@ -191,7 +195,8 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
 
 function DraggableImage({ element, isSelected, onSelect, onStartEdit }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
-  const { dispatch } = useMeme();
+  const { dispatch, state } = useMeme();
+  const lang = state.language;
   const [visibleBounds, setVisibleBounds] = useState(DEFAULT_VISIBLE_BOUNDS);
   const rhNW = useResizeHandler(element, 'nw');
   const rhN  = useResizeHandler(element, 'n');
@@ -245,8 +250,19 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
         onTouchStart={handleElementPointerStart}
       >
         <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
+          {/* panda 元素用 mix-blend-mode: multiply
+              panda 在 face 之上 (zIndex panda > face)
+              panda 白色内部 × face = face (face 透过来)
+              panda 黑色 silhouette × face = black (廓盖 face)
+              图层面板按 text > panda > face 排序 (符合 user 要求) */}
           <img src={element.src} alt="element" className="block max-w-none" draggable={false}
-            style={{ width: element.width, height: element.height, transform: element.flipX ? 'scaleX(-1)' : 'none' }}
+            style={{
+              width: element.width,
+              height: element.height,
+              transform: element.flipX ? 'scaleX(-1)' : 'none',
+              // 直接读 element.blendMode (创建时根据 shell 透明/不透明 设置好)
+              mixBlendMode: element.blendMode === 'multiply' ? 'multiply' : 'normal',
+            }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
           {isSelected && (
@@ -277,7 +293,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                   style={{ backgroundColor: '#0080FF' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  编辑
+                  {lang === 'zh' ? '编辑' : 'Edit'}
                 </button>
                 <button
                   onClick={(e) => {
@@ -289,7 +305,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                   style={{ backgroundColor: '#EF4444' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  删除
+                  {lang === 'zh' ? '删除' : 'Delete'}
                 </button>
               </div>
             </>
@@ -413,12 +429,17 @@ function DraggableText({ element, isSelected, onSelect }: {
             onBlur={commitEdit}
             onKeyDown={handleInputKeyDown}
             onClick={(e) => e.stopPropagation()}
-            className="px-2 py-1 bg-transparent border-none outline-none whitespace-nowrap block"
+            // size 属性比 minWidth+block 更稳定 — input 宽度直接跟着 char 数走, 不会撑出 canvas
+            // 删 block / whitespace-nowrap, 用 inline-block 默认行为 + width: max-content 兜底
+            size={Math.max(4, (editText.length || 1) + 1)}
+            className="px-2 py-1 bg-transparent border-none outline-none"
             style={{
               ...textStyle,
               caretColor: '#FF5E00',
-              minWidth: Math.max(80, (editText.length || 1) * element.fontSize * 0.65),
+              // 限死 max-width 防超长文字撑爆 canvas / 推动 editor-layout
+              maxWidth: 440,
               boxShadow: 'inset 0 -2px 0 #FF5E00',
+              boxSizing: 'border-box',
             }}
           />
         ) : (
@@ -869,7 +890,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         {state.elements.length === 0 && !editingEl && (
           <div className="canvas-empty-state">
             <div className="canvas-empty-badge canvas-empty-badge-top">
-              连击 COMBO x3
+              {state.language === 'zh' ? '连击 COMBO x3' : 'COMBO x3'}
             </div>
             <div className="canvas-empty-center">
               <div className="canvas-empty-panda">🐼</div>
@@ -949,14 +970,14 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   style={{ backgroundColor: editTool === 'brush' ? '#FF5E00' : '#2a2a2a', color: '#fff' }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  画笔
+                  {state.language === 'zh' ? '画笔' : 'Brush'}
                 </button>
                 <button
                   onClick={() => setEditTool('eraser')}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium"
                   style={{ backgroundColor: editTool === 'eraser' ? '#EF4444' : '#2a2a2a', color: '#fff' }}
                 >
-                  <Eraser size={10} />橡皮擦
+                  <Eraser size={10} />{state.language === 'zh' ? '橡皮擦' : 'Eraser'}
                 </button>
                 <input
                   type="color"
@@ -967,7 +988,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   disabled={editTool !== 'brush'}
                 />
                 <div className="flex items-center gap-1">
-                  <span className="text-[9px]" style={{ color: '#888' }}>粗细</span>
+                  <span className="text-[9px]" style={{ color: '#888' }}>{state.language === 'zh' ? '粗细' : 'Size'}</span>
                   <input
                     type="range"
                     min={2}
@@ -987,33 +1008,33 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   onClick={handleFinishEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
                   style={{ backgroundColor: '#00CC66' }}
-                  title="完成编辑"
+                  title={state.language === 'zh' ? '完成编辑' : 'Finish'}
                 >
-                  <Save size={10} />完成
+                  <Save size={10} />{state.language === 'zh' ? '完成' : 'Done'}
                 </button>
                 <button
                   onClick={handleUndoEdit}
                   disabled={editHistory.length <= 1}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white disabled:opacity-30"
                   style={{ backgroundColor: '#0080FF' }}
-                  title="撤回上一步"
+                  title={state.language === 'zh' ? '撤回上一步' : 'Undo'}
                 >
-                  <Undo2 size={10} />撤回
+                  <Undo2 size={10} />{state.language === 'zh' ? '撤回' : 'Undo'}
                 </button>
                 <button
                   onClick={exitEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
                   style={{ backgroundColor: '#888' }}
                 >
-                  <LogOut size={10} />退出
+                  <LogOut size={10} />{state.language === 'zh' ? '退出' : 'Exit'}
                 </button>
                 <button
                   onClick={handleClearEdit}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-white"
                   style={{ backgroundColor: '#2a2a2a' }}
-                  title="清空所有编辑"
+                  title={state.language === 'zh' ? '清空所有编辑' : 'Clear all'}
                 >
-                  <RotateCcw size={10} />清空
+                  <RotateCcw size={10} />{state.language === 'zh' ? '清空' : 'Clear'}
                 </button>
               </div>
             </div>

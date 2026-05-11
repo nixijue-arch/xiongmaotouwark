@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { useMeme } from '@/context/memecontext';
+import { useMemo, useState } from 'react';
+import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
+import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
-import { PANDA_HEADS, FACES, getPandaFaceOffset } from '@/data/materials';
+import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
+import { calcEditorFaceLayout, bboxCropImage } from '@/lib/composeMeme';
+import { PandaCanvas } from '@/components/pandacanvas';
+import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
 import type { Material } from '@/data/materials';
@@ -13,13 +17,14 @@ function isElementActive(elements: MemeElement[], itemId: string): boolean {
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return PANDA_HEADS.some(p => p.id === name);
+  // 也认 'panda-head' fallback name（handleAddFace 兜底用）
+  return name === 'panda-head' || ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return FACES.some(f => f.id === name);
+  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
@@ -47,8 +52,29 @@ function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): M
   });
 }
 
+// 从 draftSlot 抽出 panda 信息给预览渲染用
+function getSlotPreviewInfo(slot: DraftSlot) {
+  const elements = slot.state?.elements ?? [];
+  const pandaEl = elements.find(e => e.type === 'image' && isPanda(e)) as ImageElement | undefined;
+  const faceEl = elements.find(e => e.type === 'image' && isFace(e)) as ImageElement | undefined;
+  if (!pandaEl) return null;
+  const pandaInPool = ALL_PANDAS.find(p => p.id === pandaEl.name);
+  const faceOffset = pandaInPool
+    ? getLivePandaFaceOffset(pandaInPool)
+    : (faceEl
+        ? { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height }
+        : { x: 100, y: 70, w: 250, h: 250 });
+  return {
+    pandaSrc: pandaInPool?.src ?? pandaEl.src,
+    pandaId: pandaInPool?.id ?? pandaEl.name,
+    faceSrc: faceEl ? (ALL_FACES.find(f => f.id === faceEl.name)?.src ?? faceEl.src) : '',
+    faceOffset,
+  };
+}
+
 export function LeftSidebar() {
   const { state, dispatch, generateId, draftSlots, saveDraft, loadDraft, clearDraft } = useMeme();
+
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'panda' | 'face'>('panda');
@@ -56,10 +82,26 @@ export function LeftSidebar() {
   const [faceSearch, setFaceSearch] = useState('');
 
   const lang = state.language;
-  const filteredPandas = filterMaterials(PANDA_HEADS, pandaSearch, lang);
-  const filteredFaces = filterMaterials(FACES, faceSearch, lang);
-  const savedDraftSlots = draftSlots.filter(slot => slot.state);
-  const nextDraftSlot = draftSlots.find(slot => !slot.state) ?? draftSlots[draftSlots.length - 1];
+  // 编辑器素材池跟 QuickMode / Collection 一致 — 用 ALL_* (70 panda + 132 face)
+  // 之前只用 LittleRed 24+67 子集，PandaHead 46+65 不在 sidebar 里
+  const filteredPandas = filterMaterials(ALL_PANDAS, pandaSearch, lang);
+  const filteredFaces = filterMaterials(ALL_FACES, faceSearch, lang);
+  // 动态 schema：所有 draftSlots 都已经 state !== null（loadDraftSlots 已过滤），直接全用
+  const savedDraftSlots = draftSlots;
+
+  // 下一个草稿 id：未满时新建；满 40 时覆盖最旧的
+  const { nextDraftSlotId, nextDraftLabel } = useMemo(() => {
+    if (draftSlots.length === 0) return { nextDraftSlotId: 'draft-1', nextDraftLabel: '草稿1' };
+    if (draftSlots.length < DRAFT_SLOT_MAX) {
+      const idx = draftSlots.length + 1;
+      return { nextDraftSlotId: `draft-${Date.now()}-${idx}`, nextDraftLabel: `草稿${idx}` };
+    }
+    // 已满 — 找最旧的覆盖
+    const oldest = draftSlots.reduce((min, slot) => ((slot.updatedAt ?? 0) < (min.updatedAt ?? 0) ? slot : min), draftSlots[0]);
+    return { nextDraftSlotId: oldest.id, nextDraftLabel: oldest.name };
+  }, [draftSlots]);
+
+  // 已不需要单独"存到草图本"逻辑 — saveDraft 写入的 draftSlot 就是 Collection 的数据源
 
   const handleUseDraft = (slotId: string, slotName: string) => {
     const confirmed = window.confirm(
@@ -83,36 +125,88 @@ export function LeftSidebar() {
 
   const handleAddPandaHead = (src: string, id: string) => {
     const pandaCount = state.elements.filter(isPanda).length;
+    const layering = getShellLayering(id);
     const element: ImageElement = {
       id: generateId(), type: 'image', src, name: id,
       x: Math.min(150, 75 + pandaCount * 18),
       y: Math.min(120, 50 + pandaCount * 18),
       width: 350, height: 350,
-      rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: layering.pandaZ,
+      blendMode: layering.pandaBlend,
+      flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
     if (isMobile) setSheetOpen(false);
   };
 
-  const handleAddFace = (src: string, id: string) => {
-    let pandaId = 'panda-head';
+  // 加 face — 先 bbox-crop 原 face PNG 去掉透明 padding, 再用 cropped 尺寸算 anchor 内位置
+  // 这样保证 face 元素尺寸 = 实际内容尺寸, 在 panda anchor 区域里精确就位
+  // (修 sunglasses/extreme padding face 在编辑器里"过大或错位"的 bug)
+  // 如果没 panda 在画布上, 自动塞一个默认 panda (用 ALL_PANDAS[0] = panda-01, 有完整 anchor 数据)
+  const handleAddFace = async (src: string, id: string) => {
+    let pandaId: string;
     const currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (currentPanda) {
       pandaId = currentPanda.name;
     } else {
+      // 没 panda → 自动加一个默认 (用第一个有 calibration 的 panda, anchor 数据齐全)
+      const defaultPanda = ALL_PANDAS[0];
+      pandaId = defaultPanda.id;
+      const defaultLayering = getShellLayering(defaultPanda.id);
       const pandaElement: ImageElement = {
-        id: generateId(), type: 'image', src: './assets/panda-head.png', name: pandaId,
+        id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
         x: 75, y: 50, width: 350, height: 350,
-        rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+        rotation: 0, opacity: 1,
+        zIndex: defaultLayering.pandaZ,
+        blendMode: defaultLayering.pandaBlend,
+        flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
-    const offset = getPandaFaceOffset(pandaId);
+    const anchorPanda = ALL_PANDAS.find(p => p.id === pandaId);
+    // 1. bbox 紧凑裁剪 face PNG (去透明边)
+    let croppedSrc = src;
+    let croppedW = 0, croppedH = 0;
+    try {
+      const cropped = await bboxCropImage(src);
+      croppedSrc = cropped.dataUrl;
+      croppedW = cropped.w;
+      croppedH = cropped.h;
+    } catch { /* 失败用原 src 兜底 */ }
+
+    // 2. 算元素在 panda anchor 里的位置 + 尺寸 (按 cropped 比例 contain 进 anchor)
+    let layout = { x: 100, y: 70, width: 250, height: 250 };
+    if (anchorPanda && croppedW > 0 && croppedH > 0) {
+      const anchor = getLivePandaFaceOffset(anchorPanda);
+      const faceFill = 0.95;
+      const fScale = Math.min(anchor.w / croppedW, anchor.h / croppedH) * faceFill;
+      const dispW = Math.round(croppedW * fScale);
+      const dispH = Math.round(croppedH * fScale);
+      // panda 元素左上角 (75,50) + anchor 中心 - 元素中心 = 元素左上角
+      const elX = Math.round(75 + anchor.x + anchor.w / 2 - dispW / 2);
+      const elY = Math.round(50 + anchor.y + anchor.h / 2 - dispH / 2);
+      layout = { x: elX, y: elY, width: dispW, height: dispH };
+    } else if (anchorPanda) {
+      // bbox crop 失败的兜底 — 用旧 calcEditorFaceLayout
+      const fallback = await calcEditorFaceLayout({
+        pandaSrc: anchorPanda.src,
+        faceSrc: src,
+        faceOffset350: getLivePandaFaceOffset(anchorPanda),
+      });
+      layout = fallback;
+    }
+
     const faceCount = state.elements.filter(isFace).length;
+    // face 的图层方案根据当前 panda 决定
+    const faceLayering = getShellLayering(pandaId);
     const faceElement: ImageElement = {
-      id: generateId(), type: 'image', src, name: id,
-      x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
-      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+      id: generateId(), type: 'image', src: croppedSrc, name: id,
+      x: layout.x + faceCount * 6, y: layout.y + faceCount * 6, width: layout.width, height: layout.height,
+      rotation: 0, opacity: 1,
+      zIndex: faceLayering.faceZ,
+      blendMode: faceLayering.faceBlend,
+      flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element: faceElement });
     if (isMobile) setSheetOpen(false);
@@ -226,15 +320,34 @@ export function LeftSidebar() {
           <span className="draft-card-icon">💾</span>
           <span className="draft-card-title">{lang === 'zh' ? '本地草稿' : 'Local Draft'}</span>
         </div>
-        <button className="draft-save-current-btn" onClick={() => void saveDraft(nextDraftSlot.id)}>
-          {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
+        {/* 保存草稿 = 在草图 tab 也立刻可见 (同一个 draftSlots 数据源) */}
+        <button
+          className="draft-save-current-btn"
+          onClick={() => {
+            void saveDraft(nextDraftSlotId);
+            toast.success(
+              lang === 'zh'
+                ? `已存为${nextDraftLabel}（草图本同步可见）`
+                : `Saved as ${nextDraftLabel.replace('草稿', 'Draft ')} (visible in Drafts tab)`
+            );
+          }}
+          disabled={state.elements.filter(isPanda).length === 0}
+          title={
+            lang === 'zh'
+              ? `本地草稿上限 ${DRAFT_SLOT_MAX}，已存 ${draftSlots.length}`
+              : `Max ${DRAFT_SLOT_MAX} drafts, saved ${draftSlots.length}`
+          }
+        >
+          {lang === 'zh'
+            ? `保存当前到${nextDraftLabel}（${draftSlots.length}/${DRAFT_SLOT_MAX}）`
+            : `Save to ${nextDraftLabel.replace('草稿', 'Draft ')} (${draftSlots.length}/${DRAFT_SLOT_MAX})`}
         </button>
         {savedDraftSlots.length === 0 ? (
           <p className="draft-empty-hint">
             {lang === 'zh' ? '还没有已保存草稿，先保存一份当前编辑内容' : 'No saved drafts yet. Save the current edit first.'}
           </p>
         ) : (
-          <div className="draft-slot-grid">
+          <div className="draft-slot-grid" style={{ maxHeight: 360, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarGutter: 'stable' }}>
             {savedDraftSlots.map(slot => {
             const draftTime = slot.updatedAt
               ? new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
@@ -245,6 +358,7 @@ export function LeftSidebar() {
                 }).format(new Date(slot.updatedAt))
               : '';
 
+            const preview = getSlotPreviewInfo(slot);
             return (
               <div key={slot.id} className="draft-slot-card">
                 <button
@@ -252,7 +366,23 @@ export function LeftSidebar() {
                   onClick={() => handleUseDraft(slot.id, slot.name)}
                   title={lang === 'zh' ? '点击使用草稿' : 'Click to use this draft'}
                 >
-                  <img src={slot.previewUrl} alt={slot.name} className="draft-slot-image" />
+                  {/* 用 PandaCanvas 渲染缩略图 — 跟 Collection / QuickMode 共享同款 composeMeme
+                      锚点对齐, 所以编辑器侧栏与草图 tab 的缩略图视觉一致 */}
+                  {preview && preview.faceSrc ? (
+                    <PandaCanvas
+                      pandaSrc={preview.pandaSrc}
+                      pandaId={preview.pandaId}
+                      faceSrc={preview.faceSrc}
+                      faceOffset={preview.faceOffset}
+                      alt={slot.name}
+                      className="draft-slot-image"
+                      size={256}
+                    />
+                  ) : slot.previewUrl ? (
+                    <img src={slot.previewUrl} alt={slot.name} className="draft-slot-image" />
+                  ) : (
+                    <div className="draft-slot-image" style={{ background: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#888' }}>—</div>
+                  )}
                 </button>
                 <div className="draft-slot-info">
                   <div className="draft-slot-name">{lang === 'zh' ? slot.name : slot.name.replace('草稿', 'Draft ')}</div>

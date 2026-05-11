@@ -18,6 +18,10 @@ export interface ImageElement extends CanvasElement {
   src: string;
   name: string;
   flipX: boolean;
+  // 'multiply' = mix-blend-mode multiply (跟下面图层组合)
+  // panda 是透明抠图时 → panda 在 face 之上 multiply, 黑廓盖人脸
+  // panda 是不透明白底时 → face 在 panda 之上 multiply, 白头廓内透出 face
+  blendMode?: 'multiply' | 'normal';
 }
 
 export interface TextElement extends CanvasElement {
@@ -88,11 +92,7 @@ const initialState: AppState = {
 
 const SESSION_STORAGE_KEY = 'xiongmaotou.editor-state.v1';
 const DRAFT_SLOTS_STORAGE_KEY = 'xiongmaotou.editor-drafts.v1';
-const DEFAULT_DRAFT_SLOTS: DraftSlot[] = [
-  { id: 'draft-1', name: '草稿1', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-  { id: 'draft-2', name: '草稿2', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-  { id: 'draft-3', name: '草稿3', updatedAt: null, previewUrl: '', elementCount: 0, state: null },
-];
+export const DRAFT_SLOT_MAX = 40;
 
 function isImageElement(element: MemeElement): element is ImageElement {
   return element.type === 'image';
@@ -197,29 +197,32 @@ function sanitizeStoredState(input: Pick<AppState, 'elements' | 'selectedId' | '
 }
 
 function loadDraftSlots(): DraftSlot[] {
-  if (typeof window === 'undefined') return DEFAULT_DRAFT_SLOTS;
+  if (typeof window === 'undefined') return [];
 
   try {
     const raw = window.localStorage.getItem(DRAFT_SLOTS_STORAGE_KEY);
-    if (!raw) return DEFAULT_DRAFT_SLOTS;
+    if (!raw) return [];
 
     const parsed = JSON.parse(raw) as DraftSlot[];
-    if (!Array.isArray(parsed)) return DEFAULT_DRAFT_SLOTS;
+    if (!Array.isArray(parsed)) return [];
 
-    return DEFAULT_DRAFT_SLOTS.map((fallbackSlot, index) => {
-      const slot = parsed[index];
-      const safeState = sanitizeStoredState(slot?.state);
-      return {
-        id: fallbackSlot.id,
-        name: fallbackSlot.name,
-        updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
-        previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
-        elementCount: safeState?.elements.length ?? 0,
-        state: safeState,
-      };
-    });
+    return parsed
+      .slice(0, DRAFT_SLOT_MAX)
+      .map((slot, index): DraftSlot => {
+        const safeState = sanitizeStoredState(slot?.state);
+        return {
+          id: typeof slot?.id === 'string' && slot.id ? slot.id : `draft-${index + 1}`,
+          name: typeof slot?.name === 'string' && slot.name ? slot.name : `草稿${index + 1}`,
+          updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
+          previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
+          elementCount: safeState?.elements.length ?? 0,
+          state: safeState,
+        };
+      })
+      // 兼容旧版 3-slot schema：filter 掉初始化时 state=null 但 updatedAt=null 的占位
+      .filter(slot => slot.state !== null);
   } catch {
-    return DEFAULT_DRAFT_SLOTS;
+    return [];
   }
 }
 
@@ -285,8 +288,14 @@ async function renderDraftPreview(elements: MemeElement[]): Promise<string> {
 function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'ADD_ELEMENT': {
-      const maxZ = state.elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
-      const element = { ...action.element, zIndex: maxZ + 1 };
+      let element = action.element;
+      // 默认图层规则: face=1 (底), panda=5 (中, 加 mix-blend-mode multiply), text=100 (顶)
+      // 如果 element 自带 zIndex 且 != 0, 尊重它 (跨流程显式指定)
+      // 如果 zIndex === 0 (旧调用方未指定), 自动 max+1 放最上 (兼容旧拖拽行为)
+      if (!element.zIndex || element.zIndex === 0) {
+        const maxZ = state.elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
+        element = { ...element, zIndex: maxZ + 1 };
+      }
       return { ...state, elements: [...state.elements, element], selectedId: element.id };
     }
     case 'REMOVE_ELEMENT':
@@ -328,8 +337,16 @@ interface MemeContextType {
   generateId: () => string;
   draftSlots: DraftSlot[];
   saveDraft: (slotId: string) => Promise<void>;
+  // QuickMode 收藏时调这个 — 传入已构造好的 editor elements 而不是用当前 state
+  // 让 QuickMode 的"心"按钮也能产生本地草稿 (打通快速 ↔ 编辑器草稿)
+  saveDraftWithState: (
+    slotId: string,
+    snapshot: Pick<AppState, 'elements' | 'selectedId' | 'language'>,
+    name?: string,
+  ) => Promise<void>;
   loadDraft: (slotId: string) => void;
   clearDraft: (slotId: string) => void;
+  renameDraft: (slotId: string, name: string) => void;
 }
 
 const MemeContext = createContext<MemeContextType | null>(null);
@@ -357,20 +374,102 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
       language: state.language,
     } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
 
-    const nextDraftSlots = draftSlots.map(slot => (
-      slot.id === slotId
-        ? {
-            ...slot,
-            updatedAt: Date.now(),
-            previewUrl,
-            elementCount: state.elements.length,
-            state: savedState,
-          }
-        : slot
-    ));
+    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
+    let nextDraftSlots: DraftSlot[];
+
+    if (existingIndex >= 0) {
+      // 覆盖已有 slot
+      nextDraftSlots = draftSlots.map(slot => (
+        slot.id === slotId
+          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+          : slot
+      ));
+    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
+      // 追加新 slot
+      const index = draftSlots.length + 1;
+      nextDraftSlots = [
+        ...draftSlots,
+        {
+          id: slotId,
+          name: `草稿${index}`,
+          updatedAt: Date.now(),
+          previewUrl,
+          elementCount: state.elements.length,
+          state: savedState,
+        },
+      ];
+    } else {
+      // 已满 40 — 覆盖最旧的（updatedAt 最小）
+      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
+        const cur = slot.updatedAt ?? 0;
+        const min = arr[minIdx].updatedAt ?? 0;
+        return cur < min ? idx : minIdx;
+      }, 0);
+      nextDraftSlots = draftSlots.map((slot, idx) => (
+        idx === oldestIndex
+          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+          : slot
+      ));
+    }
 
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots, state.elements, state.language, state.selectedId]);
+
+  const saveDraftWithState = useCallback(async (
+    slotId: string,
+    snapshot: Pick<AppState, 'elements' | 'selectedId' | 'language'>,
+    name?: string,
+  ) => {
+    const previewUrl = await renderDraftPreview(snapshot.elements);
+    const safe = sanitizeStoredState(snapshot);
+    if (!safe) return;
+
+    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
+    let nextDraftSlots: DraftSlot[];
+
+    if (existingIndex >= 0) {
+      // 覆盖已有 slot (保留原 name 除非显式传新名)
+      nextDraftSlots = draftSlots.map(slot => (
+        slot.id === slotId
+          ? {
+              ...slot,
+              name: name || slot.name,
+              updatedAt: Date.now(),
+              previewUrl,
+              elementCount: safe.elements.length,
+              state: safe,
+            }
+          : slot
+      ));
+    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
+      const idx = draftSlots.length + 1;
+      nextDraftSlots = [
+        ...draftSlots,
+        {
+          id: slotId,
+          name: name || `草稿${idx}`,
+          updatedAt: Date.now(),
+          previewUrl,
+          elementCount: safe.elements.length,
+          state: safe,
+        },
+      ];
+    } else {
+      // 满 40 — 覆盖最旧的
+      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
+        const cur = slot.updatedAt ?? 0;
+        const min = arr[minIdx].updatedAt ?? 0;
+        return cur < min ? idx : minIdx;
+      }, 0);
+      nextDraftSlots = draftSlots.map((slot, idx) => (
+        idx === oldestIndex
+          ? { ...slot, name: name || slot.name, updatedAt: Date.now(), previewUrl, elementCount: safe.elements.length, state: safe }
+          : slot
+      ));
+    }
+
+    persistDraftSlots(nextDraftSlots);
+  }, [draftSlots, persistDraftSlots]);
 
   const loadDraft = useCallback((slotId: string) => {
     const slot = draftSlots.find(item => item.id === slotId);
@@ -386,13 +485,40 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [draftSlots]);
 
   const clearDraft = useCallback((slotId: string) => {
-    const nextDraftSlots = draftSlots.map(slot => (
-      slot.id === slotId
-        ? { ...slot, updatedAt: null, previewUrl: '', elementCount: 0, state: null }
-        : slot
-    ));
+    // Dynamic schema：直接移除 slot（不再保留 state=null 的占位）
+    const nextDraftSlots = draftSlots.filter(slot => slot.id !== slotId);
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots]);
+
+  const renameDraft = useCallback((slotId: string, name: string) => {
+    const trimmed = name.trim();
+    // eslint-disable-next-line no-console
+    console.log('[renameDraft] called', { slotId, name: trimmed });
+    if (!trimmed) return;
+    setDraftSlots((prev) => {
+      const matchedSlot = prev.find(s => s.id === slotId);
+      // eslint-disable-next-line no-console
+      console.log('[renameDraft] inside setDraftSlots', {
+        slotId,
+        foundInPrev: !!matchedSlot,
+        oldName: matchedSlot?.name,
+        newName: trimmed,
+        prevLen: prev.length,
+      });
+      if (!matchedSlot) return prev;
+      if (matchedSlot.name === trimmed) return prev; // 同名跳过
+      const next = prev.map(slot => (
+        slot.id === slotId ? { ...slot, name: trimmed } : slot
+      ));
+      // 同步 localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
+        } catch { /* ignore */ }
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -416,7 +542,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [state.elements, state.selectedId, state.language]);
 
   return (
-    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, loadDraft, clearDraft }}>
+    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, renameDraft }}>
       {children}
     </MemeContext.Provider>
   );
