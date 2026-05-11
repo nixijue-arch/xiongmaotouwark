@@ -29,14 +29,25 @@ export async function captureNode(node: HTMLElement, opts: ExportOptions = {}): 
 }
 
 /**
- * 复制 PNG 到剪贴板（chrome / edge 支持，safari 部分）
+ * 复制 PNG 到剪贴板
+ *
+ * ⚠️ 关键: navigator.clipboard.write 必须在 user gesture 内同步调用
+ * 不能先 await captureNode (~150-500ms async) 然后再 write
+ * → 因为 await 期间 user gesture 失效 → "Document is not focused" 错误
+ *
+ * 修法: 把 blob 的 Promise 直接传给 ClipboardItem
+ * → write() 在同步路径里立刻 fire (gesture 仍有效)
+ * → 浏览器自己等 Promise resolve (gesture 期内允许)
  */
 export async function copyImageToClipboard(node: HTMLElement, opts?: ExportOptions): Promise<void> {
-  const blob = await captureNode(node, opts);
   if (!navigator.clipboard || !('write' in navigator.clipboard)) {
     throw new Error('clipboard.write not supported');
   }
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+  // 不 await blob — 让 ClipboardItem 接管异步
+  const blobPromise = captureNode(node, opts);
+  await navigator.clipboard.write([
+    new ClipboardItem({ 'image/png': blobPromise }),
+  ]);
 }
 
 /**
