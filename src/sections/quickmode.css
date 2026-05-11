@@ -1,0 +1,495 @@
+/* QuickMode styles — 自包含，不污染 App.css */
+/* Contributed by PandaHead (github.com/jokkibtc/panda) */
+
+.quickmode-root {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 24px 80px;
+  background: #1a1a1a;
+  color: #f0f0f0;
+}
+
+/* Hero */
+.quickmode-hero {
+  max-width: 720px;
+  margin: 0 auto 20px;
+}
+.quickmode-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.quickmode-hero-title h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.quickmode-hero-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #888;
+}
+
+/* Preview */
+.quickmode-preview-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0 18px;
+}
+.quickmode-preview {
+  /* v5: 固定尺寸预览框（不随 panda aspect 变高变矮）
+     panda-frame 固定 350×350 box，panda contain 居中显示
+     caption 固定 margin-top → 视觉始终一致 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 400px;
+  height: 480px;
+  padding: 25px 25px 30px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+}
+.quickmode-preview .qm-panda-frame {
+  width: 350px;
+  height: 350px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.quickmode-preview .qm-panda-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+.quickmode-preview .qm-caption {
+  margin-top: 14px;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  color: #000;
+  padding: 0 16px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+/* Actions */
+.quickmode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 24px;
+}
+.qm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #f0f0f0;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+  font-family: inherit;
+}
+.qm-btn:hover {
+  background: #333;
+  border-color: #4a4a4a;
+}
+.qm-btn:active {
+  transform: scale(0.97);
+}
+.qm-btn-primary {
+  background: #FF5E00;
+  border-color: #FF5E00;
+  color: #fff;
+  font-weight: 600;
+}
+.qm-btn-primary:hover {
+  background: #ff7325;
+  border-color: #ff7325;
+}
+.qm-btn-accent {
+  background: rgba(0, 204, 102, 0.15);
+  border-color: #00CC66;
+  color: #00CC66;
+  font-weight: 600;
+}
+.qm-btn-accent:hover {
+  background: rgba(0, 204, 102, 0.25);
+}
+.qm-btn-ghost {
+  background: transparent;
+  border-color: #3a3a3a;
+  color: #888;
+}
+.qm-btn-ghost:hover {
+  color: #fff;
+  border-color: #5a5a5a;
+}
+.qm-btn-fav-on {
+  border-color: #FF5E00;
+  color: #FF5E00;
+}
+.qm-divider {
+  width: 1px;
+  height: 22px;
+  background: #3a3a3a;
+}
+
+/* Rail sections */
+.quickmode-rail-section {
+  max-width: 1180px;
+  margin: 0 auto 18px;
+}
+.quickmode-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+.qm-rail-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+}
+.qm-rail-emoji {
+  font-size: 16px;
+}
+.qm-rail-count {
+  font-size: 12px;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+.quickmode-rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 4px 12px;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+.quickmode-rail::-webkit-scrollbar {
+  height: 6px;
+}
+.quickmode-rail::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 999px;
+}
+.quickmode-rail::-webkit-scrollbar-thumb:hover {
+  background: #5a5a5a;
+}
+.qm-rail-item {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #3a3a3a;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  transition: all 180ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qm-rail-item:hover {
+  border-color: #888;
+  transform: translateY(-2px);
+}
+.qm-rail-item-active {
+  border-color: #FF5E00;
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 14px rgba(255, 94, 0, 0.32);
+}
+.qm-rail-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* Text input + font */
+.quickmode-text-row {
+  max-width: 1180px;
+  margin: 8px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+  flex-wrap: wrap;
+}
+.qm-text-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+  min-width: 50px;
+}
+.qm-icon-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #888;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.qm-icon-btn:hover {
+  background: #333;
+  color: #f0f0f0;
+}
+.qm-text-input {
+  flex: 1;
+  min-width: 200px;
+  height: 36px;
+  padding: 0 12px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #f0f0f0;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 160ms ease;
+}
+.qm-text-input:focus {
+  border-color: #FF5E00;
+}
+.qm-text-input::placeholder {
+  color: #666;
+}
+.qm-font-select {
+  min-width: 110px;
+  height: 36px;
+  padding: 0 10px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #f0f0f0;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+}
+.qm-font-select:focus {
+  border-color: #FF5E00;
+}
+
+/* Mobile (≤720px) */
+@media (max-width: 720px) {
+  .quickmode-root {
+    padding: 16px 14px 60px;
+  }
+  .quickmode-preview {
+    width: calc(100vw - 56px);
+    max-width: 400px;
+    min-height: 0;
+    padding: 18px 18px 22px;
+  }
+  .quickmode-preview .qm-panda-img {
+    max-width: 100%;
+    max-height: calc(100vw - 92px);
+  }
+  .quickmode-preview .qm-caption {
+    margin-top: 16px;
+    font-size: clamp(22px, 6vw, 28px);
+  }
+  .qm-rail-item {
+    width: 56px;
+    height: 56px;
+  }
+  .quickmode-actions .qm-btn {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .quickmode-text-row {
+    gap: 6px;
+  }
+}
+
+/* === v2 增强 === */
+
+/* Face transform row */
+.quickmode-transform-row {
+  max-width: 720px;
+  margin: 16px auto 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.quickmode-hint {
+  text-align: center;
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 18px;
+}
+
+/* RotationDot */
+.qm-rotation-track {
+  position: relative;
+  width: 240px;
+  height: 36px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+.qm-rotation-track-bar {
+  position: absolute;
+  top: 50%;
+  left: 0; right: 0;
+  height: 4px;
+  background: #3a3a3a;
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.qm-rotation-track-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px; height: 14px;
+  background: #666;
+  transform: translate(-50%, -50%);
+}
+.qm-rotation-dot {
+  position: absolute;
+  top: 50%;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #FF5E00;
+  border: 2px solid #ff7325;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  cursor: grab;
+  box-shadow: 0 2px 8px rgba(255, 94, 0, 0.4);
+  transition: left 60ms ease-out;
+}
+.qm-rotation-dot:active { cursor: grabbing; }
+.qm-rotation-dot-arrow {
+  width: 2px; height: 14px;
+  background: #fff;
+  border-radius: 1px;
+  transform-origin: center;
+}
+
+/* qm-icon-btn extra states */
+.qm-icon-btn-on {
+  background: rgba(255, 94, 0, 0.18) !important;
+  border-color: #FF5E00 !important;
+  color: #FF5E00 !important;
+}
+
+/* rotation 数值显示 */
+.qm-rotation-display {
+  min-width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+}
+
+/* 文字语言切换（双 / 中 / EN） */
+.qm-textlang-toggle {
+  display: inline-flex;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #2a2a2a;
+  flex-shrink: 0;
+}
+.qm-textlang-btn {
+  padding: 0 10px;
+  height: 36px;
+  min-width: 32px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 160ms ease;
+  font-family: inherit;
+}
+.qm-textlang-btn:hover { color: #ccc; }
+.qm-textlang-btn-on {
+  background: #FF5E00;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* NamePopover (收藏后弹) */
+.qm-name-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #2a2a2a;
+  border: 1px solid #FF5E00;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  width: 240px;
+}
+.qm-name-input {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.qm-name-input:focus { border-color: #FF5E00; }
+.qm-name-ok, .qm-name-cancel {
+  width: 26px; height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid #555;
+  color: #888;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.qm-name-ok:hover { color: #00CC66; border-color: #00CC66; }
+.qm-name-cancel:hover { color: #E97B7B; border-color: #E97B7B; }

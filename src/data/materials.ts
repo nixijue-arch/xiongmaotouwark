@@ -120,3 +120,51 @@ PANDA_HEADS.forEach(p => { pandaOffsetMap[p.id] = p.faceOffset; });
 export function getPandaFaceOffset(pandaId: string): { x: number; y: number; w: number; h: number } {
   return pandaOffsetMap[pandaId] || defaultOffset;
 }
+
+// ===== PandaHead 贡献的 46 panda + 65 face (来源 https://pandahead.fun) =====
+import { PANDAHEAD_PANDAS } from './panda-pandahead';
+import { PANDAHEAD_FACES } from './face-pandahead';
+
+/** 完整 panda 池：原 24 + PandaHead 贡献 46 = 70 */
+export const ALL_PANDAS: Material[] = [...PANDA_HEADS, ...PANDAHEAD_PANDAS];
+/** 完整 face 池：原 67 + PandaHead 贡献 65 = 132 */
+export const ALL_FACES: Material[] = [...FACES, ...PANDAHEAD_FACES];
+
+PANDAHEAD_PANDAS.forEach(p => { pandaOffsetMap[p.id] = p.faceOffset; });
+
+// ===== align_panda.py 自动检测的 24 个 native panda anchor overrides =====
+import { PANDA_ALIGN_OVERRIDES } from './panda-align-overrides';
+PANDA_HEADS.forEach(p => {
+  const override = PANDA_ALIGN_OVERRIDES[p.id];
+  if (override) {
+    p.faceOffset = override;
+    pandaOffsetMap[p.id] = override;
+  }
+});
+
+// ===== 手动校准 — 70 个 panda 全部肉眼校准的 anchor (最高优先级) =====
+// 必须迭代 [PANDA_HEADS, PANDAHEAD_PANDAS] 70 个全应用，不能只迭代 PANDA_HEADS
+import { PANDA_MANUAL_OVERRIDES } from './panda-manual-overrides';
+[...PANDA_HEADS, ...PANDAHEAD_PANDAS].forEach((p) => {
+  const manual = PANDA_MANUAL_OVERRIDES[p.id];
+  if (manual) {
+    p.faceOffset = manual;
+    pandaOffsetMap[p.id] = manual;
+  }
+});
+
+// ===== DEV-only: 实时从 localStorage 读校准工具 override =====
+// 校准工具改了 localStorage 后 dispatch 'pmw-anchor-changed' event；消费方用 useLiveAnchor hook 自动 re-render
+// 注意：localStorage 按 origin 隔离，跨端口不同步（浏览器机制）
+export function getLivePandaFaceOffset(panda: Material): { x: number; y: number; w: number; h: number } {
+  if (import.meta.env.DEV) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
+      const ov = stored[panda.id];
+      if (ov?.faceOffset) return ov.faceOffset;
+    } catch {
+      /* ignore */
+    }
+  }
+  return panda.faceOffset;
+}
