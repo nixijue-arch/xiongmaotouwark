@@ -2486,12 +2486,13 @@ body {
 }
 
 .draft-card {
-  /* padding 与 .sidebar-section-header(12px 12px 8px) + .sidebar-scroll(0 12px 12px) 对齐
-     这样 draft 内的按钮 / slot-grid 与下方 panda/face 卡片视觉同宽 */
-  padding: 12px;
+  /* 关键: padding-right 比 left 多 7px 来匹配 panda/face 面板的 scrollbar-gutter (7px)
+     panda section 用 scrollbar-gutter:stable 永远保留 7px 右侧空隙
+     draft-card 没滚动条但要保持 content 右边和 panda content 右边对齐
+     不然按钮和下方 grid 看起来宽度不一致 */
+  padding: 12px 19px 12px 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08));
   border-bottom: 1px solid var(--retro-stroke);
-  /* 防止 40 张草图把 panda/face 板块挤没 — draft-slot-grid 自带 overflow-y */
   flex-shrink: 0;
 }
 
@@ -2984,8 +2985,8 @@ textarea {
 }
 
 .draft-card-header {
-  /* 与 .draft-card padding(12px) 反向相消，让 win7 titlebar 贴到面板边缘 */
-  margin: -12px -12px 12px;
+  /* 反向相消 padding: 12px 19px 12px 12px 让 titlebar 贴到面板边缘 */
+  margin: -12px -19px 12px -12px;
 }
 
 .sidebar-section-header {

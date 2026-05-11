@@ -565,8 +565,54 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                 style={{ width: '100%' }}
               />
               <div style={{ fontSize: 10, color: '#888', marginTop: 4, lineHeight: 1.4 }}>
-                正数 = caption 往上挪贴近 panda 底部; 负数 = 拉远。<br />
-                用于修不同 shell 透明 padding 不均, caption 距离不一致的 case。
+                正数 = caption 往上挪贴近 panda 底部; 负数 = 拉远。
+              </div>
+              {/* 实时文字预览 — 让用户看到当前 captionOffset 数值的效果 */}
+              <div
+                style={{
+                  marginTop: 10,
+                  background: 'linear-gradient(180deg, #fffdf7 0%, #f7f1e3 100%)',
+                  border: '2px solid #0a4e97',
+                  borderRadius: 8,
+                  padding: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ fontSize: 9, color: '#456', alignSelf: 'flex-start', fontWeight: 600 }}>
+                  📌 文字示例 (跟随上方 slider 实时变化):
+                </div>
+                <div
+                  style={{
+                    width: '100%',
+                    height: 140,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={panda.src}
+                    alt={panda.id}
+                    draggable={false}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: '50% 100%', userSelect: 'none' }}
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 6 - captionOffset,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: '#000',
+                    fontFamily: '"Noto Sans SC", system-ui, sans-serif',
+                    lineHeight: 1.1,
+                    textAlign: 'center',
+                  }}
+                >
+                  我嘞个去
+                </div>
               </div>
             </div>
 
