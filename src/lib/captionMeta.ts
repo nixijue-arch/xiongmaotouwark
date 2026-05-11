@@ -142,7 +142,48 @@ export function clearAllUserCaptions(): void {
   writeAll([]);
 }
 
-/** 导出可粘到 TEXTS_ZH/EN 数组里的 TS code */
+/**
+ * 导出"完整源" TS code — 把当前 base + 用户加的 − 用户删的 渲染成完整的 TEXTS_ZH/TEXTS_EN 数组
+ * 直接覆盖 src/data/quickModeTexts.ts 里对应数组就行, 一次性把所有 localStorage 改动落到源文件
+ */
+export function exportCompleteSourceTS(
+  baseZh: Array<{ text: string; tags: string[] }>,
+  baseEn: Array<{ text: string; tags: string[] }>,
+): string {
+  const userCaps = readUserCaptions();
+  const deletedSet = new Set(readDeletedBaseCaptions());
+
+  const finalZh = [
+    ...baseZh.filter((t) => !deletedSet.has(t.text)),
+    ...userCaps.filter((c) => c.lang === 'zh').map((c) => ({ text: c.text, tags: c.tags as string[] })),
+  ];
+  const finalEn = [
+    ...baseEn.filter((t) => !deletedSet.has(t.text)),
+    ...userCaps.filter((c) => c.lang === 'en').map((c) => ({ text: c.text, tags: c.tags as string[] })),
+  ];
+
+  const fmt = (arr: Array<{ text: string; tags: string[] }>) =>
+    arr.map((c) => {
+      const tagsCode = c.tags.length ? c.tags.map((t) => `'${t}'`).join(', ') : "'roast'";
+      return `  { text: ${JSON.stringify(c.text)}, tags: [${tagsCode}] },`;
+    }).join('\n');
+
+  const lines: string[] = [];
+  lines.push('// === 完整源 export — 直接覆盖 src/data/quickModeTexts.ts 里的两个数组 ===');
+  lines.push(`// generated ${new Date().toISOString()} · ZH ${finalZh.length} · EN ${finalEn.length}`);
+  lines.push(`// (base ZH ${baseZh.length} - deleted ${deletedSet.size} + user ${userCaps.filter(c => c.lang==='zh').length})`);
+  lines.push('');
+  lines.push('export const TEXTS_ZH: ModedText[] = [');
+  lines.push(fmt(finalZh));
+  lines.push('];');
+  lines.push('');
+  lines.push('export const TEXTS_EN: ModedText[] = [');
+  lines.push(fmt(finalEn));
+  lines.push('];');
+  return lines.join('\n');
+}
+
+/** 导出可粘到 TEXTS_ZH/EN 数组里的 TS code (仅用户加的, 不含删除) */
 export function exportCaptionsTSCode(): string {
   const all = readUserCaptions();
   if (!all.length) return '// (no user captions yet)';

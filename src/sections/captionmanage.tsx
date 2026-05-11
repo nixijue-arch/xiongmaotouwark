@@ -19,7 +19,7 @@ import {
 } from '@/data/quickModeTexts';
 import {
   readUserCaptions, addUserCaption, updateUserCaption,
-  deleteUserCaption, clearAllUserCaptions, exportCaptionsTSCode,
+  deleteUserCaption, clearAllUserCaptions, exportCaptionsTSCode, exportCompleteSourceTS,
   readDeletedBaseCaptions, deleteBaseCaption, undeleteBaseCaption, clearAllDeletedBase,
   CAPTION_CHANGED_EVENT,
   type UserCaption,
@@ -147,6 +147,21 @@ function CaptionManageImpl({ onBack }: CaptionManageProps) {
     }
   };
 
+  // 导出"完整源"覆盖式: 合并 base + 用户加 − 用户删, 一次性落到源文件
+  const handleExportComplete = async () => {
+    const code = exportCompleteSourceTS(
+      TEXTS_ZH.map((t) => ({ text: t.text, tags: t.tags as string[] })),
+      TEXTS_EN.map((t) => ({ text: t.text, tags: t.tags as string[] })),
+    );
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`已复制完整源 → 直接覆盖 quickModeTexts.ts 两个 TEXTS 数组`);
+    } catch {
+      toast.error('复制失败, 自行选中复制');
+      console.log(code);
+    }
+  };
+
   const handleClearAllUser = () => {
     if (userCaps.length === 0) return;
     if (!confirm(`确定清空 ${userCaps.length} 条用户文案?`)) return;
@@ -173,8 +188,11 @@ function CaptionManageImpl({ onBack }: CaptionManageProps) {
           总 {stats.total} ・ 源 zh/en {stats.zhBase}/{stats.enBase} ・ 用户 zh/en {stats.userZh}/{stats.userEn} ・ 已删 {stats.deletedCount}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={handleExport} style={iconBtn('primary')} disabled={userCaps.length === 0}>
-          <Copy size={14} /> 导出 TS code
+        <button onClick={handleExportComplete} style={iconBtn('primary')} title="导出完整源 = base + 用户加 − 用户删, 直接覆盖 quickModeTexts.ts 两个数组">
+          <Copy size={14} /> 导出完整源
+        </button>
+        <button onClick={handleExport} style={iconBtn('ghost')} disabled={userCaps.length === 0} title="只导出用户加的 (老式 append 模式)">
+          <Copy size={14} /> 仅用户加
         </button>
         <button onClick={handleRestoreAllDeleted} style={iconBtn('ghost')} disabled={deletedBase.size === 0}>
           <RotateCcw size={14} /> 恢复全部
