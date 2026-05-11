@@ -1,6 +1,6 @@
-// 70 个 panda 的手动校准 faceOffset
-// 由用户在校准工具（D:\dev\pmw\src\sections\CalibrateAnchor.tsx）肉眼拖拽 + 数值精调得到
-// 导出时间: 2026-05-10T20:44:48.438Z
+// 70 个 panda 的手动校准 faceOffset + 41 个 caption 偏移
+// 由用户在校准工具（DEV-only /?page=calibrate）肉眼拖拽 + slider 精调得到
+// 最新导出时间: 2026-05-11T12:36:43.603Z (用户实测对齐)
 //
 // 优先级：手动校准 > align_panda.py 自动 > 默认
 // 在 materials.ts 末尾应用，覆盖 panda-align-overrides.ts 的自动检测值
@@ -80,10 +80,50 @@ export const PANDA_MANUAL_OVERRIDES: Record<string, { x: number; y: number; w: n
   'panda-ph-046': { x: 108, y: 83, w: 132, h: 142 },
 };
 
-// caption 上下偏移 (px in 350-coord) — 由校准工具的"图片上下偏移"滑块调好后 export
+// caption 上下偏移 (px in 350-coord) — 校准工具"图片上下偏移"滑块调好的值
 // 正数 = panda 图片往下挪贴近 caption (缩小间距)
 // 负数 = panda 图片往上挪 (拉远 caption)
-// 仅对有 visible 偏移需求的 panda 列出, 不在 map 里 = 0 (默认位置)
+// 不在 map 里 = 0 (默认位置)
 export const PANDA_CAPTION_OFFSETS: Record<string, number> = {
-  // user 校准后 export 填入, e.g. 'panda-ph-024': 30
+  'panda-01': 6,
+  'panda-03': 23,
+  'panda-04': 12,
+  'panda-05': 43,
+  'panda-06': 6,
+  'panda-07': 4,
+  'panda-08': 5,
+  'panda-09': 14,
+  'panda-10': 61,
+  'panda-20': 10,
+  'panda-21': 46,
+  'panda-22': 52,
+  'panda-23': 45,
+  'panda-24': 43,
+  'panda-ph-005': 35,
+  'panda-ph-007': 36,
+  'panda-ph-008': 32,
+  'panda-ph-009': 41,
+  'panda-ph-010': 39,
+  'panda-ph-011': 13,
+  'panda-ph-012': 16,
+  'panda-ph-014': 39,
+  'panda-ph-016': 5,
+  'panda-ph-017': 5,
+  'panda-ph-018': 29,
+  'panda-ph-019': 34,
+  'panda-ph-020': 22,
+  'panda-ph-021': 7,
+  'panda-ph-022': 25,
+  'panda-ph-023': 37,
+  'panda-ph-027': 47,
+  'panda-ph-028': 37,
+  'panda-ph-030': 100,
+  'panda-ph-032': 27,
+  'panda-ph-034': 42,
+  'panda-ph-036': 35,
+  'panda-ph-038': 27,
+  'panda-ph-039': 42,
+  'panda-ph-040': 41,
+  'panda-ph-044': 13,
+  'panda-ph-046': 36,
 };
