@@ -327,6 +327,13 @@ interface MemeContextType {
   generateId: () => string;
   draftSlots: DraftSlot[];
   saveDraft: (slotId: string) => Promise<void>;
+  // QuickMode 收藏时调这个 — 传入已构造好的 editor elements 而不是用当前 state
+  // 让 QuickMode 的"心"按钮也能产生本地草稿 (打通快速 ↔ 编辑器草稿)
+  saveDraftWithState: (
+    slotId: string,
+    snapshot: Pick<AppState, 'elements' | 'selectedId' | 'language'>,
+    name?: string,
+  ) => Promise<void>;
   loadDraft: (slotId: string) => void;
   clearDraft: (slotId: string) => void;
 }
@@ -397,6 +404,62 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     persistDraftSlots(nextDraftSlots);
   }, [draftSlots, persistDraftSlots, state.elements, state.language, state.selectedId]);
 
+  const saveDraftWithState = useCallback(async (
+    slotId: string,
+    snapshot: Pick<AppState, 'elements' | 'selectedId' | 'language'>,
+    name?: string,
+  ) => {
+    const previewUrl = await renderDraftPreview(snapshot.elements);
+    const safe = sanitizeStoredState(snapshot);
+    if (!safe) return;
+
+    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
+    let nextDraftSlots: DraftSlot[];
+
+    if (existingIndex >= 0) {
+      // 覆盖已有 slot (保留原 name 除非显式传新名)
+      nextDraftSlots = draftSlots.map(slot => (
+        slot.id === slotId
+          ? {
+              ...slot,
+              name: name || slot.name,
+              updatedAt: Date.now(),
+              previewUrl,
+              elementCount: safe.elements.length,
+              state: safe,
+            }
+          : slot
+      ));
+    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
+      const idx = draftSlots.length + 1;
+      nextDraftSlots = [
+        ...draftSlots,
+        {
+          id: slotId,
+          name: name || `草稿${idx}`,
+          updatedAt: Date.now(),
+          previewUrl,
+          elementCount: safe.elements.length,
+          state: safe,
+        },
+      ];
+    } else {
+      // 满 40 — 覆盖最旧的
+      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
+        const cur = slot.updatedAt ?? 0;
+        const min = arr[minIdx].updatedAt ?? 0;
+        return cur < min ? idx : minIdx;
+      }, 0);
+      nextDraftSlots = draftSlots.map((slot, idx) => (
+        idx === oldestIndex
+          ? { ...slot, name: name || slot.name, updatedAt: Date.now(), previewUrl, elementCount: safe.elements.length, state: safe }
+          : slot
+      ));
+    }
+
+    persistDraftSlots(nextDraftSlots);
+  }, [draftSlots, persistDraftSlots]);
+
   const loadDraft = useCallback((slotId: string) => {
     const slot = draftSlots.find(item => item.id === slotId);
     const restored = sanitizeStoredState(slot?.state);
@@ -438,7 +501,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [state.elements, state.selectedId, state.language]);
 
   return (
-    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, loadDraft, clearDraft }}>
+    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft }}>
       {children}
     </MemeContext.Provider>
   );

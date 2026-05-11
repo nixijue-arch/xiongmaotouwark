@@ -46,7 +46,7 @@ interface QuickModeProps {
 }
 
 export function QuickMode({ onOpenEditor }: QuickModeProps) {
-  const { state, dispatch, t, generateId } = useMeme();
+  const { state, dispatch, t, generateId, saveDraftWithState, clearDraft } = useMeme();
   const lang = state.language;
   // DEV: 校准工具改 anchor 时触发 re-render，让预览实时显示新值
   useLiveAnchor();
@@ -145,18 +145,62 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     }
   }, [pandaId, faceId]);
 
-  const onFav = useCallback(() => {
+  // 收藏 = 写 useQuickFavs (Collection 看得到) + 写 draftSlots (编辑器本地草稿看得到)
+  // 取消收藏 = 同步删两边
+  // 让"快速生图收藏"和"编辑器本地草稿"打通成同一个池子
+  const onFav = useCallback(async () => {
     const wasOn = isFavored;
     toggle({ id: favKey, pandaId, faceId, text, fontFamily: fontKey });
+    // 派生 slotId — 同一个 favKey 永远对应同一个 slot, 重复收藏不重复创建草稿
+    const slotId = `quick-${favKey}`;
+
     if (wasOn) {
+      clearDraft(slotId);
       toast.info(t('quickUnsaved'));
-    } else {
-      // 弹 NamePopover 让用户改名（可跳过）
-      setPendingFavName(text || '');
-      setNamePopoverOpen(true);
-      toast.success(t('quickSaved'));
+      return;
     }
-  }, [isFavored, toggle, favKey, pandaId, faceId, text, fontKey, t]);
+
+    // 心 ON: 构造编辑器 elements 写入 draftSlot, 跟点"进编辑器精修"逻辑一致
+    try {
+      const offset350 = getLivePandaFaceOffset(panda);
+      const faceLayout = await calcEditorFaceLayout({
+        pandaSrc: panda.src,
+        faceSrc: face.src,
+        faceOffset350: offset350,
+      });
+      const elements: any[] = [
+        {
+          id: generateId(), type: 'image', src: panda.src, name: panda.id,
+          x: 75, y: 50, width: 350, height: 350,
+          rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+        },
+        {
+          id: generateId(), type: 'image', src: face.src, name: face.id,
+          x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
+          rotation: faceRotation, opacity: 1, zIndex: 1, flipX: faceFlipX,
+        },
+      ];
+      if (text.trim()) {
+        elements.push({
+          id: generateId(), type: 'text', text,
+          x: 60, y: 410, width: 380, height: 56,
+          rotation: 0, opacity: 1, zIndex: 2,
+          fontFamily: fontStack, fontSize: 32, fontWeight: 'bold',
+          textAlign: 'center', fillColor: '#000000', strokeColor: '#ffffff',
+          strokeWidth: 0,
+        });
+      }
+      const slotName = text.trim() || `快速·${panda.labelCn}`;
+      await saveDraftWithState(slotId, { elements, selectedId: null, language: lang }, slotName);
+    } catch (e) {
+      // 不阻断 fav, draft 写失败仍然显示 fav 心
+      console.warn('[QuickMode] saveDraftWithState failed:', e);
+    }
+
+    setPendingFavName(text || '');
+    setNamePopoverOpen(true);
+    toast.success(t('quickSaved'));
+  }, [isFavored, toggle, favKey, pandaId, faceId, text, fontKey, panda, face, faceRotation, faceFlipX, fontStack, lang, generateId, saveDraftWithState, clearDraft, t]);
 
   const onSaveName = useCallback((name: string) => {
     if (name.trim()) rename(favKey, name.trim());

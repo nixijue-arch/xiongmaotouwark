@@ -151,7 +151,8 @@
   width: 184px;
   height: 184px;
   display: flex;
-  align-items: center;
+  /* 与 QuickMode 一致：bottom-align img 内容底贴 frame 底, caption 距离稳定 */
+  align-items: flex-end;
   justify-content: center;
   flex-shrink: 0;
 }

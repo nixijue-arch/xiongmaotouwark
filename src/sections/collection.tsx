@@ -11,7 +11,7 @@ import { captureNode, copyImageToClipboard, downloadImage } from '@/lib/exportIm
 import { composeMeme, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import {
-  FolderOpen, Copy, Download, Trash2, ArrowRight, Sparkles, Edit2, Check, X,
+  FolderOpen, Copy, Download, Trash2, SquarePen, Sparkles, Edit2, Check, X,
   Package,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -423,7 +423,7 @@ function DraftCard({ fav, lang, isSelected, onToggleSelect, onDelete, onRename, 
           <Download size={13} />
         </button>
         <button onClick={(e) => { e.stopPropagation(); onSendToEditor(); }} className="draft-icon-btn draft-icon-btn-accent" title={lang === 'zh' ? '进编辑器精修' : 'Open in Editor'}>
-          <ArrowRight size={13} />
+          <SquarePen size={13} />
         </button>
         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="draft-icon-btn draft-icon-btn-danger" title={lang === 'zh' ? '删除' : 'Delete'}>
           <Trash2 size={13} />

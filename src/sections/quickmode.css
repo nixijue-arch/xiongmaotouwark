@@ -57,7 +57,11 @@
   width: 350px;
   height: 350px;
   display: flex;
-  align-items: center;
+  /* 关键：bottom-align IMG 元素到 frame 底部
+     之前 align-items: center 让 wide-shaped panda (350x273) 在 frame (350x350) 居中
+     内容底部 y=311 不在 frame 底部 y=350 → caption 距离不一致
+     改成 flex-end 后所有 panda 的内容底都贴 frame 底, caption 距离统一 */
+  align-items: flex-end;
   justify-content: center;
   flex-shrink: 0;
 }

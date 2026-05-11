@@ -2,8 +2,18 @@ import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react
 import { useMeme } from '@/context/memecontext';
 import type { ImageElement, TextElement } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
+import { ALL_FACES } from '@/data/materials';
 import Draggable from 'react-draggable';
 import { Eraser, RotateCcw, LogOut, Save, Undo2 } from 'lucide-react';
+
+// 判断 image element 是否是 face — 用于 mix-blend-mode 套熊猫头 clip 效果
+// 跟 leftsidebar / quickmode 的 isFace 判定保持一致
+function isFaceElement(el: ImageElement): boolean {
+  const name = el.name || '';
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-');
+}
 
 /* ========== DraggableImage ========== */
 interface DraggableImageProps {
@@ -245,8 +255,18 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
         onTouchStart={handleElementPointerStart}
       >
         <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
+          {/* face 元素用 mix-blend-mode: multiply
+              在 panda 白色头廓内 face 正常显示 (face × white = face)
+              超出 panda 到黑色 silhouette 时 face × black = black, 视觉上被 panda 廓"盖住"
+              完全在 panda 之外时 face × #fff canvas-bg = face 不变（不影响）
+              这样不用改 z-index, face 仍然可以选中拖动, 但 shell 会智能盖住溢出的 face */}
           <img src={element.src} alt="element" className="block max-w-none" draggable={false}
-            style={{ width: element.width, height: element.height, transform: element.flipX ? 'scaleX(-1)' : 'none' }}
+            style={{
+              width: element.width,
+              height: element.height,
+              transform: element.flipX ? 'scaleX(-1)' : 'none',
+              mixBlendMode: isFaceElement(element) ? 'multiply' : 'normal',
+            }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
           {isSelected && (
