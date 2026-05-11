@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { MUSEUM_IMAGES } from '@/data/museum-images';
 import { getTagsFor, ALL_TAGS_ZH, ALL_TAGS_EN, TAG_EMOJI } from '@/data/museum-tags';
-import { X, Download, ArrowLeft, ChevronLeft, ChevronRight, Pencil, Copy, Search } from 'lucide-react';
+import { X, Download, ArrowLeft, ChevronLeft, ChevronRight, Pencil, Copy, Search, Sparkles, Grid2x2, ChevronsUpDown } from 'lucide-react';
 
 export function Museum({ onBack, setPage }: { onBack: () => void; setPage: (page: 'editor' | 'museum') => void }) {
   const { t, state, dispatch, generateId } = useMeme();
@@ -151,89 +151,128 @@ export function Museum({ onBack, setPage }: { onBack: () => void; setPage: (page
 
   const selectedImage = selectedIndex !== null ? MUSEUM_IMAGES[selectedIndex] : null;
   const selectedUrl = selectedImage ? `./museum/${selectedImage}` : '';
-
+  const countLabel = lang === 'zh' ? `共 ${filteredImages.length} 种表情包` : `${filteredImages.length} memes`;
   // Tag cloud
   const tags = lang === 'zh' ? ALL_TAGS_ZH : ALL_TAGS_EN;
 
   return (
     <div className="museum-container">
-      {/* Header */}
-      <div className="museum-header">
-        <button onClick={onBack} className="museum-back-btn">
-          <ArrowLeft size={16} />
-          <span>{t('backToEditor')}</span>
-        </button>
-        <h1 className="museum-title">{t('museum')}</h1>
-        <div className="museum-count">{filteredImages.length} memes</div>
-      </div>
+      <div className="museum-shell win7-window">
+        <div className="win7-titlebar museum-window-titlebar">
+          <div className="win7-title-meta">
+            <span className="win7-title-icon">🐼</span>
+            <span>{lang === 'zh' ? '熊猫头 Meme-Lab' : 'Panda Meme-Lab'}</span>
+          </div>
+          <div className="win7-window-controls" aria-hidden="true">
+            <span className="win7-window-btn">─</span>
+            <span className="win7-window-btn">□</span>
+            <span className="win7-window-btn win7-window-btn-close">×</span>
+          </div>
+        </div>
 
-      {/* Search Bar */}
-      <div className="museum-search-wrap">
-        <div className="museum-search-box">
-          <Search size={14} color="#888" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder={lang === 'zh' ? '按标签搜索，如：开心、生气、疑惑…' : 'Search tags: happy, angry, confused…'}
-            className="museum-search-input"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="museum-search-clear">
-              <X size={14} />
+        <div className="museum-header">
+          <button onClick={onBack} className="museum-back-btn">
+            <ArrowLeft size={18} />
+            <span>{t('backToEditor')}</span>
+          </button>
+
+          <div className="museum-title-panel">
+            <div className="museum-title-icon-wrap">
+              <img src="/site-logo.png" alt="Panda logo" className="museum-title-icon" />
+            </div>
+            <div className="museum-title-copy">
+              <h1 className="museum-title">{t('museum')}</h1>
+              <div className="museum-title-note">
+                <Sparkles size={14} />
+                <span>{lang === 'zh' ? '经典熊猫头档案库' : 'Classic panda meme archive'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="museum-count">
+            <span>{countLabel}</span>
+          </div>
+        </div>
+
+        <div className="museum-search-wrap">
+          <div className="museum-search-box">
+            <Search size={16} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder={lang === 'zh' ? '按标签搜索，如：开心、生气、疑惑…' : 'Search tags: happy, angry, confused…'}
+              className="museum-search-input"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="museum-search-clear">
+                <X size={14} />
+              </button>
+            )}
+            <span className="museum-search-caret" aria-hidden="true">
+              <ChevronsUpDown size={16} />
+            </span>
+          </div>
+        </div>
+
+        <div className="museum-tag-cloud">
+          <button
+            onClick={() => setActiveTag('all')}
+            className={`museum-tag museum-tag-all ${activeTag === 'all' ? 'active' : ''}`}
+          >
+            <Grid2x2 size={14} />
+            <span>{lang === 'zh' ? '全部' : 'All'}</span>
+          </button>
+
+          {tags.map(tag => (
+            <button
+              key={tag}
+              onClick={() => setActiveTag(tag === activeTag ? 'all' : tag)}
+              className={`museum-tag ${activeTag === tag ? 'active' : ''}`}
+            >
+              <span>{TAG_EMOJI[tag] || '🏷️'}</span>
+              <span>{tag}</span>
             </button>
+          ))}
+        </div>
+
+        <div className="museum-gallery-panel">
+          <div className="museum-grid">
+            {filteredImages.map((filename, index) => {
+              const tagData = getTagsFor(filename);
+              const displayTags = lang === 'zh' ? tagData?.tags : tagData?.tagEn;
+              return (
+                <div
+                  key={filename}
+                  className="museum-card"
+                  onClick={() => openImage(MUSEUM_IMAGES.indexOf(filename))}
+                >
+                  <span className="museum-card-pin" aria-hidden="true">★</span>
+                  <img
+                    src={`./museum/${filename}`}
+                    alt={`panda meme ${index + 1}`}
+                    loading="lazy"
+                    className="museum-img"
+                  />
+                  {displayTags && displayTags.length > 0 && (
+                    <div className="museum-card-tags">
+                      {displayTags.slice(0, 2).map(t => (
+                        <span key={t} className="museum-tag-chip">{TAG_EMOJI[t] || ''}{t}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {filteredImages.length === 0 && (
+            <div className="museum-empty">
+              <p>{lang === 'zh' ? '没有找到匹配的表情包' : 'No memes found'}</p>
+            </div>
           )}
         </div>
       </div>
-
-      {/* Tag Cloud */}
-      <div className="museum-tag-cloud">
-        {tags.map(tag => (
-          <button
-            key={tag}
-            onClick={() => setActiveTag(tag === activeTag ? 'all' : tag)}
-            className={`museum-tag ${activeTag === tag ? 'active' : ''}`}
-          >
-            <span>{TAG_EMOJI[tag] || '🏷️'}</span>
-            <span>{tag}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Image Grid */}
-      <div className="museum-grid">
-        {filteredImages.map((filename, index) => {
-          const tagData = getTagsFor(filename);
-          const displayTags = lang === 'zh' ? tagData?.tags : tagData?.tagEn;
-          return (
-            <div
-              key={filename}
-              className="museum-card"
-              onClick={() => openImage(MUSEUM_IMAGES.indexOf(filename))}
-            >
-              <img
-                src={`./museum/${filename}`}
-                alt={`panda meme ${index + 1}`}
-                loading="lazy"
-                className="museum-img"
-              />
-              {displayTags && displayTags.length > 0 && (
-                <div className="museum-card-tags">
-                  {displayTags.slice(0, 2).map(t => (
-                    <span key={t} className="museum-tag-chip">{TAG_EMOJI[t] || ''}{t}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {filteredImages.length === 0 && (
-        <div className="museum-empty">
-          <p>{lang === 'zh' ? '没有找到匹配的表情包' : 'No memes found'}</p>
-        </div>
-      )}
 
       {/* Lightbox */}
       {selectedIndex !== null && selectedImage && (

@@ -15,28 +15,31 @@ interface DraggableImageProps {
 
 type ResizeDir = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
 const CANVAS_SIZE = 500;
-const MAX_DESKTOP_CANVAS_SCALE = 1.9;
+const MAX_DESKTOP_CANVAS_SCALE = 2.35;
+const MOBILE_CANVAS_MIN_SCALE = 0.45;
+const DESKTOP_CANVAS_MIN_SCALE = 1;
 const DRAGGABLE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 const DEFAULT_VISIBLE_BOUNDS = { left: 0, top: 0, width: 1, height: 1 };
 const visibleBoundsCache = new Map<string, typeof DEFAULT_VISIBLE_BOUNDS>();
 
-function getCanvasScale(isMobile: boolean) {
-  if (typeof window === 'undefined') return 1;
+function getCanvasScale(
+  isMobile: boolean,
+  availableWidth: number,
+  availableHeight: number,
+) {
+  const widthScale = availableWidth / CANVAS_SIZE;
+  const heightScale = availableHeight / CANVAS_SIZE;
+  const rawScale = Math.min(widthScale, heightScale);
 
-  if (isMobile) {
-    const vw = window.innerWidth - 16;
-    const vh = window.innerHeight - 120;
-    const scale = Math.min(1, Math.min(vw / CANVAS_SIZE, vh / CANVAS_SIZE));
-    return Math.max(0.45, scale);
+  if (!Number.isFinite(rawScale) || rawScale <= 0) {
+    return 1;
   }
 
-  const reservedSidebars = 192 + 214;
-  const reservedPadding = 12;
-  const reservedHeader = 72;
-  const vw = window.innerWidth - reservedSidebars - reservedPadding;
-  const vh = window.innerHeight - reservedHeader;
-  const scale = Math.min(MAX_DESKTOP_CANVAS_SCALE, vw / CANVAS_SIZE, vh / CANVAS_SIZE);
-  return Math.max(1, scale);
+  if (isMobile) {
+    return Math.max(MOBILE_CANVAS_MIN_SCALE, Math.min(1, rawScale));
+  }
+
+  return Math.max(DESKTOP_CANVAS_MIN_SCALE, Math.min(MAX_DESKTOP_CANVAS_SCALE, rawScale));
 }
 
 function validateDroppedImage(file: File, language: 'zh' | 'en'): string | null {
@@ -782,22 +785,46 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const editingEl = state.elements.find(e => e.id === editingId) as ImageElement | undefined;
   const isMobile = useIsMobile();
 
-  // Mobile canvas auto-scale
-  const [canvasScale, setCanvasScale] = useState(() => getCanvasScale(isMobile));
+  // Canvas auto-scale based on the real middle-column space.
+  const [canvasScale, setCanvasScale] = useState(1);
+  const stageRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     const updateCanvasScale = () => {
-      setCanvasScale(getCanvasScale(isMobile));
+      const stageNode = stageRef.current;
+      if (!stageNode) return;
+
+      const styles = window.getComputedStyle(stageNode);
+      const paddingX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+      const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const availableWidth = Math.max(stageNode.clientWidth - paddingX, CANVAS_SIZE * MOBILE_CANVAS_MIN_SCALE);
+      const availableHeight = Math.max(stageNode.clientHeight - paddingY, CANVAS_SIZE * MOBILE_CANVAS_MIN_SCALE);
+
+      setCanvasScale(getCanvasScale(isMobile, availableWidth, availableHeight));
     };
 
     updateCanvasScale();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateCanvasScale();
+    });
+
+    if (stageRef.current) {
+      resizeObserver.observe(stageRef.current);
+    }
+
     window.addEventListener('resize', updateCanvasScale);
-    return () => window.removeEventListener('resize', updateCanvasScale);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateCanvasScale);
+    };
   }, [isMobile]);
 
   return (
-    <div className="flex flex-col items-center justify-center flex-1 overflow-y-auto p-3 md:p-4 gap-3"
+    <div
+      ref={stageRef}
+      className="flex flex-col items-center justify-center flex-1 overflow-y-auto p-3 md:p-4 gap-3"
       style={isMobile ? { paddingBottom: '60px' } : {}}>
       <div
         ref={canvasWrapperRef}
@@ -815,8 +842,8 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
             backgroundColor: '#FFFFFF',
             width: CANVAS_SIZE,
             height: CANVAS_SIZE,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            border: '2px solid #2a2a2a',
+            boxShadow: '0 16px 32px rgba(108, 146, 196, 0.22)',
+            border: '3px solid #88a6cf',
             overflow: 'hidden',
             flexShrink: 0,
             transform: canvasScale !== 1 ? `scale(${canvasScale})` : undefined,
@@ -838,6 +865,19 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
               zIndex: 200,
             }}
           />
+        )}
+        {state.elements.length === 0 && !editingEl && (
+          <div className="canvas-empty-state">
+            <div className="canvas-empty-badge canvas-empty-badge-top">
+              连击 COMBO x3
+            </div>
+            <div className="canvas-empty-center">
+              <div className="canvas-empty-panda">🐼</div>
+              <h3>{state.language === 'zh' ? '把素材拖到这里' : 'Drop assets here'}</h3>
+              <p>{state.language === 'zh' ? '开始创作你的熊猫头表情包吧！' : 'Start creating your panda meme pack!'}</p>
+              <span>{state.language === 'zh' ? '支持 PNG / JPG / GIF' : 'Supports PNG / JPG / GIF'}</span>
+            </div>
+          </div>
         )}
         {state.elements.map((el) => {
           const isSelected = el.id === state.selectedId;

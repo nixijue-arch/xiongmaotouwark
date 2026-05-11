@@ -221,7 +221,7 @@ export function LeftSidebar() {
 
   return (
     <aside className="desktop-sidebar-left">
-      <div className="draft-card">
+      <div className="draft-card win7-panel">
         <div className="draft-card-header">
           <span className="draft-card-icon">💾</span>
           <span className="draft-card-title">{lang === 'zh' ? '本地草稿' : 'Local Draft'}</span>
@@ -275,7 +275,7 @@ export function LeftSidebar() {
         )}
       </div>
 
-      <div className="sidebar-section sidebar-panda">
+      <div className="sidebar-section sidebar-panda win7-panel">
         <div className="sidebar-section-header">
           <span className="sidebar-icon">🐼</span>
           <span className="sidebar-label">{lang === 'zh' ? '选择熊猫头' : 'Choose Panda Head'}</span>
@@ -291,7 +291,7 @@ export function LeftSidebar() {
         </div>
       </div>
 
-      <div className="sidebar-section sidebar-face">
+      <div className="sidebar-section sidebar-face win7-panel">
         <div className="sidebar-section-header">
           <span className="sidebar-icon">😂</span>
           <span className="sidebar-label">{lang === 'zh' ? '选择人脸' : 'Choose Face'}</span>

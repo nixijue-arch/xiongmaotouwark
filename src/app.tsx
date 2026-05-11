@@ -14,10 +14,10 @@ function App() {
 
   return (
     <MemeProvider>
-      <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ backgroundColor: '#0f0f0f' }}>
+      <div className="app-shell h-screen w-screen flex flex-col overflow-hidden">
         <Header page={page} setPage={setPage} />
         {page === 'editor' ? (
-          <div className="flex-1 flex overflow-hidden main-content">
+          <div className="editor-layout flex-1 flex overflow-hidden main-content">
             <LeftSidebar />
             <CanvasArea canvasRef={canvasRef} />
             <RightSidebar canvasRef={canvasRef} />
