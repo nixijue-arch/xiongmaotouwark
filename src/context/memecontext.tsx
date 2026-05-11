@@ -483,13 +483,19 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    // 用 functional setState 避免 stale closure: 即使 draftSlots ref 不是最新
-    // 也用最新值更新, 防止快速连续 rename / 与其他更新交叉时丢更新
+    // 用 functional setState 避免 stale closure
+    // ⚠️ 不改 updatedAt — 改名不应该让卡片跳到列表顶部 (Collection 按 updatedAt 排序)
+    // 之前加 updatedAt:Date.now() → 卡片跳到顶 → user 在原位置看到"没变" → 误判 rename 失败
     setDraftSlots((prev) => {
-      const next = prev.map(slot => (
-        slot.id === slotId ? { ...slot, name: trimmed, updatedAt: Date.now() } : slot
-      ));
-      // 同时同步 localStorage (persistDraftSlots 的副作用部分)
+      let found = false;
+      const next = prev.map(slot => {
+        if (slot.id !== slotId) return slot;
+        if (slot.name === trimmed) return slot; // 同名跳过
+        found = true;
+        return { ...slot, name: trimmed };
+      });
+      if (!found) return prev;
+      // 同步 localStorage
       if (typeof window !== 'undefined') {
         try {
           window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));

@@ -597,6 +597,8 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                     display: 'flex',
                     alignItems: 'flex-end',
                     justifyContent: 'center',
+                    position: 'relative',
+                    zIndex: 1,
                   }}
                 >
                   <img
@@ -624,6 +626,11 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
                     fontFamily: '"Noto Sans SC", system-ui, sans-serif',
                     lineHeight: 1.1,
                     textAlign: 'center',
+                    // 跟 QuickMode + Collection 一致 — 强制最高图层
+                    // panda translateY 正值移到 caption 区域时, caption 仍可见
+                    position: 'relative',
+                    zIndex: 10,
+                    background: 'inherit',
                   }}
                 >
                   我嘞个去
