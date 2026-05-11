@@ -310,6 +310,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [previewCrop, setPreviewCrop] = useState<CropRect>({ x: 0, y: 0, width: CAPTURE_SIZE, height: CAPTURE_SIZE });
   const [sheetOpen, setSheetOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [smartModalOpen, setSmartModalOpen] = useState(false);
+  const { toggle: toggleFav } = useQuickFavs();
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const previewRequestIdRef = useRef(0);
@@ -349,6 +351,36 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   };
 
   const handleClearCanvas = () => dispatch({ type: 'CLEAR_CANVAS' });
+
+  // 保存当前编辑器内容为草图 — 上传/智能提取的素材 src 也存进 fav 防丢失
+  const handleSaveDraft = useCallback(() => {
+    const pandaEl = state.elements.find(isPanda) as ImageElement | undefined;
+    const faceEl = state.elements.find(isFace) as ImageElement | undefined;
+    const textEl = state.elements.find((e) => e.type === 'text') as TextElement | undefined;
+    if (!pandaEl || !faceEl) {
+      toast.error(state.language === 'zh' ? '需要至少有 panda 和 face 才能存草图' : 'Need at least panda + face to save');
+      return;
+    }
+    const pandaId = pandaEl.name;
+    const faceId = faceEl.name;
+    const text = textEl?.text ?? '';
+    const fontFamily = textEl?.fontFamily ?? 'sans-serif';
+    const id = makeFavKey(pandaId, faceId, text, fontFamily);
+    const isCustomPanda = pandaId.startsWith('upload-panda-');
+    const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
+    const fav: Parameters<typeof toggleFav>[0] = { id, pandaId, faceId, text, fontFamily };
+    if (isCustomPanda) {
+      fav.pandaSrc = pandaEl.src;
+      fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
+    }
+    if (isCustomFace) fav.faceSrc = faceEl.src;
+    toggleFav(fav);
+    toast.success(state.language === 'zh' ? '已存到草图' : 'Saved to drafts');
+  }, [state.elements, state.language, toggleFav]);
+
+  // 预览自动刷新 — elements 变化后 debounce 600ms 重生成（user 反馈手动按钮繁琐）
+  const elementsKey = state.elements.map(e => e.id + ':' + ((e as ImageElement).src ?? '') + ':' + (e.type === 'text' ? (e as TextElement).text : '')).join('|');
+  const prevKeyRef = useRef('');
 
   // 随机组合 — 用 calcEditorFaceLayout 自动定位 face + 素材池 ALL_* (70+132 全集)
   const handleRandomCombo = async () => {
@@ -559,6 +591,19 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       }
     } catch (err) { console.error('Preview failed:', err); }
   }, [state.elements]);
+
+  // 预览自动跟随 elements 变化 (debounce 600ms 防频繁 render 抖动)
+  useEffect(() => {
+    if (elementsKey === prevKeyRef.current) return;
+    prevKeyRef.current = elementsKey;
+    if (state.elements.length === 0) {
+      if (previewUrl) setPreviewUrl('');
+      return;
+    }
+    const t = setTimeout(() => { handleRefreshPreview(); }, 600);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsKey]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -862,8 +907,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   <button onClick={() => setModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#F59E0B' }}>
                     <Camera size={14} />{t('customFace')}
                   </button>
+                  <button onClick={() => setSmartModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#10B981' }}>
+                    <Sparkles size={14} />{state.language === 'zh' ? '智能提取' : 'Smart Extract'}
+                  </button>
                 </>
               )}
+              <button onClick={handleSaveDraft} disabled={state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: '#FF5E00' }}>
+                <Heart size={14} />{state.language === 'zh' ? '存草图' : 'Save'}
+              </button>
               <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}>
                 {isExporting ? '...' : t('download')}
               </button>
@@ -907,6 +958,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
           onConfirm={handleCustomFaceConfirm}
+          language={state.language}
+        />
+        <SmartExtractModal
+          isOpen={smartModalOpen}
+          onClose={() => setSmartModalOpen(false)}
+          onConfirm={(dataUrl) => handleCustomFaceConfirm(dataUrl)}
           language={state.language}
         />
       </>
@@ -1233,6 +1290,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               <label className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] cursor-pointer" style={{ backgroundColor: '#8B5CF6' }}><Upload size={16} />{t('uploadAsset')}<input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" /></label>
               <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '支持拖拽素材到画布' : 'Drag assets onto the canvas'}</p>
               <button onClick={() => setModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#F59E0B' }}><Camera size={16} />{t('customFace')}</button>
+              <button onClick={() => setSmartModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#10B981' }}><Sparkles size={16} />{state.language === 'zh' ? '智能提取人脸' : 'Smart Extract'}</button>
               <p className="text-[10px] text-center" style={{ color: PANEL_MUTED }}>{state.language === 'zh' ? '上传照片自动生成熊猫脸 · 支持 JPG / PNG / GIF' : 'Upload photo to auto-generate panda face · Supports JPG / PNG / GIF'}</p>
             </>
           )}
@@ -1242,6 +1300,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       {/* Social Share + Footer Actions */}
       <div className="p-4 space-y-2 mt-auto win7-panel win7-panel-footer">
         <button onClick={handleClearCanvas} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-30" style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}><Trash2 size={14} />{t('clearCanvas')}</button>
+        <button onClick={handleSaveDraft} disabled={state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] disabled:opacity-50" style={{ backgroundColor: '#FF5E00' }}><Heart size={14} />{state.language === 'zh' ? '存到草图' : 'Save to Drafts'}</button>
         <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.02] disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}><Download size={16} />{isExporting ? '...' : t('download')}</button>
 
         {/* Social Share Buttons - icon only with tooltip */}
@@ -1281,6 +1340,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConfirm={handleCustomFaceConfirm}
+        language={state.language}
+      />
+      <SmartExtractModal
+        isOpen={smartModalOpen}
+        onClose={() => setSmartModalOpen(false)}
+        onConfirm={(dataUrl) => handleCustomFaceConfirm(dataUrl)}
         language={state.language}
       />
     </aside>

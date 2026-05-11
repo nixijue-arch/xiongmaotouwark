@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
-import { PANDA_HEADS, FACES, getPandaFaceOffset } from '@/data/materials';
+import { PANDA_HEADS, FACES, ALL_PANDAS, getLivePandaFaceOffset } from '@/data/materials';
+import { calcEditorFaceLayout } from '@/lib/composeMeme';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
 import type { Material } from '@/data/materials';
@@ -94,7 +95,8 @@ export function LeftSidebar() {
     if (isMobile) setSheetOpen(false);
   };
 
-  const handleAddFace = (src: string, id: string) => {
+  // 加 face — 用 calcEditorFaceLayout 按 panda anchor 算 content_center 位置（跟 QuickMode/Collection 一致）
+  const handleAddFace = async (src: string, id: string) => {
     let pandaId = 'panda-head';
     const currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (currentPanda) {
@@ -107,11 +109,18 @@ export function LeftSidebar() {
       };
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
-    const offset = getPandaFaceOffset(pandaId);
+    const anchorPanda = ALL_PANDAS.find(p => p.id === pandaId);
+    const layout = anchorPanda
+      ? await calcEditorFaceLayout({
+          pandaSrc: anchorPanda.src,
+          faceSrc: src,
+          faceOffset350: getLivePandaFaceOffset(anchorPanda),
+        })
+      : { x: 100, y: 70, width: 250, height: 250 };
     const faceCount = state.elements.filter(isFace).length;
     const faceElement: ImageElement = {
       id: generateId(), type: 'image', src, name: id,
-      x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
+      x: layout.x + faceCount * 6, y: layout.y + faceCount * 6, width: layout.width, height: layout.height,
       rotation: 0, opacity: 1, zIndex: 1, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element: faceElement });
