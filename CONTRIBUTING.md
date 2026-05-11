@@ -37,17 +37,22 @@ bun run dev   # 起 vite, 默认 5173 (被占自动跳 3001 / 3002 ...)
 
 90% 贡献是补 caption。**两种方式：**
 
-### 方式 A：UI 操作 → 导出 → 粘贴（推荐，零代码）
+### 极简流程（推荐 — 一键写文件，零 copy-paste）
 
 1. `bun run dev` → 顶栏点 📝 **文案**
-2. 顶部表单 → 输入文案 + 选 中/EN + 勾 3 模式之一（FOMO / FUD / 斗图）→ ＋加
-3. 列表里可继续 ✎ 编辑 / 🗑 删除（**包括屏蔽源条目**）
-4. 一批改完点 **"导出完整源"**（顶栏橙色大按钮）→ 自动复制到剪贴板
-   - 输出的内容 = 当前 base 池 **减去** 你删除的源条目 **加上** 你新加的，已渲染成 `TEXTS_ZH` + `TEXTS_EN` 完整数组
-5. 打开 `src/data/quickModeTexts.ts`，**整体覆盖**原有的 `TEXTS_ZH` 和 `TEXTS_EN` 数组定义
-6. `bun run build` 验证 TS 检查 → `git commit` → PR
+2. 在 UI 里加 / 改 / 删 caption（所有改动暂存 localStorage）
+3. 点顶部绿色按钮 **💾 保存到源文件** → 自动写入 `src/data/quickModeTexts.ts`
+   - 走本地 Vite 插件（`/__sync/captions` 端点），**只在 dev 模式可用**，prod 无效（plugin `apply: 'serve'` + Netlify 静态托管无 Node 中间件）
+   - 写完自动清 localStorage（本地 state 已完全落到源文件）
+   - Vite HMR 自动 reload，立即看到新源池
+4. `git add src/data/quickModeTexts.ts && git commit -m "feat: 补 N 条 X 模式文案" && git push`
+5. 提 PR
 
-⚠️ **必须用"导出完整源"，不要用"仅用户加"** —— 后者只 append 你新加的，不会处理你在 UI 里删除的源条目。"仅用户加" 留着只是兼容老流程，新流程统一用"完整源"覆盖式。
+**没有第二步 copy-paste**。点按钮 → git commit → 完事。
+
+### Fallback：clipboard 复制（plugin 没起来时自动走）
+
+如果第 3 步 fetch 失败（plugin 没注册 / 端口冲突 / 其他原因），按钮会自动走老路径：复制完整源到剪贴板，让你手动粘到 `quickModeTexts.ts`。toast 会提示。
 
 ### 方式 B：直接改源文件（适合一次加大量）
 

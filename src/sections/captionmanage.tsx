@@ -147,18 +147,45 @@ function CaptionManageImpl({ onBack }: CaptionManageProps) {
     }
   };
 
-  // 导出"完整源"覆盖式: 合并 base + 用户加 − 用户删, 一次性落到源文件
-  const handleExportComplete = async () => {
-    const code = exportCompleteSourceTS(
-      TEXTS_ZH.map((t) => ({ text: t.text, tags: t.tags as string[] })),
-      TEXTS_EN.map((t) => ({ text: t.text, tags: t.tags as string[] })),
-    );
+  // 一键保存到源文件 — fetch 本地 vite plugin (POST /__sync/captions) 直接写 quickModeTexts.ts
+  // 后端: scripts/vite-plugin-dev-sync.ts (apply: 'serve' 仅 dev), 替换两个 TEXTS 数组
+  // 写完自动清 localStorage, 因为源已含全部改动, 不再需要 DEV-only override 合入
+  const handleSaveToSource = async () => {
+    const deletedSet = new Set(readDeletedBaseCaptions());
+    const baseZh = TEXTS_ZH.filter((t) => !deletedSet.has(t.text));
+    const baseEn = TEXTS_EN.filter((t) => !deletedSet.has(t.text));
+    const userZh = userCaps.filter((c) => c.lang === 'zh');
+    const userEn = userCaps.filter((c) => c.lang === 'en');
+    const payload = {
+      zh: [...baseZh, ...userZh].map((c) => ({ text: c.text, tags: c.tags as string[] })),
+      en: [...baseEn, ...userEn].map((c) => ({ text: c.text, tags: c.tags as string[] })),
+    };
     try {
-      await navigator.clipboard.writeText(code);
-      toast.success(`已复制完整源 → 直接覆盖 quickModeTexts.ts 两个 TEXTS 数组`);
-    } catch {
-      toast.error('复制失败, 自行选中复制');
-      console.log(code);
+      const r = await fetch('/__sync/captions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const result = (await r.json()) as { zh: number; en: number; file: string };
+      // 写源成功 → 清 localStorage (本地状态已完全落到源文件)
+      clearAllUserCaptions();
+      clearAllDeletedBase();
+      toast.success(`✅ 已写入 ${result.file}: ${result.zh} ZH + ${result.en} EN. Vite HMR 重 load`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`保存失败 (${msg}). 走 fallback: 复制完整源到剪贴板`);
+      // Fallback: clipboard copy (跟以前一样)
+      const code = exportCompleteSourceTS(
+        TEXTS_ZH.map((t) => ({ text: t.text, tags: t.tags as string[] })),
+        TEXTS_EN.map((t) => ({ text: t.text, tags: t.tags as string[] })),
+      );
+      try {
+        await navigator.clipboard.writeText(code);
+        toast.info('已复制完整源到剪贴板, 自行粘到 quickModeTexts.ts');
+      } catch {
+        console.log(code);
+      }
     }
   };
 
@@ -188,11 +215,11 @@ function CaptionManageImpl({ onBack }: CaptionManageProps) {
           总 {stats.total} ・ 源 zh/en {stats.zhBase}/{stats.enBase} ・ 用户 zh/en {stats.userZh}/{stats.userEn} ・ 已删 {stats.deletedCount}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={handleExportComplete} style={iconBtn('primary')} title="导出完整源 = base + 用户加 − 用户删, 直接覆盖 quickModeTexts.ts 两个数组">
-          <Copy size={14} /> 导出完整源
+        <button onClick={handleSaveToSource} style={iconBtn('accent')} title="一键写入 quickModeTexts.ts (base + 用户加 − 用户删). 走本地 vite plugin, 写完 HMR 自动 reload, 清空 localStorage.">
+          <Copy size={14} /> 💾 保存到源文件
         </button>
-        <button onClick={handleExport} style={iconBtn('ghost')} disabled={userCaps.length === 0} title="只导出用户加的 (老式 append 模式)">
-          <Copy size={14} /> 仅用户加
+        <button onClick={handleExport} style={iconBtn('ghost')} disabled={userCaps.length === 0} title="老式 clipboard 导出 — 仅用户加的 (append). 用 '保存到源文件' 更省事.">
+          <Copy size={14} /> 仅复制用户加
         </button>
         <button onClick={handleRestoreAllDeleted} style={iconBtn('ghost')} disabled={deletedBase.size === 0}>
           <RotateCcw size={14} /> 恢复全部
