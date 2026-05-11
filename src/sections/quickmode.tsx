@@ -202,16 +202,27 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // -------- render --------
 
   return (
-    <div className="quickmode-root">
-      <div className="quickmode-hero">
-        <div className="quickmode-hero-title">
-          <Sparkles size={18} color="#FF5E00" />
-          <h2>{t('quickMode')}</h2>
+    <div className="about-container about-arcade-shell quickmode-root">
+      <div className="about-page">
+      <section className="about-banner-card">
+        <div className="about-banner-main">
+          <div className="about-banner-icon"><Sparkles size={32} color="#1767c7" /></div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0a356d' }}>{t('quickMode')}</h2>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#456' }}>{t('quickModeSubtitle')}</p>
+          </div>
         </div>
-        <p className="quickmode-hero-sub">{t('quickModeSubtitle')}</p>
-      </div>
+        <button onClick={onRandomize} className="about-arcade-btn">
+          <Wand2 size={16} /> {t('quickRandom')}
+        </button>
+      </section>
 
-      {/* Preview — 滚轮在这里微调 face rotation */}
+      {/* Preview — 米白卡片风格匹配 LittleRed about-* 系列 */}
+      <section className="about-panel">
+        <div className="about-panel-title">
+          <span className="about-panel-badge"><Sparkles size={18} /></span>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '预览' : 'Preview'}</h3>
+        </div>
       <div className="quickmode-preview-wrap" ref={previewWrapRef}>
         <div ref={previewRef} className="quickmode-preview" style={{ fontFamily: fontStack }}>
           <div className="qm-panda-frame">
@@ -233,18 +244,19 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
           )}
         </div>
       </div>
+      </section>
 
-      {/* Action buttons */}
-      <div className="quickmode-actions">
-        <button onClick={onCopy} className="qm-btn qm-btn-primary">
+      {/* Action buttons — about-arcade-btn 风格 */}
+      <section style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 12 }}>
+        <button onClick={onCopy} className="about-arcade-btn">
           <Copy size={14} /> {t('quickCopy')}
         </button>
-        <button onClick={onDownload} className="qm-btn">
+        <button onClick={onDownload} className="about-arcade-btn">
           <Download size={14} /> {t('quickDownload')}
         </button>
         <div style={{ position: 'relative' }}>
-          <button onClick={onFav} className={'qm-btn ' + (isFavored ? 'qm-btn-fav-on' : '')}>
-            <Heart size={14} fill={isFavored ? '#FF5E00' : 'none'} />
+          <button onClick={onFav} className="about-arcade-btn" style={isFavored ? { background: 'linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%)', borderColor: '#a13a09' } : {}}>
+            <Heart size={14} fill={isFavored ? '#fff' : 'none'} />
             {t('quickFav')}
           </button>
           {namePopoverOpen && (
@@ -256,32 +268,30 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             />
           )}
         </div>
-        <span className="qm-divider" />
-        <button onClick={onRandomize} className="qm-btn qm-btn-accent">
-          <Wand2 size={14} /> {t('quickRandom')}
-        </button>
-        <button onClick={onToEditor} className="qm-btn qm-btn-ghost">
+        <button onClick={onToEditor} className="about-arcade-btn" style={{ background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
           {t('quickToEditor')} <ArrowRight size={14} />
         </button>
-      </div>
+      </section>
 
-      {/* Face transform row: rotation dot + flip + reset */}
-      <div className="quickmode-transform-row">
-        <RotationDot value={faceRotation} onChange={setFaceRotation} />
-        <button onClick={onFlipH} className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')} title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}>
-          <FlipHorizontal size={16} />
-        </button>
-        <button onClick={onResetTransform} className="qm-icon-btn" title={lang === 'zh' ? '重置' : 'Reset'}>
-          <RotateCcw size={14} />
-        </button>
-        <span className="qm-rotation-display">
-          {faceRotation > 0 ? '+' : ''}{faceRotation}°
-          {faceFlipX && ' ⇋'}
+      {/* Face transform row: rotation dot + flip + reset — 米白卡片风格 */}
+      <section className="about-banner-card" style={{ marginTop: 12, padding: '12px 22px' }}>
+        <div className="quickmode-transform-row" style={{ flex: 1 }}>
+          <RotationDot value={faceRotation} onChange={setFaceRotation} />
+          <button onClick={onFlipH} className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')} title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}>
+            <FlipHorizontal size={16} />
+          </button>
+          <button onClick={onResetTransform} className="qm-icon-btn" title={lang === 'zh' ? '重置' : 'Reset'}>
+            <RotateCcw size={14} />
+          </button>
+          <span className="qm-rotation-display">
+            {faceRotation > 0 ? '+' : ''}{faceRotation}°
+            {faceFlipX && ' ⇋'}
+          </span>
+        </div>
+        <span className="about-chip" style={{ padding: '4px 10px', fontSize: 11 }}>
+          {lang === 'zh' ? '拖圆点旋转' : 'Drag dot'}
         </span>
-      </div>
-      <div className="quickmode-hint">
-        {lang === 'zh' ? '拖动圆点旋转 face' : 'Drag dot to rotate face'}
-      </div>
+      </section>
 
       {/* Panda head rail */}
       <RailSection
@@ -338,6 +348,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
           ))}
         </select>
+      </div>
       </div>
     </div>
   );

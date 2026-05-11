@@ -182,49 +182,60 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
     }, 30);
   }, [dispatch, generateId, lang, onOpenEditor]);
 
-  // 空 state
+  // 空 state — 套 LittleRed about- 风格
   if (Object.keys(favs).length === 0) {
     return (
-      <div className="col-root">
-        <div className="col-empty">
-          <FolderOpen size={48} color="#666" />
-          <h3>{lang === 'zh' ? '草图本是空的' : 'No drafts yet'}</h3>
-          <p>{lang === 'zh' ? '去快速生图收藏几张试试' : 'Open Quick mode and save some drafts'}</p>
-          <button onClick={onOpenQuick} className="col-cta">
-            <Sparkles size={14} />
-            {lang === 'zh' ? '打开快速生图' : 'Open Quick Mode'}
-          </button>
+      <div className="about-container about-arcade-shell col-root">
+        <div className="about-page">
+          <section className="about-banner-card" style={{ flexDirection: 'column', textAlign: 'center', padding: '40px 22px' }}>
+            <FolderOpen size={48} color="#1767c7" />
+            <h3 style={{ margin: '12px 0 6px', fontSize: 20, fontWeight: 800, color: '#0a356d' }}>
+              {lang === 'zh' ? '草图本是空的' : 'No drafts yet'}
+            </h3>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#456' }}>
+              {lang === 'zh' ? '去快速生图收藏几张试试' : 'Open Quick mode and save some drafts'}
+            </p>
+            <button onClick={onOpenQuick} className="about-arcade-btn">
+              <Sparkles size={14} />
+              {lang === 'zh' ? '打开快速生图' : 'Open Quick Mode'}
+            </button>
+          </section>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="col-root">
-      <div className="col-hero">
-        <div className="col-hero-title">
-          <FolderOpen size={20} color="#FF5E00" />
-          <h2>{lang === 'zh' ? '我的草图' : 'My Drafts'}</h2>
-          <span className="col-count">{items.length}</span>
-          <div style={{ flex: 1 }} />
-          <div className="col-filter">
-            {(['all', 'recent'] as Filter[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={'col-filter-btn ' + (filter === f ? 'col-filter-btn-on' : '')}
-              >
-                {lang === 'zh' ? (f === 'all' ? '全部' : '最近') : (f === 'all' ? 'All' : 'Recent')}
-              </button>
-            ))}
+    <div className="about-container about-arcade-shell col-root">
+      <div className="about-page">
+      <section className="about-banner-card">
+        <div className="about-banner-main">
+          <div className="about-banner-icon"><FolderOpen size={32} color="#1767c7" /></div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0a356d', display: 'flex', alignItems: 'center', gap: 10 }}>
+              {lang === 'zh' ? '我的草图' : 'My Drafts'}
+              <span className="about-chip" style={{ padding: '4px 10px', fontSize: 12 }}>{items.length}</span>
+            </h2>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#456' }}>
+              {lang === 'zh' ? '点卡片多选 → 批量打包 ZIP / 删除' : 'Click card to multi-select → batch ZIP / delete'}
+            </p>
           </div>
         </div>
-        <p className="col-hero-sub">
-          {lang === 'zh'
-            ? '点 ☐ 多选 → 批量打包 ZIP / 删除；卡片 hover 看 actions'
-            : 'Click ☐ to multi-select → batch ZIP / delete; hover card for actions'}
-        </p>
-      </div>
+        <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'rgba(15, 93, 175, 0.1)', borderRadius: 12 }}>
+          {(['all', 'recent'] as Filter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={filter === f ? 'about-arcade-btn' : ''}
+              style={filter === f
+                ? { padding: '6px 14px', fontSize: 13, borderRadius: 10 }
+                : { padding: '6px 14px', fontSize: 13, color: '#0a356d', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            >
+              {lang === 'zh' ? (f === 'all' ? '全部' : '最近') : (f === 'all' ? 'All' : 'Recent')}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="col-grid">
         {items.map((fav) => (
@@ -272,6 +283,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 }

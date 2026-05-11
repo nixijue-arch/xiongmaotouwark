@@ -736,16 +736,16 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
 
   // ===== Render =====
   return (
-    <div className="fixed inset-0 z-[2001] flex items-center justify-center p-2" style={{ backgroundColor: 'rgba(0,0,0,0.9)' }} onClick={handleClose}>
+    <div className="fixed inset-0 z-[2001] flex items-center justify-center p-2" style={{ backgroundColor: 'rgba(10, 53, 109, 0.6)' }} onClick={handleClose}>
       <div className="relative w-full max-w-5xl rounded-2xl p-5 max-h-[96vh] overflow-y-auto"
-           style={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }} onClick={e => e.stopPropagation()}>
+           style={{ background: 'linear-gradient(180deg, #fffdf7 0%, #f7f1e3 100%)', border: '3px solid #0a4e97', boxShadow: '0 8px 24px rgba(7, 48, 95, 0.22)' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <Sparkles size={20} style={{ color: '#10B981' }} />
-            <h2 className="text-lg font-bold text-white">{t('smartExtractTitle')}</h2>
-            <span className="text-xs hidden sm:inline" style={{ color: '#888' }}>· {t('smartExtractHint')}</span>
+            <Sparkles size={20} style={{ color: '#1767c7' }} />
+            <h2 className="text-lg font-bold" style={{ color: '#0a356d' }}>{t('smartExtractTitle')}</h2>
+            <span className="text-xs hidden sm:inline" style={{ color: '#456' }}>· {t('smartExtractHint')}</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"
@@ -787,8 +787,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
               <input type="file" accept="image/png,image/jpeg,image/jpg,image/webp" multiple className="hidden"
                 onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) handleFiles(fs); (e.target as HTMLInputElement).value = ''; }} />
             </label>
-            <div className="mt-3 p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#aaa' }}>
-              <div className="font-semibold mb-1" style={{ color: '#10B981' }}>📌 几个小提醒</div>
+            <div className="mt-3 p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: 'linear-gradient(180deg, #dff0ff 0%, #d5ebff 100%)', border: '2px solid #0a4e97', color: '#0a356d' }}>
+              <div className="font-semibold mb-1" style={{ color: '#1767c7' }}>📌 几个小提醒</div>
               <div>· 尽量用 <b>正脸</b> 照片，效果最佳（侧脸 / 戴口罩可能识别不准）</div>
               <div>· 自动识别后可在原图上 <b>拖曲线</b> 改提取范围；<b>双击点</b> 删除多余控制点；任意空白处单击新增</div>
               <div>· 默认预设已适配大多数照片，效果不理想时再展开高级选项手动微调</div>
@@ -977,14 +977,14 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
           </>
         )}
 
-        {/* Footer actions */}
+        {/* Footer actions — about-arcade-btn 风格 */}
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={handleClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: '#2a2a2a' }}>
+          <button onClick={handleClose} className="about-arcade-btn" style={{ background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d', padding: '10px 16px', fontSize: 14 }}>
             {t('smartExtractCancel')}
           </button>
           <button onClick={handleConfirm} disabled={!activeItem?.outputCanvas || processing}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: '#10B981' }}>
+            className="about-arcade-btn disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ padding: '10px 16px', fontSize: 14 }}>
             <Check size={14} />
             {t('smartExtractConfirm')}
           </button>
