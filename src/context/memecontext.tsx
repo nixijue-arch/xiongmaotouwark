@@ -90,7 +90,8 @@ const initialState: AppState = {
   museumEditMode: false,
 };
 
-const SESSION_STORAGE_KEY = 'xiongmaotou.editor-state.v1';
+// v2 (2026-05-12): 句跃金透明 shell + 智能图层方案上线, 老 v1 session 里的 elements 位置/zIndex/blendMode 跟新逻辑不一致 → bump key 让所有用户首次进入新版自动空画布开始
+const SESSION_STORAGE_KEY = 'xiongmaotou.editor-state.v2';
 const DRAFT_SLOTS_STORAGE_KEY = 'xiongmaotou.editor-drafts.v1';
 export const DRAFT_SLOT_MAX = 40;
 
