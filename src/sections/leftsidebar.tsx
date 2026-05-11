@@ -264,25 +264,24 @@ export function LeftSidebar() {
           <span className="draft-card-icon">💾</span>
           <span className="draft-card-title">{lang === 'zh' ? '本地草稿' : 'Local Draft'}</span>
         </div>
-        <button className="draft-save-current-btn" onClick={() => void saveDraft(nextDraftSlot.id)}>
-          {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
-        </button>
-        {/* 存到草图本 — 联通 useQuickFavs (跟 Quick / Collection 共享) */}
+        {/* 一键打通: 保存到草稿N 同时进草图本 (顶部"草图" tab 也能看) */}
         <button
           className="draft-save-current-btn"
-          onClick={handleSaveToCollection}
+          onClick={() => {
+            void saveDraft(nextDraftSlot.id);
+            // 同时存到 useQuickFavs — 草稿1 → 草图1 等价
+            handleSaveToCollection();
+          }}
           disabled={state.elements.filter(isPanda).length === 0}
-          style={{ marginTop: 6, background: 'linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%)', borderColor: '#a13a09', color: '#fff' }}
-          title={lang === 'zh' ? '存到顶部「草图」tab' : 'Save to top "Drafts" tab'}
         >
-          {lang === 'zh' ? '💾 存到草图本' : '💾 Save to Drafts'}
+          {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
         </button>
         {savedDraftSlots.length === 0 ? (
           <p className="draft-empty-hint">
             {lang === 'zh' ? '还没有已保存草稿，先保存一份当前编辑内容' : 'No saved drafts yet. Save the current edit first.'}
           </p>
         ) : (
-          <div className="draft-slot-grid">
+          <div className="draft-slot-grid" style={{ maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
             {savedDraftSlots.map(slot => {
             const draftTime = slot.updatedAt
               ? new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {

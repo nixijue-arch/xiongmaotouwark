@@ -18,7 +18,10 @@ import { useQuickFavs, makeFavKey } from '@/hooks/useQuickFavs';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
 import { PandaCanvas } from '@/components/pandacanvas';
+import { PhotoCropModal } from '@/components/photocropmodal';
+import { SmartExtractModal } from '@/components/smartextractmodal';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
+import { Camera } from 'lucide-react';
 import {
   Sparkles, Copy, Download, Heart, Wand2, ArrowRight, Type,
   RotateCcw, FlipHorizontal, Check, X,
@@ -60,6 +63,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   });
   const [faceRotation, setFaceRotation] = useState(0);
   const [faceFlipX, setFaceFlipX] = useState(false);
+  const [customFaceModalOpen, setCustomFaceModalOpen] = useState(false);
+  const [smartModalOpen, setSmartModalOpen] = useState(false);
+  const [customFace, setCustomFace] = useState<Material | null>(null);
   // 防频闪：滚轮高频改 rotation 时，PandaCanvas 用 deferred 值
   // → React 跳过中间帧，仅在用户停下时合成最终 canvas
   // memory feedback_engineering.md '频闪用 useDeferredValue 防' SOP
@@ -80,7 +86,16 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     () => PANDA_HEADS.find((p) => p.id === pandaId) ?? PANDA_HEADS[0],
     [pandaId]
   );
-  const face = useMemo(() => FACES.find((f) => f.id === faceId) ?? FACES[0], [faceId]);
+  // 优先用 customFace (自制/智能提取的)，否则用 池里的
+  const face = useMemo(() => customFace ?? (FACES.find((f) => f.id === faceId) ?? FACES[0]), [faceId, customFace]);
+
+  // 自制熊猫脸 / 智能提取 confirm 后注入到 Quick 的 face state — 跳过 faceId 直接覆盖
+  const onCustomFaceConfirm = useCallback((dataUrl: string) => {
+    const id = `custom-face-${Date.now()}`;
+    setCustomFace({ id, src: dataUrl, labelCn: '自制人脸', labelEn: 'Custom', tags: [], tagsEn: [], faceOffset: { x: 0, y: 0, w: 0, h: 0 } });
+    setCustomFaceModalOpen(false);
+    setSmartModalOpen(false);
+  }, []);
   const fontStack = FONT_OPTIONS.find((f) => f.id === fontKey)?.stack ?? FONT_OPTIONS[0].stack;
   const favKey = makeFavKey(pandaId, faceId, text, fontKey);
   const isFavored = Boolean(favs[favKey]);
@@ -218,8 +233,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             badge="😂"
             title={t('quickPickFace')}
             items={FACES}
-            value={faceId}
-            onChange={setFaceId}
+            value={customFace ? '__custom__' : faceId}
+            onChange={(id) => { setFaceId(id); setCustomFace(null); }}
             lang={lang}
           />
         </aside>
@@ -394,8 +409,43 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               </button>
             </div>
           </section>
+
+          {/* 上传 / 智能提取人脸 — 输出后直接套到 Quick 当前 panda 上 */}
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Camera size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '上传 / 提取' : 'Upload / Extract'}</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => setCustomFaceModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
+                <Camera size={14} /> {t('customFace')}
+              </button>
+              <button onClick={() => setSmartModalOpen(true)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)', borderColor: '#0a6e50' }}>
+                <Sparkles size={14} /> {t('smartExtract')}
+              </button>
+              {customFace && (
+                <button onClick={() => setCustomFace(null)} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d', fontSize: 12, padding: '8px 14px' }}>
+                  <X size={12} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
+                </button>
+              )}
+            </div>
+          </section>
         </aside>
       </div>
+
+      {/* Modals — onConfirm 注入 face 到 quick state */}
+      <PhotoCropModal
+        isOpen={customFaceModalOpen}
+        onClose={() => setCustomFaceModalOpen(false)}
+        onConfirm={onCustomFaceConfirm}
+        language={lang}
+      />
+      <SmartExtractModal
+        isOpen={smartModalOpen}
+        onClose={() => setSmartModalOpen(false)}
+        onConfirm={onCustomFaceConfirm}
+        language={lang}
+      />
     </div>
   );
 }
@@ -426,14 +476,16 @@ function PickPanel({ badge, title, items, value, onChange, lang }: PickPanelProp
             style={{
               padding: 4,
               borderRadius: 10,
-              background: it.id === value ? 'linear-gradient(180deg, #1f92f8 0%, #116bcc 100%)' : '#fff',
-              border: it.id === value ? '2px solid #09498f' : '2px solid rgba(10, 78, 151, 0.25)',
+              background: '#fff',
+              // 只在边框做选中高亮 — 不要整张卡蓝色盖住 panda/face 图
+              border: it.id === value ? '3px solid #1f92f8' : '2px solid rgba(10, 78, 151, 0.18)',
+              boxShadow: it.id === value ? '0 0 0 2px rgba(31,146,248,0.25), 0 2px 8px rgba(7,48,95,0.18)' : 'none',
               cursor: 'pointer',
               aspectRatio: '1',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'transform 120ms ease',
+              transition: 'all 120ms ease',
             }}
           >
             <img src={it.src} alt={it.id} draggable={false} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
