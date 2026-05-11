@@ -434,12 +434,17 @@ function DraggableText({ element, isSelected, onSelect }: {
             onBlur={commitEdit}
             onKeyDown={handleInputKeyDown}
             onClick={(e) => e.stopPropagation()}
-            className="px-2 py-1 bg-transparent border-none outline-none whitespace-nowrap block"
+            // size 属性比 minWidth+block 更稳定 — input 宽度直接跟着 char 数走, 不会撑出 canvas
+            // 删 block / whitespace-nowrap, 用 inline-block 默认行为 + width: max-content 兜底
+            size={Math.max(4, (editText.length || 1) + 1)}
+            className="px-2 py-1 bg-transparent border-none outline-none"
             style={{
               ...textStyle,
               caretColor: '#FF5E00',
-              minWidth: Math.max(80, (editText.length || 1) * element.fontSize * 0.65),
+              // 限死 max-width 防超长文字撑爆 canvas / 推动 editor-layout
+              maxWidth: 440,
               boxShadow: 'inset 0 -2px 0 #FF5E00',
+              boxSizing: 'border-box',
             }}
           />
         ) : (

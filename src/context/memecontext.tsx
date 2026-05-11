@@ -532,7 +532,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [state.elements, state.selectedId, state.language]);
 
   return (
-    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft }}>
+    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, renameDraft }}>
       {children}
     </MemeContext.Provider>
   );
