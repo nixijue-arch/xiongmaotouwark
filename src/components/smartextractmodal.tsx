@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Upload, Sparkles, Check, ChevronDown, ChevronUp, Undo2, Redo2, RotateCcw } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { X, Upload, Sparkles, Check, ChevronDown, ChevronUp, Undo2, Redo2 } from 'lucide-react';
 import { translations } from '@/context/translations';
-import { PANDA_HEADS } from '@/data/materials';
+import { ALL_PANDAS, getLivePandaFaceOffset } from '@/data/materials';
+import { PandaCanvas } from '@/components/pandacanvas';
 
 interface Props {
   isOpen: boolean;
@@ -75,9 +76,14 @@ interface Params {
 }
 
 const PRESETS: Record<string, Params> = {
+  // 经典温和：保留较多细节，适合中等亮度暗调照片
   'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 60, whitePoint: 200, gamma: 0.85, contrast: 30, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
+  // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
   'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024 },
+  // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
   'hi-contrast':  { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 70, whitePoint: 190, gamma: 0.7,  contrast: 60, edgeStrength: 60, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
 };
 
@@ -167,15 +173,25 @@ function analyzeFace(image: HTMLImageElement, maskHandles: Point[]): any {
 }
 
 function autoRoute(f: any): { preset: string; reason: string } {
-  const { mean, std, darkRatio, lightRatio } = f;
+  // 路由偏向"高调亮白"作为默认 — 熊猫头表情包美学就是少纹理 + 神似 + 更白
+  // 之前 ground-truth 是 fallback, 导致大多数正常打光的照片得不到最贴近熊猫头风格的处理
+  const { mean, std, darkRatio } = f;
   const cv = std / Math.max(1, mean);
-  if (std > 65 && darkRatio > 0.18) return { preset: 'hi-contrast', reason: `强光影 (std=${std.toFixed(0)}) → 极致黑白` };
-  if (darkRatio > 0.30) return { preset: 'ground-truth', reason: `暗调主导 (${(darkRatio * 100).toFixed(0)}% 暗) → 经典温和` };
-  if (cv < 0.27 && mean > 140 && darkRatio < 0.18 && lightRatio > 0.08) {
-    return { preset: 'high-key', reason: `均匀亮调 (mean=${mean.toFixed(0)}, cv=${cv.toFixed(2)}) → 高调亮白` };
+
+  // 极强光影 (明显的硬阴影 + 大量暗块) → 极致黑白才能 capture
+  if (std > 78 && darkRatio > 0.28) {
+    return { preset: 'hi-contrast', reason: `强光影 (std=${std.toFixed(0)}, 暗 ${(darkRatio * 100).toFixed(0)}%) → 极致黑白` };
   }
-  if (mean < 105) return { preset: 'lofi', reason: `低光 (mean=${mean.toFixed(0)}) → 低保真做旧` };
-  return { preset: 'ground-truth', reason: `常规 (mean=${mean.toFixed(0)}, cv=${cv.toFixed(2)}) → 经典预设` };
+  // 真正的低光照（夜景 / 室内黯淡）→ 低保真做旧能"裱救"颗粒感
+  if (mean < 95 && darkRatio > 0.40) {
+    return { preset: 'lofi', reason: `低光 (mean=${mean.toFixed(0)}) → 低保真做旧` };
+  }
+  // 整体偏暗 (但还有结构) → 经典温和保留更多细节
+  if (mean < 118 || darkRatio > 0.38) {
+    return { preset: 'ground-truth', reason: `暗调 (mean=${mean.toFixed(0)}, 暗 ${(darkRatio * 100).toFixed(0)}%) → 经典温和` };
+  }
+  // 默认推荐：高调亮白 — 熊猫头表情包标准美学
+  return { preset: 'high-key', reason: `亮调 (mean=${mean.toFixed(0)}, cv=${cv.toFixed(2)}) → 高调亮白（熊猫头风格）` };
 }
 
 // 主处理函数：mask polygon + 风格化 + 暗边修剪 + 白底
@@ -363,25 +379,26 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
   const [activeId, setActiveId] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
   const [autoMode, setAutoMode] = useState(true);
-  const [currentPreset, setCurrentPreset] = useState<string>('ground-truth');
+  // 默认 high-key — 熊猫头表情包风格（少纹理 + 神似 + 更白）
+  const [currentPreset, setCurrentPreset] = useState<string>('high-key');
   const [recommendReason, setRecommendReason] = useState<string>('');
-  const [params, setParams] = useState<Params>(PRESETS['ground-truth']);
+  const [params, setParams] = useState<Params>(PRESETS['high-key']);
   const [loadingModel, setLoadingModel] = useState(false);
   const [error, setError] = useState<string>('');
   const [processing, setProcessing] = useState(false);
-  // Panda preview
-  const [showPandaPreview, setShowPandaPreview] = useState(true);
+  // Panda preview — 用 PandaCanvas 而不是手动 canvas draw, 这样和 QuickMode / Collection
+  // 共享同一套 composeMeme 锚点对齐 (bbox crop + content_center)
   const [pandaHeadId, setPandaHeadId] = useState<string>('panda-01');
   const [faceRotation, setFaceRotation] = useState(0);
   const [faceFlipX, setFaceFlipX] = useState(false);
   const [faceFill, setFaceFill] = useState(0.92);
-  const [, setPandaCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [faceDataUrl, setFaceDataUrl] = useState<string>('');
   // polygon 拖拽
   const [draggingHandle, setDraggingHandle] = useState(-1);
 
   const outputPreviewRef = useRef<HTMLCanvasElement>(null);
-  const pandaPreviewRef = useRef<HTMLCanvasElement>(null);
   const originalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const currentPanda = useMemo(() => ALL_PANDAS.find(p => p.id === pandaHeadId) || ALL_PANDAS[0], [pandaHeadId]);
 
   // History stack (undo/redo)
   interface Snapshot { params: Params; currentPreset: string; itemHandles: { id: string; handles: Point[] }[]; activeId: string | null; }
@@ -498,7 +515,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     pushHistory(true);
   }, [autoMode, currentPreset, pushHistory]);
 
-  // active item / params 变化时重渲染输出
+  // active item / params 变化时重渲染输出 + 同步生成 face dataURL 给 PandaCanvas 用
   useEffect(() => {
     if (!activeItem) return;
     setProcessing(true);
@@ -511,6 +528,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
           c.width = 320; c.height = 320;
           c.getContext('2d')!.drawImage(out, 0, 0, 320, 320);
         }
+        // 也存 dataURL 给 PandaCanvas 套熊猫头预览用（与 QuickMode 共享 composeMeme 锚点对齐）
+        try { setFaceDataUrl(out.toDataURL('image/png')); } catch { /* ignore */ }
         // 原图 + overlay
         drawOriginalWithOverlay(activeItem);
       } catch (e: any) {
@@ -522,45 +541,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     return () => cancelAnimationFrame(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, params, activeItem?.maskHandles]);
-
-  // panda preview 合成
-  useEffect(() => {
-    if (!showPandaPreview || !advanced || !activeItem?.outputCanvas) { setPandaCanvas(null); return; }
-    const panda = PANDA_HEADS.find(p => p.id === pandaHeadId) || PANDA_HEADS[0];
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const SIZE = 400;
-      const c = document.createElement('canvas');
-      c.width = SIZE; c.height = SIZE;
-      const ctx = c.getContext('2d')!;
-      ctx.fillStyle = '#FFF';
-      ctx.fillRect(0, 0, SIZE, SIZE);
-      // 先画 face 在 faceOffset 区域（这样 panda 廓覆盖在 face 上方）
-      const fo = panda.faceOffset; // {x, y, w, h} 在 400×400 坐标系
-      const face = activeItem.outputCanvas!;
-      const fScale = Math.min(fo.w / face.width, fo.h / face.height) * faceFill;
-      const fw = face.width * fScale, fh = face.height * fScale;
-      const cx = fo.x + fo.w / 2, cy = fo.y + fo.h / 2;
-      ctx.save();
-      ctx.translate(cx, cy);
-      if (faceRotation) ctx.rotate(faceRotation * Math.PI / 180);
-      if (faceFlipX) ctx.scale(-1, 1);
-      ctx.drawImage(face, -fw / 2, -fh / 2, fw, fh);
-      ctx.restore();
-      // panda 廓画上层（白色透明区域露出 face）
-      ctx.drawImage(img, 0, 0, SIZE, SIZE);
-      setPandaCanvas(c);
-      if (pandaPreviewRef.current) {
-        const pc = pandaPreviewRef.current;
-        pc.width = SIZE; pc.height = SIZE;
-        pc.getContext('2d')!.drawImage(c, 0, 0);
-      }
-    };
-    img.onerror = () => setPandaCanvas(null);
-    img.src = panda.src;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeItem?.outputCanvas, pandaHeadId, faceRotation, faceFlipX, faceFill, showPandaPreview, advanced]);
 
   // 原图 + face polygon overlay
   function drawOriginalWithOverlay(item: Item) {
@@ -724,7 +704,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
   };
   const handleClose = () => {
     setItems([]); setActiveId(null); setError(''); setRecommendReason('');
-    setAdvanced(false); setCurrentPreset('ground-truth'); setParams(PRESETS['ground-truth']);
+    setAdvanced(false); setCurrentPreset('high-key'); setParams(PRESETS['high-key']);
+    setFaceDataUrl('');
     historyRef.current = { stack: [], idx: -1 };
     onClose();
   };
@@ -749,27 +730,29 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
           </div>
           <div className="flex items-center gap-1">
             <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"
-              className="p-1.5 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed">
-              <Undo2 size={16} className="text-white" />
+              className="p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ color: '#0a356d' }}>
+              <Undo2 size={16} />
             </button>
             <button onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)"
-              className="p-1.5 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed">
-              <Redo2 size={16} className="text-white" />
+              className="p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ color: '#0a356d' }}>
+              <Redo2 size={16} />
             </button>
-            <button onClick={handleClose} className="p-1.5 rounded hover:bg-white/10">
-              <X size={18} className="text-white" />
+            <button onClick={handleClose} className="p-1.5 rounded" style={{ color: '#0a356d' }}>
+              <X size={18} />
             </button>
           </div>
         </div>
 
         {loadingModel && (
-          <div className="mb-3 p-2 rounded text-xs text-white" style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)' }}>
-            <span className="inline-block w-3 h-3 mr-2 border-2 border-green-300 border-r-transparent rounded-full animate-spin align-middle" />
+          <div className="mb-3 p-2 rounded text-xs" style={{ background: 'linear-gradient(180deg, #ddf5e8 0%, #c6ecd9 100%)', border: '1.5px solid #0a8552', color: '#0a5c39', fontWeight: 600 }}>
+            <span className="inline-block w-3 h-3 mr-2 border-2 border-green-700 border-r-transparent rounded-full animate-spin align-middle" />
             {t('smartExtractLoading')}
           </div>
         )}
         {error && (
-          <div className="mb-3 p-2 rounded text-xs text-red-300" style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.4)' }}>
+          <div className="mb-3 p-2 rounded text-xs" style={{ background: 'linear-gradient(180deg, #fbe1e1 0%, #f6cbcb 100%)', border: '1.5px solid #a74040', color: '#8a2424', fontWeight: 600 }}>
             {error}
           </div>
         )}
@@ -777,21 +760,21 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
         {/* Upload zone */}
         {items.length === 0 && !loadingModel && (
           <>
-            <label className="block border-2 border-dashed rounded-xl py-10 px-6 text-center cursor-pointer"
-              style={{ borderColor: '#2a2a2a', background: 'rgba(16,185,129,0.05)' }}
+            <label className="block border-2 border-dashed rounded-xl py-8 px-6 text-center cursor-pointer transition-all hover:scale-[1.01]"
+              style={{ borderColor: '#0a8552', background: 'linear-gradient(180deg, #fff 0%, #ddf5e8 100%)' }}
               onDragOver={e => e.preventDefault()}
               onDrop={e => { e.preventDefault(); const fs = Array.from(e.dataTransfer.files).filter(x => /^image\//.test(x.type)); if (fs.length) handleFiles(fs); }}>
-              <Upload size={28} className="mx-auto mb-2" style={{ color: '#10B981' }} />
-              <div className="text-white font-semibold text-sm">{t('smartExtractUpload')}</div>
-              <div className="text-[11px] mt-1" style={{ color: '#888' }}>JPG / PNG / WebP · 拖拽 / 点击 · 可批量</div>
+              <Upload size={28} className="mx-auto mb-2" style={{ color: '#0a8552' }} />
+              <div className="font-bold text-sm" style={{ color: '#0a356d' }}>{t('smartExtractUpload')}</div>
+              <div className="text-[11px] mt-1" style={{ color: '#456', fontWeight: 500 }}>JPG / PNG / WebP · 拖拽 / 点击 · 可批量</div>
               <input type="file" accept="image/png,image/jpeg,image/jpg,image/webp" multiple className="hidden"
                 onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) handleFiles(fs); (e.target as HTMLInputElement).value = ''; }} />
             </label>
             <div className="mt-3 p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: 'linear-gradient(180deg, #dff0ff 0%, #d5ebff 100%)', border: '2px solid #0a4e97', color: '#0a356d' }}>
-              <div className="font-semibold mb-1" style={{ color: '#1767c7' }}>📌 几个小提醒</div>
+              <div className="font-bold mb-1" style={{ color: '#1767c7' }}>📌 几个小提醒</div>
               <div>· 尽量用 <b>正脸</b> 照片，效果最佳（侧脸 / 戴口罩可能识别不准）</div>
               <div>· 自动识别后可在原图上 <b>拖曲线</b> 改提取范围；<b>双击点</b> 删除多余控制点；任意空白处单击新增</div>
-              <div>· 默认预设已适配大多数照片，效果不理想时再展开高级选项手动微调</div>
+              <div>· 默认预设是<b>高调亮白</b>（熊猫头风格），效果不理想时再展开高级选项手动微调</div>
             </div>
           </>
         )}
@@ -799,15 +782,16 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
         {/* Main preview area */}
         {activeItem && (
           <>
-            <div className={`grid gap-3 ${advanced && showPandaPreview ? 'md:grid-cols-3' : 'md:grid-cols-2'} grid-cols-1`}>
+            {/* 3 列预览始终显示 — 原图 / 输出 face / 套熊猫头 */}
+            <div className="grid gap-3 md:grid-cols-3 grid-cols-1">
               <div>
-                <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#aaa' }}>
-                  <span>原图 · 拖曲线 / 双击删点 改提取范围</span>
-                  <button onClick={resetHandles} className="text-[10px]" style={{ color: '#10B981' }}>重置 mask</button>
+                <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#456' }}>
+                  <span style={{ fontWeight: 600 }}>原图 · 拖曲线 / 双击删点</span>
+                  <button onClick={resetHandles} className="text-[10px] font-semibold" style={{ color: '#0a8552' }}>重置 mask</button>
                 </div>
                 <div
                   className="rounded-lg overflow-hidden aspect-square flex items-center justify-center select-none"
-                  style={{ background: '#0a0a0a', cursor: draggingHandle >= 0 ? 'grabbing' : 'grab', touchAction: 'none' }}
+                  style={{ background: '#fff', border: '2px solid #0a4e97', cursor: draggingHandle >= 0 ? 'grabbing' : 'grab', touchAction: 'none' }}
                   onPointerDown={onOriginalPointerDown}
                   onPointerMove={onOriginalPointerMove}
                   onPointerUp={onOriginalPointerUp}
@@ -819,26 +803,39 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
               </div>
 
               <div>
-                <div className="text-[11px] mb-1" style={{ color: '#aaa' }}>
-                  输出 face {processing && <span style={{ color: '#10B981' }}>· {t('smartExtractProcessing')}</span>}
+                <div className="text-[11px] mb-1" style={{ color: '#456', fontWeight: 600 }}>
+                  输出 face {processing && <span style={{ color: '#0a8552' }}>· {t('smartExtractProcessing')}</span>}
                 </div>
                 <div className="rounded-lg overflow-hidden aspect-square flex items-center justify-center"
-                  style={{ background: '#FFF', backgroundImage: 'repeating-conic-gradient(#F0F0F0 0% 25%, #FFF 0% 50%)', backgroundSize: '16px 16px' }}>
+                  style={{ background: '#FFF', backgroundImage: 'repeating-conic-gradient(#F0F0F0 0% 25%, #FFF 0% 50%)', backgroundSize: '16px 16px', border: '2px solid #0a4e97' }}>
                   <canvas ref={outputPreviewRef} className="max-w-full max-h-full" />
                 </div>
               </div>
 
-              {advanced && showPandaPreview && (
-                <div>
-                  <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#aaa' }}>
-                    <span>套熊猫头预览</span>
-                    <button onClick={() => setShowPandaPreview(false)} className="text-[10px]" style={{ color: '#888' }}>隐藏</button>
-                  </div>
-                  <div className="rounded-lg overflow-hidden aspect-square flex items-center justify-center" style={{ background: '#FFF' }}>
-                    <canvas ref={pandaPreviewRef} className="max-w-full max-h-full" />
-                  </div>
+              {/* 套熊猫头预览 — 用 PandaCanvas 共享 composeMeme 锚点对齐 (跟 QuickMode 完全一致) */}
+              <div>
+                <div className="text-[11px] mb-1" style={{ color: '#456', fontWeight: 600 }}>
+                  套熊猫头预览
+                  <span style={{ color: '#1767c7', marginLeft: 6, fontWeight: 500 }}>· {currentPanda.labelCn}</span>
                 </div>
-              )}
+                <div className="rounded-lg overflow-hidden aspect-square flex items-center justify-center" style={{ background: '#FFF', border: '2px solid #0a4e97' }}>
+                  {faceDataUrl ? (
+                    <PandaCanvas
+                      pandaSrc={currentPanda.src}
+                      pandaId={currentPanda.id}
+                      faceSrc={faceDataUrl}
+                      faceOffset={getLivePandaFaceOffset(currentPanda)}
+                      rotation={faceRotation}
+                      flipX={faceFlipX}
+                      faceFill={faceFill}
+                      alt="套熊猫头预览"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <span className="text-[11px]" style={{ color: '#aaa' }}>等待处理...</span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Thumbnail strip (multiple images) */}
@@ -849,7 +846,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                     setActiveId(it.id);
                     if (it.recommended) setRecommendReason(it.recommended.reason);
                   }} className="flex-shrink-0 rounded-lg overflow-hidden border-2 w-12 h-12"
-                    style={{ borderColor: it.id === activeId ? '#10B981' : 'transparent', background: '#0a0a0a' }}>
+                    style={{ borderColor: it.id === activeId ? '#0a8552' : 'rgba(10,78,151,0.2)', background: '#fff' }}>
                     {it.outputCanvas
                       ? <canvas width={48} height={48} ref={(el) => { if (el) el.getContext('2d')!.drawImage(it.outputCanvas!, 0, 0, 48, 48); }} className="w-full h-full object-cover" />
                       : <img src={it.image.src} className="w-full h-full object-cover" alt="" />}
@@ -859,7 +856,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             )}
 
             {/* SIMPLE 模式参数 (3 sliders always visible) */}
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 space-y-1.5">
               <SliderRow label={t('smartExtractHeadExpand')} value={params.headExpand} min={-30} max={40}
                 onChange={v => setParam('headExpand', v)} fmt={v => (v >= 0 ? '+' : '') + v + '%'} />
               <SliderRow label={t('smartExtractTrimDark')} value={params.trimDark} min={0} max={100}
@@ -868,50 +865,75 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                 onChange={v => setParam('contrast', v)} fmt={v => '+' + v} />
             </div>
 
-            {/* Advanced 展开按钮 */}
+            {/* ===== 预设 (always visible, above advanced) — about-arcade-btn 风格 ===== */}
+            <div className="mt-3" style={{ background: '#fff', border: '2px solid #0a4e97', borderRadius: 12, padding: '8px 10px', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.55), 0 2px 6px rgba(7,48,95,0.10)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold" style={{ color: '#0a356d' }}>预设</span>
+                <label className="flex items-center gap-1 text-[10px] cursor-pointer" style={{ color: '#0a356d', fontWeight: 600 }}>
+                  <input type="checkbox" checked={autoMode} onChange={e => {
+                    setAutoMode(e.target.checked);
+                    if (e.target.checked && activeItem?.recommended && activeItem.recommended.preset !== currentPreset) {
+                      applyPreset(activeItem.recommended.preset);
+                      setAutoMode(true);
+                    }
+                  }} style={{ accentColor: '#0a4e97' }} /> 智能路由
+                </label>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(['high-key', 'ground-truth', 'lofi', 'hi-contrast'] as const).map(p => {
+                  const isActive = currentPreset === p;
+                  const isRecommended = activeItem?.recommended?.preset === p;
+                  return (
+                    <button key={p} onClick={() => applyPreset(p)}
+                      className="about-arcade-btn relative"
+                      style={isActive
+                        ? { padding: '7px 8px', fontSize: 12, justifyContent: 'center', whiteSpace: 'nowrap' }
+                        : { padding: '7px 8px', fontSize: 12, justifyContent: 'center', background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', borderColor: '#0a4e97', color: '#0a356d', whiteSpace: 'nowrap' }}>
+                      {p === 'ground-truth' ? '经典' : p === 'high-key' ? '高调亮白' : p === 'lofi' ? '低保真做旧' : '极致黑白'}
+                      {isRecommended && (
+                        <span style={{ position: 'absolute', top: -6, right: -4, background: 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)', border: '1px solid #0a6e50', color: '#fff', fontSize: 9, padding: '1px 5px', borderRadius: 5, fontWeight: 700, boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }}>推荐</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {recommendReason && <div className="text-[10px] mt-2" style={{ color: '#456' }}>智能：{recommendReason}</div>}
+            </div>
+
+            {/* ===== 熊猫头套壳 (always visible, above advanced) — 跟 LeftSidebar 选熊猫头风格一致 ===== */}
+            <div className="mt-3" style={{ background: '#fff', border: '2px solid #0a4e97', borderRadius: 12, padding: '8px 10px', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.55), 0 2px 6px rgba(7,48,95,0.10)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold" style={{ color: '#0a356d' }}>熊猫头套壳</span>
+                <span className="text-[10px]" style={{ color: '#456' }}>当前: {currentPanda.labelCn}</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {ALL_PANDAS.slice(0, 16).map(p => (
+                  <button key={p.id} onClick={() => setPandaHeadId(p.id)}
+                    className="flex-shrink-0 rounded-lg overflow-hidden"
+                    title={p.labelCn}
+                    style={{
+                      width: 52, height: 52, padding: 2,
+                      background: '#fff',
+                      border: pandaHeadId === p.id ? '3px solid #1f92f8' : '2px solid rgba(10, 78, 151, 0.18)',
+                      boxShadow: pandaHeadId === p.id ? '0 0 0 2px rgba(31,146,248,0.25), 0 2px 6px rgba(7,48,95,0.15)' : 'none',
+                      cursor: 'pointer',
+                    }}>
+                    <img src={p.src} className="w-full h-full" style={{ objectFit: 'contain' }} alt={p.labelCn} draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Advanced 展开按钮 — about-arcade-btn 蓝 gradient (跟整站一致) */}
             <button onClick={() => setAdvanced(a => !a)}
-              className="mt-3 w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 text-white transition-colors"
-              style={{ background: advanced ? '#10B981' : '#2a2a2a' }}>
-              {advanced ? <><ChevronUp size={14} /> 收起高级</> : <><ChevronDown size={14} /> 展开高级选项</>}
+              className="about-arcade-btn"
+              style={{ marginTop: 10, width: '100%', padding: '8px 12px', fontSize: 12, justifyContent: 'center', background: advanced ? 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)' : undefined, borderColor: advanced ? '#0a6e50' : undefined }}>
+              {advanced ? <><ChevronUp size={14} /> 收起高级选项</> : <><ChevronDown size={14} /> 展开高级选项</>}
             </button>
 
-            {/* ADVANCED 面板 */}
+            {/* ADVANCED 面板 — 只放细节参数, 预设/熊猫头套壳已经在外面始终可见 */}
             {advanced && (
-              <div className="mt-3 space-y-4 border-t pt-3" style={{ borderColor: '#2a2a2a' }}>
-
-                {/* 预设 + 智能路由 */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-semibold" style={{ color: '#aaa' }}>预设</span>
-                    <label className="flex items-center gap-1 text-[10px] cursor-pointer" style={{ color: '#888' }}>
-                      <input type="checkbox" checked={autoMode} onChange={e => {
-                        setAutoMode(e.target.checked);
-                        if (e.target.checked && activeItem?.recommended && activeItem.recommended.preset !== currentPreset) {
-                          applyPreset(activeItem.recommended.preset);
-                          setAutoMode(true);
-                        }
-                      }} className="accent-green-500" /> 智能路由
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {(['ground-truth', 'high-key', 'lofi', 'hi-contrast'] as const).map(p => (
-                      <button key={p} onClick={() => applyPreset(p)}
-                        className="relative px-2 py-2 rounded text-[11px] font-semibold transition-colors"
-                        style={{
-                          background: currentPreset === p ? 'rgba(16,185,129,0.2)' : '#2a2a2a',
-                          color: '#FFF',
-                          border: '1px solid ' + (currentPreset === p ? '#10B981' : '#3a3a3a'),
-                        }}>
-                        {p === 'ground-truth' ? '熊猫头标准' : p === 'high-key' ? '高调亮白' : p === 'lofi' ? '低保真做旧' : '极致黑白'}
-                        {activeItem?.recommended?.preset === p && (
-                          <span className="absolute -top-1 -right-1 bg-green-500 text-white text-[8px] px-1 rounded font-bold">推荐</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  {recommendReason && <div className="text-[10px] mt-2" style={{ color: '#888' }}>智能：{recommendReason}</div>}
-                </div>
-
+              <div className="mt-3 space-y-3 pt-3" style={{ borderTop: '1px dashed rgba(10, 78, 151, 0.3)' }}>
                 {/* 抠图详细参数 */}
                 <FieldGroup title="抠图">
                   <SliderRow label="额头延伸" value={params.foreheadExt} min={-30} max={40} onChange={v => setParam('foreheadExt', v)} fmt={v => (v >= 0 ? '+' : '') + v + '%'} />
@@ -923,9 +945,9 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
 
                 {/* 风格化 */}
                 <FieldGroup title="风格化">
-                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#aaa' }}>
-                    <input type="checkbox" checked={params.autoNorm} onChange={e => setParam('autoNorm', e.target.checked)} className="accent-green-500" />
-                    自动 normalize（histogram 拉伸）
+                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#0a356d', fontWeight: 500 }}>
+                    <input type="checkbox" checked={params.autoNorm} onChange={e => setParam('autoNorm', e.target.checked)} style={{ accentColor: '#0a4e97' }} />
+                    自动 normalize (histogram 拉伸)
                   </label>
                   <SliderRow label="黑场点" value={params.blackPoint} min={0} max={120} onChange={v => setParam('blackPoint', v)} />
                   <SliderRow label="白场点" value={params.whitePoint} min={135} max={255} onChange={v => setParam('whitePoint', v)} />
@@ -935,43 +957,28 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                 </FieldGroup>
 
                 {/* 做旧 */}
-                <FieldGroup title="做旧（可选）">
-                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#aaa' }}>
-                    <input type="checkbox" checked={params.quantize} onChange={e => setParam('quantize', e.target.checked)} className="accent-green-500" />
-                    4 级量化（chouj）
+                <FieldGroup title="做旧 (可选)">
+                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#0a356d', fontWeight: 500 }}>
+                    <input type="checkbox" checked={params.quantize} onChange={e => setParam('quantize', e.target.checked)} style={{ accentColor: '#0a4e97' }} />
+                    4 级量化
                   </label>
-                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#aaa' }}>
-                    <input type="checkbox" checked={params.jpegLofi} onChange={e => setParam('jpegLofi', e.target.checked)} className="accent-green-500" />
+                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#0a356d', fontWeight: 500 }}>
+                    <input type="checkbox" checked={params.jpegLofi} onChange={e => setParam('jpegLofi', e.target.checked)} style={{ accentColor: '#0a4e97' }} />
                     JPEG 做旧
                   </label>
                   <SliderRow label="JPEG 质" value={params.jpegQ} min={10} max={90} onChange={v => setParam('jpegQ', v)} />
                   <SliderRow label="模糊" value={params.blur} min={0} max={30} onChange={v => setParam('blur', v)} fmt={v => v + 'px'} />
                 </FieldGroup>
 
-                {/* 套熊猫头预览参数 */}
-                {showPandaPreview ? (
-                  <FieldGroup title="套熊猫头预览">
-                    <div className="flex gap-2 overflow-x-auto pb-2">
-                      {PANDA_HEADS.slice(0, 12).map(p => (
-                        <button key={p.id} onClick={() => setPandaHeadId(p.id)}
-                          className="flex-shrink-0 w-14 h-14 rounded border-2"
-                          style={{ borderColor: pandaHeadId === p.id ? '#10B981' : '#2a2a2a', background: '#FFF' }}>
-                          <img src={p.src} className="w-full h-full object-contain" alt={p.labelCn} />
-                        </button>
-                      ))}
-                    </div>
-                    <SliderRow label="旋转" value={faceRotation} min={-180} max={180} onChange={setFaceRotation} fmt={v => v + '°'} />
-                    <SliderRow label="缩放" value={faceFill} min={0.5} max={1.3} step={0.01} onChange={setFaceFill} fmt={v => Math.round(v * 100) + '%'} />
-                    <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#aaa' }}>
-                      <input type="checkbox" checked={faceFlipX} onChange={e => setFaceFlipX(e.target.checked)} className="accent-green-500" />
-                      水平翻转
-                    </label>
-                  </FieldGroup>
-                ) : (
-                  <button onClick={() => setShowPandaPreview(true)} className="text-[11px] flex items-center gap-1" style={{ color: '#10B981' }}>
-                    <RotateCcw size={12} /> 显示套熊猫头预览
-                  </button>
-                )}
+                {/* 套熊猫头预览参数 - 旋转/缩放/翻转 */}
+                <FieldGroup title="预览微调">
+                  <SliderRow label="旋转" value={faceRotation} min={-180} max={180} onChange={setFaceRotation} fmt={v => v + '°'} />
+                  <SliderRow label="缩放" value={faceFill} min={0.5} max={1.3} step={0.01} onChange={setFaceFill} fmt={v => Math.round(v * 100) + '%'} />
+                  <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#0a356d', fontWeight: 500 }}>
+                    <input type="checkbox" checked={faceFlipX} onChange={e => setFaceFlipX(e.target.checked)} style={{ accentColor: '#0a4e97' }} />
+                    水平翻转
+                  </label>
+                </FieldGroup>
               </div>
             )}
           </>
@@ -1000,19 +1007,20 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
 function SliderRow({ label, value, min, max, step = 1, onChange, fmt = v => String(v) }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; fmt?: (v: number) => string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[11px] flex-shrink-0" style={{ color: '#aaa', width: 64 }}>{label}</span>
+      <span className="text-[11px] flex-shrink-0" style={{ color: '#0a356d', fontWeight: 600, width: 72 }}>{label}</span>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="flex-1 accent-green-500" />
-      <span className="text-[11px] font-mono flex-shrink-0 text-right" style={{ color: '#FFF', width: 44 }}>{fmt(value)}</span>
+        className="flex-1"
+        style={{ accentColor: '#0a4e97' }} />
+      <span className="text-[11px] font-mono flex-shrink-0 text-right" style={{ color: '#0a356d', fontWeight: 700, width: 48 }}>{fmt(value)}</span>
     </div>
   );
 }
 
 function FieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#666' }}>{title}</div>
+    <div className="space-y-2" style={{ background: 'rgba(255, 255, 255, 0.6)', border: '1px solid rgba(10, 78, 151, 0.2)', borderRadius: 10, padding: '8px 12px' }}>
+      <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: '#1767c7' }}>{title}</div>
       {children}
     </div>
   );

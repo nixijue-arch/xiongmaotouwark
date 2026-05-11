@@ -49,7 +49,6 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
           onClick={() => setPage('quick')}
           className={page === 'quick' ? activeLinkClass : 'header-link'}
           title={state.language === 'zh' ? '快速生图' : 'Quick'}
-          style={page === 'quick' ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' } : {}}
         >
           <Zap size={14} />
           <span className="link-label">{state.language === 'zh' ? '快速' : 'Quick'}</span>
@@ -66,7 +65,6 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
           onClick={() => setPage('collection')}
           className={page === 'collection' ? activeLinkClass : 'header-link'}
           title={state.language === 'zh' ? '草图' : 'Drafts'}
-          style={page === 'collection' ? { backgroundColor: 'rgba(255,94,0,0.18)', borderColor: '#FF5E00', color: '#FF5E00' } : {}}
         >
           <FolderOpen size={14} />
           <span className="link-label">{state.language === 'zh' ? '草图' : 'Drafts'}</span>

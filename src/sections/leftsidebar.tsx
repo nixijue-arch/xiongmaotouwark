@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
-import { PANDA_HEADS, FACES, ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
+import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
 import { useQuickFavs } from '@/hooks/useQuickFavs';
 import { toast } from 'sonner';
@@ -62,8 +62,10 @@ export function LeftSidebar() {
   const [faceSearch, setFaceSearch] = useState('');
 
   const lang = state.language;
-  const filteredPandas = filterMaterials(PANDA_HEADS, pandaSearch, lang);
-  const filteredFaces = filterMaterials(FACES, faceSearch, lang);
+  // 编辑器素材池跟 QuickMode / Collection 一致 — 用 ALL_* (70 panda + 132 face)
+  // 之前只用 LittleRed 24+67 子集，PandaHead 46+65 不在 sidebar 里
+  const filteredPandas = filterMaterials(ALL_PANDAS, pandaSearch, lang);
+  const filteredFaces = filterMaterials(ALL_FACES, faceSearch, lang);
   // 动态 schema：所有 draftSlots 都已经 state !== null（loadDraftSlots 已过滤），直接全用
   const savedDraftSlots = draftSlots;
 
