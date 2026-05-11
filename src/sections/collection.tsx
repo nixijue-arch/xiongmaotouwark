@@ -301,8 +301,9 @@ interface DraftCardProps {
 function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename, onSendToEditor }: DraftCardProps) {
   const info = useMemo(() => extractSlotInfo(slot), [slot]);
   const previewRef = useRef<HTMLDivElement>(null);
-  const renameInputRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
+  // 跟 PMW 同款 controlled state, 简单可靠
+  const [nameDraft, setNameDraft] = useState(slot.name || info.text || '');
 
   const tilt = useMemo(() => {
     let h = 0;
@@ -353,12 +354,8 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
     }
   };
 
-  // 用 ref 直读 DOM input value, 不走 React 受控组件 — 彻底躲避任何 state 同步 / closure 怪异
   const submitRename = () => {
-    const value = (renameInputRef.current?.value ?? '').trim();
-    if (value && value !== slot.name) {
-      onRename(value);
-    }
+    if (nameDraft.trim()) onRename(nameDraft.trim());
     setEditing(false);
   };
 
@@ -391,37 +388,19 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
         {editing ? (
           <div className="draft-rename-row">
             <input
-              ref={renameInputRef}
               autoFocus
-              // 用 defaultValue + key 让 React 把这当成 uncontrolled input
-              // 每次 editing=true 时 key 变 → input re-mount → defaultValue 刷新
-              // 不走 controlled state, 不会被任何 useEffect 重置, 用户输入直接进 DOM
-              key={`rename-${slot.id}-${editing ? 'on' : 'off'}`}
-              defaultValue={slot.name || info.text || ''}
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); submitRename(); }
-                if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+                if (e.key === 'Enter') submitRename();
+                if (e.key === 'Escape') setEditing(false);
               }}
               placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
               className="draft-rename-input"
               onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
             />
-            <button
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); submitRename(); }}
-              onClick={(e) => e.stopPropagation()}
-              className="draft-rename-ok"
-              title="保存"
-            ><Check size={12} /></button>
-            <button
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setEditing(false); }}
-              onClick={(e) => e.stopPropagation()}
-              className="draft-rename-cancel"
-              title="取消"
-            ><X size={12} /></button>
+            <button onClick={(e) => { e.stopPropagation(); submitRename(); }} className="draft-rename-ok"><Check size={12} /></button>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(false); }} className="draft-rename-cancel"><X size={12} /></button>
           </div>
         ) : (
           <div className="draft-name-row">

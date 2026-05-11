@@ -482,19 +482,24 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
 
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();
+    // eslint-disable-next-line no-console
+    console.log('[renameDraft] called', { slotId, name: trimmed });
     if (!trimmed) return;
-    // 用 functional setState 避免 stale closure
-    // ⚠️ 不改 updatedAt — 改名不应该让卡片跳到列表顶部 (Collection 按 updatedAt 排序)
-    // 之前加 updatedAt:Date.now() → 卡片跳到顶 → user 在原位置看到"没变" → 误判 rename 失败
     setDraftSlots((prev) => {
-      let found = false;
-      const next = prev.map(slot => {
-        if (slot.id !== slotId) return slot;
-        if (slot.name === trimmed) return slot; // 同名跳过
-        found = true;
-        return { ...slot, name: trimmed };
+      const matchedSlot = prev.find(s => s.id === slotId);
+      // eslint-disable-next-line no-console
+      console.log('[renameDraft] inside setDraftSlots', {
+        slotId,
+        foundInPrev: !!matchedSlot,
+        oldName: matchedSlot?.name,
+        newName: trimmed,
+        prevLen: prev.length,
       });
-      if (!found) return prev;
+      if (!matchedSlot) return prev;
+      if (matchedSlot.name === trimmed) return prev; // 同名跳过
+      const next = prev.map(slot => (
+        slot.id === slotId ? { ...slot, name: trimmed } : slot
+      ));
       // 同步 localStorage
       if (typeof window !== 'undefined') {
         try {
