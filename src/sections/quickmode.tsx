@@ -11,7 +11,7 @@
 // "进编辑器精修"按钮 dispatch ADD_ELEMENT × 3 → setPage('editor')
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useMeme } from '@/context/MemeContext';
+import { useMeme } from '@/context/memecontext';
 import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, type Material } from '@/data/materials';
 import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN } from '@/data/quickModeTexts';
 import { makeFavKey } from '@/hooks/useQuickFavs';
