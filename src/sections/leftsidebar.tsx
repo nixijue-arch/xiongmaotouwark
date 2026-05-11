@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
-import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
+import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
 import { calcEditorFaceLayout, bboxCropImage } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { toast } from 'sonner';
@@ -125,12 +125,16 @@ export function LeftSidebar() {
 
   const handleAddPandaHead = (src: string, id: string) => {
     const pandaCount = state.elements.filter(isPanda).length;
+    const layering = getShellLayering(id);
     const element: ImageElement = {
       id: generateId(), type: 'image', src, name: id,
       x: Math.min(150, 75 + pandaCount * 18),
       y: Math.min(120, 50 + pandaCount * 18),
       width: 350, height: 350,
-      rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: layering.pandaZ,
+      blendMode: layering.pandaBlend,
+      flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
     if (isMobile) setSheetOpen(false);
@@ -139,16 +143,24 @@ export function LeftSidebar() {
   // 加 face — 先 bbox-crop 原 face PNG 去掉透明 padding, 再用 cropped 尺寸算 anchor 内位置
   // 这样保证 face 元素尺寸 = 实际内容尺寸, 在 panda anchor 区域里精确就位
   // (修 sunglasses/extreme padding face 在编辑器里"过大或错位"的 bug)
+  // 如果没 panda 在画布上, 自动塞一个默认 panda (用 ALL_PANDAS[0] = panda-01, 有完整 anchor 数据)
   const handleAddFace = async (src: string, id: string) => {
-    let pandaId = 'panda-head';
+    let pandaId: string;
     const currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (currentPanda) {
       pandaId = currentPanda.name;
     } else {
+      // 没 panda → 自动加一个默认 (用第一个有 calibration 的 panda, anchor 数据齐全)
+      const defaultPanda = ALL_PANDAS[0];
+      pandaId = defaultPanda.id;
+      const defaultLayering = getShellLayering(defaultPanda.id);
       const pandaElement: ImageElement = {
-        id: generateId(), type: 'image', src: './assets/panda-head.png', name: pandaId,
+        id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
         x: 75, y: 50, width: 350, height: 350,
-        rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+        rotation: 0, opacity: 1,
+        zIndex: defaultLayering.pandaZ,
+        blendMode: defaultLayering.pandaBlend,
+        flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: pandaElement });
     }
@@ -186,10 +198,15 @@ export function LeftSidebar() {
     }
 
     const faceCount = state.elements.filter(isFace).length;
+    // face 的图层方案根据当前 panda 决定
+    const faceLayering = getShellLayering(pandaId);
     const faceElement: ImageElement = {
       id: generateId(), type: 'image', src: croppedSrc, name: id,
       x: layout.x + faceCount * 6, y: layout.y + faceCount * 6, width: layout.width, height: layout.height,
-      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: faceLayering.faceZ,
+      blendMode: faceLayering.faceBlend,
+      flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element: faceElement });
     if (isMobile) setSheetOpen(false);

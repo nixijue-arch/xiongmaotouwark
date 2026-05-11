@@ -18,6 +18,10 @@ export interface ImageElement extends CanvasElement {
   src: string;
   name: string;
   flipX: boolean;
+  // 'multiply' = mix-blend-mode multiply (跟下面图层组合)
+  // panda 是透明抠图时 → panda 在 face 之上 multiply, 黑廓盖人脸
+  // panda 是不透明白底时 → face 在 panda 之上 multiply, 白头廓内透出 face
+  blendMode?: 'multiply' | 'normal';
 }
 
 export interface TextElement extends CanvasElement {
@@ -284,8 +288,14 @@ async function renderDraftPreview(elements: MemeElement[]): Promise<string> {
 function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'ADD_ELEMENT': {
-      const maxZ = state.elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
-      const element = { ...action.element, zIndex: maxZ + 1 };
+      let element = action.element;
+      // 默认图层规则: face=1 (底), panda=5 (中, 加 mix-blend-mode multiply), text=100 (顶)
+      // 如果 element 自带 zIndex 且 != 0, 尊重它 (跨流程显式指定)
+      // 如果 zIndex === 0 (旧调用方未指定), 自动 max+1 放最上 (兼容旧拖拽行为)
+      if (!element.zIndex || element.zIndex === 0) {
+        const maxZ = state.elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
+        element = { ...element, zIndex: maxZ + 1 };
+      }
       return { ...state, elements: [...state.elements, element], selectedId: element.id };
     }
     case 'REMOVE_ELEMENT':

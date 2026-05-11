@@ -45,8 +45,8 @@ export const PANDAHEAD_PANDAS: Material[] = [
   { id: 'panda-ph-040', src: '/assets/panda-ph-040.png', labelCn: '经典款 2', labelEn: 'Classic 2', tags: ['head'], tagsEn: ['head'], faceOffset: { x: 54, y: 22, w: 246, h: 227 } },
   { id: 'panda-ph-041', src: '/assets/panda-ph-041.png', labelCn: '经典款 3', labelEn: 'Classic 3', tags: ['head'], tagsEn: ['head'], faceOffset: { x: 43, y: 49, w: 266, h: 213 } },
   { id: 'panda-ph-042', src: '/assets/panda-ph-042.png', labelCn: '跨腿款', labelEn: 'Stride', tags: ['bust'], tagsEn: ['bust'], faceOffset: { x: 102, y: 31, w: 157, h: 141 } },
-  { id: 'panda-ph-043', src: '/assets/panda-ph-043.png', labelCn: 'gemini_generated_image_pin781pin78', labelEn: 'gemini_generated_image_pin781pin78', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 111, y: 85, w: 137, h: 120 } },
-  { id: 'panda-ph-044', src: '/assets/panda-ph-044.png', labelCn: 'gemini_generated_image_s7cqtbs7cqt', labelEn: 'gemini_generated_image_s7cqtbs7cqt', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 108, y: 38, w: 85, h: 68 } },
-  { id: 'panda-ph-045', src: '/assets/panda-ph-045.png', labelCn: 'snipaste_2026-05-10_18-17-49', labelEn: 'snipaste_2026-05-10_18-17-49', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 108, y: 93, w: 161, h: 146 } },
-  { id: 'panda-ph-046', src: '/assets/panda-ph-046.png', labelCn: 'image_2026-05-10_06-41-06', labelEn: 'image_2026-05-10_06-41-06', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 97, y: 81, w: 144, h: 145 } },
+  { id: 'panda-ph-043', src: '/assets/panda-ph-043.png', labelCn: '其他1', labelEn: 'Misc 1', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 111, y: 85, w: 137, h: 120 } },
+  { id: 'panda-ph-044', src: '/assets/panda-ph-044.png', labelCn: '其他2', labelEn: 'Misc 2', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 108, y: 38, w: 85, h: 68 } },
+  { id: 'panda-ph-045', src: '/assets/panda-ph-045.png', labelCn: '其他3', labelEn: 'Misc 3', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 108, y: 93, w: 161, h: 146 } },
+  { id: 'panda-ph-046', src: '/assets/panda-ph-046.png', labelCn: '其他4', labelEn: 'Misc 4', tags: ['misc'], tagsEn: ['misc'], faceOffset: { x: 97, y: 81, w: 144, h: 145 } },
 ];

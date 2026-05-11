@@ -5,3 +5,7 @@ dist/
 # Local container experiments not part of this UI change
 Dockerfile
 .dockerignore
+
+.shell-backup-pre-cutout/
+devlog.txt
+

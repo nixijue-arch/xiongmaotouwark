@@ -18,6 +18,14 @@ import { ALL_PANDAS, ALL_FACES } from '@/data/materials';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { loadImage, bboxCropImage } from '@/lib/composeMeme';
 import {
+  readMaterialMeta,
+  saveMaterialMetaEntry,
+  clearMaterialMetaEntry,
+  clearAllMaterialMeta,
+  exportMaterialMetaTSCode,
+  type MaterialMeta,
+} from '@/lib/materialMeta';
+import {
   readAnchorOverrides,
   saveAnchorOverride,
   removeAnchorOverride,
@@ -113,6 +121,7 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
   const [previewDispW, setPreviewDispW] = useState(0);
   const [previewDispH, setPreviewDispH] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [materialPanelOpen, setMaterialPanelOpen] = useState(false);
   const [savedTick, setSavedTick] = useState(0); // 触发"已保存"指示动画
   const [overrideMapVer, setOverrideMapVer] = useState(0); // 触发左侧列表重渲染
   // bbox-cropped panda for caption preview — 跟 QuickMode 用同款 bbox-tight 图
@@ -401,12 +410,16 @@ function CalibrateAnchorImpl({ onBack }: CalibrateAnchorProps) {
           </span>
           <div style={{ flex: 1 }} />
           <button onClick={() => setHelpOpen((v) => !v)} style={btnStyle(helpOpen ? 'accent' : 'ghost')}><HelpCircle size={14} /> 帮助</button>
+          <button onClick={() => setMaterialPanelOpen((v) => !v)} style={btnStyle(materialPanelOpen ? 'accent' : 'ghost')}>📋 素材管理</button>
           <button onClick={undo} style={btnStyle('ghost')} title="撤销 (Ctrl+Z)"><Undo2 size={14} /></button>
           <button onClick={redo} style={btnStyle('ghost')} title="重做 (Ctrl+Shift+Z)"><Redo2 size={14} /></button>
           <button onClick={onExport} style={btnStyle('primary')}><Copy size={14} /> 导出 TS code</button>
           <button onClick={onDownload} style={btnStyle('ghost')}><Download size={14} /> 下载 .ts</button>
           <button onClick={onClearAll} style={btnStyle('danger')}><Trash2 size={14} /> 清空全部</button>
         </div>
+
+        {/* 素材管理面板 */}
+        {materialPanelOpen && <MaterialManagementPanel onClose={() => setMaterialPanelOpen(false)} />}
 
         {/* 帮助面板（折叠） */}
         {helpOpen && (
@@ -711,5 +724,180 @@ function RowInput({ label, value, onChange, onBlur }: { label: string; value: nu
         }}
       />
     </>
+  );
+}
+
+// ============================================================
+// 素材管理面板 — 改名 / 隐藏 / 导出 TS code
+// ============================================================
+function MaterialManagementPanel({ onClose }: { onClose: () => void }) {
+  const [meta, setMeta] = useState<MaterialMeta>(() => readMaterialMeta());
+  const [tab, setTab] = useState<'panda' | 'face'>('panda');
+  const [search, setSearch] = useState('');
+  const [showHidden, setShowHidden] = useState(true);
+
+  const items = useMemo(() => {
+    const list = tab === 'panda' ? ALL_PANDAS : ALL_FACES;
+    const q = search.trim().toLowerCase();
+    return list.filter(m => {
+      const e = meta[m.id];
+      if (!showHidden && e?.hidden) return false;
+      if (!q) return true;
+      const nameCn = e?.labelCn || m.labelCn;
+      const nameEn = e?.labelEn || m.labelEn;
+      return m.id.toLowerCase().includes(q)
+        || nameCn.toLowerCase().includes(q)
+        || nameEn.toLowerCase().includes(q);
+    });
+  }, [tab, search, meta, showHidden]);
+
+  const setEntry = (id: string, patch: Partial<MaterialMeta[string]>) => {
+    saveMaterialMetaEntry(id, patch);
+    setMeta(readMaterialMeta());
+  };
+  const resetEntry = (id: string) => {
+    clearMaterialMetaEntry(id);
+    setMeta(readMaterialMeta());
+  };
+
+  const onExport = async () => {
+    const code = exportMaterialMetaTSCode();
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`已复制 ${Object.keys(meta).length} 个素材覆盖到剪贴板`);
+    } catch {
+      // eslint-disable-next-line no-console
+      console.log(code);
+      toast.error('复制失败 (看 console)');
+    }
+  };
+  const onClearAll = () => {
+    if (!confirm('清空所有素材改名/隐藏? 不可逆')) return;
+    clearAllMaterialMeta();
+    setMeta({});
+  };
+
+  const editedCount = Object.keys(meta).length;
+  const hiddenCount = Object.values(meta).filter(e => e.hidden).length;
+
+  return (
+    <div style={{
+      background: '#1a1a1a', border: '1px solid #3a3a3a', borderRadius: 8,
+      padding: 12, marginBottom: 12, color: '#ddd',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <span style={{ fontWeight: 700, color: '#FFC850' }}>📋 素材管理</span>
+        <span style={{ fontSize: 11, color: '#888' }}>
+          已改 {editedCount} 个 · 隐藏 {hiddenCount} 个
+        </span>
+        <div style={{ flex: 1 }} />
+        <button onClick={onExport} style={btnStyle('primary')}><Copy size={12} /> 导出 TS code</button>
+        <button onClick={onClearAll} style={btnStyle('danger')}><Trash2 size={12} /> 清空</button>
+        <button onClick={onClose} style={btnStyle('ghost')}>关闭</button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <button
+          onClick={() => setTab('panda')}
+          style={{ ...btnStyle(tab === 'panda' ? 'accent' : 'ghost'), padding: '4px 10px', fontSize: 11 }}
+        >
+          🐼 熊猫头 ({ALL_PANDAS.length})
+        </button>
+        <button
+          onClick={() => setTab('face')}
+          style={{ ...btnStyle(tab === 'face' ? 'accent' : 'ghost'), padding: '4px 10px', fontSize: 11 }}
+        >
+          😂 人脸 ({ALL_FACES.length})
+        </button>
+        <input
+          type="text"
+          placeholder="搜索 id / 名字..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            flex: 1, background: '#0a0a0a', border: '1px solid #3a3a3a', borderRadius: 4,
+            padding: '4px 8px', color: '#ddd', fontSize: 11,
+          }}
+        />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#888' }}>
+          <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+          显示已隐藏
+        </label>
+      </div>
+
+      <div style={{
+        maxHeight: 380, overflowY: 'auto',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+        gap: 6,
+      }}>
+        {items.map(m => {
+          const e = meta[m.id] || {};
+          const hidden = !!e.hidden;
+          const currentCn = e.labelCn ?? m.labelCn;
+          const currentEn = e.labelEn ?? m.labelEn;
+          return (
+            <div
+              key={m.id}
+              style={{
+                background: hidden ? '#1a0f0a' : '#0f1a14',
+                border: `1px solid ${hidden ? '#553322' : '#22553a'}`,
+                borderRadius: 6,
+                padding: 6,
+                opacity: hidden ? 0.6 : 1,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <img
+                  src={m.src}
+                  alt={m.id}
+                  style={{ width: 36, height: 36, objectFit: 'contain', background: '#fff', borderRadius: 4 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: '#666', fontFamily: 'monospace' }}>{m.id}</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      onClick={() => setEntry(m.id, { hidden: !hidden })}
+                      style={{ ...btnStyle(hidden ? 'danger' : 'ghost'), padding: '2px 6px', fontSize: 10 }}
+                    >
+                      {hidden ? '🙈 已隐藏' : '👁 可见'}
+                    </button>
+                    {(e.labelCn || e.labelEn || e.hidden) && (
+                      <button
+                        onClick={() => resetEntry(m.id)}
+                        style={{ ...btnStyle('ghost'), padding: '2px 6px', fontSize: 10 }}
+                        title="重置当前素材"
+                      >
+                        ↺
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <input
+                type="text"
+                placeholder={m.labelCn}
+                value={currentCn === m.labelCn && !e.labelCn ? '' : currentCn}
+                onChange={(ev) => setEntry(m.id, { labelCn: ev.target.value || undefined })}
+                style={{
+                  width: '100%', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 3,
+                  padding: '3px 6px', color: '#ddd', fontSize: 11, marginBottom: 3,
+                }}
+              />
+              <input
+                type="text"
+                placeholder={m.labelEn}
+                value={currentEn === m.labelEn && !e.labelEn ? '' : currentEn}
+                onChange={(ev) => setEntry(m.id, { labelEn: ev.target.value || undefined })}
+                style={{
+                  width: '100%', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 3,
+                  padding: '3px 6px', color: '#ddd', fontSize: 11,
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

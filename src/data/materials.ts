@@ -177,6 +177,63 @@ export function getLivePandaFaceOffset(panda: Material): { x: number; y: number;
   return panda.faceOffset;
 }
 
+// ===== shell 类型: 透明抠图 vs 不透明白底 =====
+// 句跃金抠的 45 张 panda-ph-001..045 都是透明 (face 区透明 + 背景透明, 仅黑廓)
+// 例外: panda-ph-046 没收到抠图, 还是原版不透明
+// LittleRed 原版 panda-01 .. 24 是不透明白底 (face 区是 opaque white)
+// 影响图层叠加: 透明 shell 把 panda 放上面 multiply; 不透明 shell 把 face 放上面 multiply
+const TRANSPARENT_SHELLS = new Set<string>();
+for (let i = 1; i <= 45; i++) {
+  TRANSPARENT_SHELLS.add(`panda-ph-${String(i).padStart(3, '0')}`);
+}
+
+export function isTransparentShell(pandaId: string): boolean {
+  return TRANSPARENT_SHELLS.has(pandaId);
+}
+
+// 给定 panda id, 返回它跟 face 配对时的图层方案
+// - 透明 panda: panda zIndex=5 (上, multiply), face zIndex=1 (下)
+// - 不透明 panda: face zIndex=5 (上, multiply), panda zIndex=1 (下)
+// text 永远 100 不变
+export function getShellLayering(pandaId: string): {
+  pandaZ: number;
+  faceZ: number;
+  pandaBlend: 'multiply' | 'normal';
+  faceBlend: 'multiply' | 'normal';
+} {
+  if (isTransparentShell(pandaId)) {
+    return { pandaZ: 5, faceZ: 1, pandaBlend: 'multiply', faceBlend: 'normal' };
+  }
+  return { pandaZ: 1, faceZ: 5, pandaBlend: 'normal', faceBlend: 'multiply' };
+}
+
+// ===== 素材元数据 (rename / hide) =====
+// DEV 校准工具的"素材管理"可视化改 — 写 localStorage 'pmw-material-meta-v1'
+// 这里只是 helper, 供 leftsidebar / quickmode 等 picker 调用过滤 + 拿覆盖后的 label
+export function getLiveMaterialLabel(m: Material, lang: 'zh' | 'en'): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const meta = JSON.parse(localStorage.getItem('pmw-material-meta-v1') || '{}');
+      const e = meta[m.id];
+      if (e) {
+        if (lang === 'zh' && e.labelCn) return e.labelCn;
+        if (lang === 'en' && e.labelEn) return e.labelEn;
+      }
+    } catch { /* ignore */ }
+  }
+  return lang === 'zh' ? m.labelCn : m.labelEn;
+}
+
+export function isMaterialHidden(m: Material): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const meta = JSON.parse(localStorage.getItem('pmw-material-meta-v1') || '{}');
+    return Boolean(meta[m.id]?.hidden);
+  } catch {
+    return false;
+  }
+}
+
 // 字幕偏移 (px, 350-coord 空间) — 校准工具改, 正数让 panda 图片往下挪
 // 优先级: DEV localStorage (实时校准) > Material.captionOffset (永久 shipped 值) > 0
 export function getLiveCaptionOffset(pandaOrId: Material | string): number {

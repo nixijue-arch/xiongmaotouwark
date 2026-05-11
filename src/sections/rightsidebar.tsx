@@ -3,7 +3,7 @@ import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
 import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, Upload, X, ChevronUp, Camera, Type, AlignLeft, AlignCenter, AlignRight, Bold, Copy, Heart } from 'lucide-react';
-import { PANDA_HEADS, ALL_PANDAS, ALL_FACES, getPandaFaceOffset, getLivePandaFaceOffset } from '@/data/materials';
+import { PANDA_HEADS, ALL_PANDAS, ALL_FACES, getPandaFaceOffset, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
 import { PhotoCropModal } from '@/components/photocropmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
@@ -377,12 +377,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       faceSrc: randomFace.src,
       faceOffset350: getLivePandaFaceOffset(randomPanda),
     });
-    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false };
-    const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
-    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 10, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    // 图层方案根据 panda 类型自动决定 (透明 ↔ 不透明)
+    const layering = getShellLayering(randomPanda.id);
+    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false };
+    const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height, rotation: 0, opacity: 1, zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: false };
+    const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'CLEAR_CANVAS' });
-    dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
     dispatch({ type: 'ADD_ELEMENT', element: faceEl });
+    dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     if (isMobile) setSheetOpen(false);
   };
@@ -399,13 +401,20 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       ? (() => { const others = ALL_FACES.filter(f => f.id !== currentFace.name); return others.length ? others[Math.floor(Math.random() * others.length)] : null; })()
       : null;
     if (newPanda && currentPanda) {
-      dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: newPanda.src, name: newPanda.id } });
+      // 换 panda 后图层方案可能变 (透明 ↔ 不透明)
+      const lay = getShellLayering(newPanda.id);
+      dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: newPanda.src, name: newPanda.id, zIndex: lay.pandaZ, blendMode: lay.pandaBlend } });
+      if (currentFace) {
+        // 同步更新 face 的图层
+        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { zIndex: lay.faceZ, blendMode: lay.faceBlend } });
+      }
     }
     if (newFace && currentFace) {
       const anchorPanda = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda?.name);
       if (anchorPanda) {
         const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: newFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
-        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height } });
+        const lay = getShellLayering(anchorPanda.id);
+        dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, zIndex: lay.faceZ, blendMode: lay.faceBlend } });
       } else {
         dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id } });
       }
@@ -415,7 +424,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
       if (anchorPanda) {
         const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: randomFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
-        const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, rotation: 0, opacity: 1, zIndex: 1, flipX: false };
+        const lay = getShellLayering(anchorPanda.id);
+        const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, rotation: 0, opacity: 1, zIndex: lay.faceZ, blendMode: lay.faceBlend, flipX: false };
         dispatch({ type: 'ADD_ELEMENT', element: faceEl });
       }
     }
@@ -541,18 +551,22 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     let currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (!currentPanda) {
       const defaultPanda = PANDA_HEADS[0];
+      const defaultLay = getShellLayering(defaultPanda.id);
       currentPanda = {
         id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
-        x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+        x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1,
+        zIndex: defaultLay.pandaZ, blendMode: defaultLay.pandaBlend, flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: currentPanda });
     }
     const offset = facePos || getPandaFaceOffset(currentPanda.name);
     const faceCount = state.elements.filter(isFace).length;
+    const customLay = getShellLayering(currentPanda.name);
     const element: ImageElement = {
       id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
       x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
-      rotation: 0, opacity: 1, zIndex: 1, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: customLay.faceZ, blendMode: customLay.faceBlend, flipX: false,
     };
     dispatch({ type: 'ADD_ELEMENT', element });
     setModalOpen(false);
@@ -875,10 +889,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 mb-4">
               {!state.museumEditMode && (
-                <>
-                  <button onClick={handleRandomCombo} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#FF5E00' }}>{t('randomCombo')}</button>
-                  <button onClick={handleSwitchImage} disabled={state.elements.filter(e => e.type === 'image').length === 0} className="py-3 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ backgroundColor: '#0080FF' }}>{t('switchImage')}</button>
-                </>
+                <button onClick={handleSwitchImage} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#0080FF' }}>{t('switchImage')}</button>
               )}
               <button onClick={handleRecommendText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#00CC66' }}>{t('recommendText')}</button>
               <button onClick={handleAddText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#9333EA' }}>{t('addText')}</button>
@@ -1262,10 +1273,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       <div className="p-4 win7-panel right-sidebar-static-panel">
         <div className="space-y-2">
           {!state.museumEditMode && (
-            <>
-              <button onClick={handleRandomCombo} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}><Shuffle size={16} />{t('randomCombo')}</button>
-              <button onClick={handleSwitchImage} disabled={state.elements.filter(e => e.type === 'image').length === 0} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] disabled:opacity-40" style={{ backgroundColor: '#0080FF' }}><Image size={16} />{t('switchImage')}</button>
-            </>
+            <button onClick={handleSwitchImage} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}><Shuffle size={16} />{t('switchImage')}</button>
           )}
           <button onClick={handleRecommendText} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#00CC66' }}><MessageCircle size={16} />{t('recommendText')}</button>
           <button onClick={handleAddText} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02]" style={{ backgroundColor: '#9333EA' }}><Type size={16} />{state.language === 'zh' ? '添加文字' : 'Add Text'}</button>

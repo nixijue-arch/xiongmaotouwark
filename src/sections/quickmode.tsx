@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeme } from '@/context/memecontext';
-import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, type Material } from '@/data/materials';
+import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, getShellLayering, type Material } from '@/data/materials';
 import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN } from '@/data/quickModeTexts';
 import { makeFavKey } from '@/hooks/useQuickFavs';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
@@ -242,16 +242,20 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         faceSrc: face.src,
         faceOffset350: offset350,
       });
+      // 图层方案: 透明 panda → panda 上 multiply, face 下; 不透明 panda → face 上 multiply, panda 下
+      const layering = getShellLayering(panda.id);
       const elements: any[] = [
-        {
-          id: generateId(), type: 'image', src: panda.src, name: panda.id,
-          x: 75, y: 50, width: 350, height: 350,
-          rotation: 0, opacity: 1, zIndex: 0, flipX: false,
-        },
         {
           id: generateId(), type: 'image', src: face.src, name: face.id,
           x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
-          rotation: faceRotation, opacity: 1, zIndex: 1, flipX: faceFlipX,
+          rotation: faceRotation, opacity: 1,
+          zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: faceFlipX,
+        },
+        {
+          id: generateId(), type: 'image', src: panda.src, name: panda.id,
+          x: 75, y: 50, width: 350, height: 350,
+          rotation: 0, opacity: 1,
+          zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
         },
       ];
       if (text.trim()) {
@@ -288,26 +292,30 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       faceSrc: face.src,
       faceOffset350: offset350,
     });
+    // 图层方案根据 panda 类型决定 (透明 vs 不透明)
+    const layering = getShellLayering(panda.id);
+    const faceEl = {
+      id: generateId(),
+      type: 'image' as const,
+      src: face.src,
+      name: face.id,
+      x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
+      rotation: faceRotation, opacity: 1,
+      zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: faceFlipX,
+    };
     const pandaEl = {
       id: generateId(),
       type: 'image' as const,
       src: panda.src,
       name: panda.id,
       x: 75, y: 50, width: 350, height: 350,
-      rotation: 0, opacity: 1, zIndex: 0, flipX: false,
+      rotation: 0, opacity: 1,
+      zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
     };
     dispatch({ type: 'CLEAR_CANVAS' });
-    dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
+    dispatch({ type: 'ADD_ELEMENT', element: faceEl });
     setTimeout(() => {
-      const faceEl = {
-        id: generateId(),
-        type: 'image' as const,
-        src: face.src,
-        name: face.id,
-        x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
-        rotation: faceRotation, opacity: 1, zIndex: 1, flipX: faceFlipX,
-      };
-      dispatch({ type: 'ADD_ELEMENT', element: faceEl });
+      dispatch({ type: 'ADD_ELEMENT', element: pandaEl });
       if (text.trim()) {
         const textEl = {
           id: generateId(),
