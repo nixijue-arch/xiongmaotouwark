@@ -203,154 +203,244 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
 
   return (
     <div className="about-container about-arcade-shell quickmode-root">
-      <div className="about-page">
-      <section className="about-banner-card">
-        <div className="about-banner-main">
-          <div className="about-banner-icon"><Sparkles size={32} color="#1767c7" /></div>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0a356d' }}>{t('quickMode')}</h2>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#456' }}>{t('quickModeSubtitle')}</p>
-          </div>
-        </div>
-        <button onClick={onRandomize} className="about-arcade-btn">
-          <Wand2 size={16} /> {t('quickRandom')}
-        </button>
-      </section>
+      <div className="about-page quickmode-three-col" style={{ display: 'flex', gap: 14, padding: '12px 14px 20px', minHeight: 'calc(100vh - 70px)' }}>
+        {/* ===== 左栏: 选熊猫头 + 选人脸 ===== */}
+        <aside style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'calc(100vh - 70px)', overflowY: 'auto' }}>
+          <PickPanel
+            badge="🐼"
+            title={t('quickPickPanda')}
+            items={PANDA_HEADS}
+            value={pandaId}
+            onChange={setPandaId}
+            lang={lang}
+          />
+          <PickPanel
+            badge="😂"
+            title={t('quickPickFace')}
+            items={FACES}
+            value={faceId}
+            onChange={setFaceId}
+            lang={lang}
+          />
+        </aside>
 
-      {/* Preview — 米白卡片风格匹配 LittleRed about-* 系列 */}
-      <section className="about-panel">
-        <div className="about-panel-title">
-          <span className="about-panel-badge"><Sparkles size={18} /></span>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '预览' : 'Preview'}</h3>
-        </div>
-      <div className="quickmode-preview-wrap" ref={previewWrapRef}>
-        <div ref={previewRef} className="quickmode-preview" style={{ fontFamily: fontStack }}>
-          <div className="qm-panda-frame">
-            <PandaCanvas
-              pandaSrc={panda.src}
-              pandaId={panda.id}
-              faceSrc={face.src}
-              faceOffset={getLivePandaFaceOffset(panda)}
-              rotation={deferredRotation}
-              flipX={deferredFlipX}
-              alt={panda.id}
-              className="qm-panda-img"
-            />
-          </div>
-          {text && (
-            <div className="qm-caption" style={{ fontFamily: fontStack }}>
-              {text}
-            </div>
-          )}
-        </div>
-      </div>
-      </section>
-
-      {/* Action buttons — about-arcade-btn 风格 */}
-      <section style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 12 }}>
-        <button onClick={onCopy} className="about-arcade-btn">
-          <Copy size={14} /> {t('quickCopy')}
-        </button>
-        <button onClick={onDownload} className="about-arcade-btn">
-          <Download size={14} /> {t('quickDownload')}
-        </button>
-        <div style={{ position: 'relative' }}>
-          <button onClick={onFav} className="about-arcade-btn" style={isFavored ? { background: 'linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%)', borderColor: '#a13a09' } : {}}>
-            <Heart size={14} fill={isFavored ? '#fff' : 'none'} />
-            {t('quickFav')}
-          </button>
-          {namePopoverOpen && (
-            <NamePopover
-              initial={pendingFavName}
-              onSave={onSaveName}
-              onClose={() => setNamePopoverOpen(false)}
-              placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
-            />
-          )}
-        </div>
-        <button onClick={onToEditor} className="about-arcade-btn" style={{ background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
-          {t('quickToEditor')} <ArrowRight size={14} />
-        </button>
-      </section>
-
-      {/* Face transform row: rotation dot + flip + reset — 米白卡片风格 */}
-      <section className="about-banner-card" style={{ marginTop: 12, padding: '12px 22px' }}>
-        <div className="quickmode-transform-row" style={{ flex: 1 }}>
-          <RotationDot value={faceRotation} onChange={setFaceRotation} />
-          <button onClick={onFlipH} className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')} title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}>
-            <FlipHorizontal size={16} />
-          </button>
-          <button onClick={onResetTransform} className="qm-icon-btn" title={lang === 'zh' ? '重置' : 'Reset'}>
-            <RotateCcw size={14} />
-          </button>
-          <span className="qm-rotation-display">
-            {faceRotation > 0 ? '+' : ''}{faceRotation}°
-            {faceFlipX && ' ⇋'}
-          </span>
-        </div>
-        <span className="about-chip" style={{ padding: '4px 10px', fontSize: 11 }}>
-          {lang === 'zh' ? '拖圆点旋转' : 'Drag dot'}
-        </span>
-      </section>
-
-      {/* Panda head rail */}
-      <RailSection
-        emoji="🐼"
-        title={t('quickPickPanda')}
-        items={PANDA_HEADS}
-        value={pandaId}
-        onChange={setPandaId}
-        lang={lang}
-      />
-
-      {/* Face rail */}
-      <RailSection
-        emoji="😂"
-        title={t('quickPickFace')}
-        items={FACES}
-        value={faceId}
-        onChange={setFaceId}
-        lang={lang}
-      />
-
-      {/* Text + lang + font */}
-      <div className="quickmode-text-row">
-        <div className="qm-text-label">
-          <Type size={14} /> {t('quickText')}
-        </div>
-        <button onClick={onRandomText} className="qm-icon-btn" title={t('quickRandomText')}>
-          <Wand2 size={14} />
-        </button>
-        <div className="qm-textlang-toggle">
-          {TEXT_LANG_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => setTextLang(opt.id)}
-              className={'qm-textlang-btn ' + (textLang === opt.id ? 'qm-textlang-btn-on' : '')}
+        {/* ===== 中间: 预览 + 操作 + transform ===== */}
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, minWidth: 0 }}>
+          {/* 预览大卡 */}
+          <div ref={previewWrapRef} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <div
+              ref={previewRef}
+              className="quickmode-preview"
+              style={{
+                fontFamily: fontStack,
+                background: '#fff',
+                borderRadius: 22,
+                border: '3px solid #0a4e97',
+                boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.55), 0 8px 24px rgba(7,48,95,0.22)',
+                padding: 24,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                width: '100%',
+                maxWidth: 460,
+              }}
             >
-              {opt.label}
+              <div className="qm-panda-frame">
+                <PandaCanvas
+                  pandaSrc={panda.src}
+                  pandaId={panda.id}
+                  faceSrc={face.src}
+                  faceOffset={getLivePandaFaceOffset(panda)}
+                  rotation={deferredRotation}
+                  flipX={deferredFlipX}
+                  alt={panda.id}
+                  className="qm-panda-img"
+                />
+              </div>
+              {text && (
+                <div className="qm-caption" style={{ fontFamily: fontStack }}>{text}</div>
+              )}
+            </div>
+          </div>
+
+          {/* 操作按钮组 */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
+            <button onClick={onCopy} className="about-arcade-btn">
+              <Copy size={14} /> {t('quickCopy')}
             </button>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={t('quickTextPlaceholder')}
-          className="qm-text-input"
-        />
-        <select
-          value={fontKey}
-          onChange={(e) => setFontKey(e.target.value)}
-          className="qm-font-select"
-        >
-          {FONT_OPTIONS.map((f) => (
-            <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
-          ))}
-        </select>
-      </div>
+            <button onClick={onDownload} className="about-arcade-btn">
+              <Download size={14} /> {t('quickDownload')}
+            </button>
+            <div style={{ position: 'relative' }}>
+              <button onClick={onFav} className="about-arcade-btn" style={isFavored ? { background: 'linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%)', borderColor: '#a13a09' } : {}}>
+                <Heart size={14} fill={isFavored ? '#fff' : 'none'} />
+                {t('quickFav')}
+              </button>
+              {namePopoverOpen && (
+                <NamePopover
+                  initial={pendingFavName}
+                  onSave={onSaveName}
+                  onClose={() => setNamePopoverOpen(false)}
+                  placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
+                />
+              )}
+            </div>
+            <button onClick={onToEditor} className="about-arcade-btn" style={{ background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
+              {t('quickToEditor')} <ArrowRight size={14} />
+            </button>
+          </div>
+
+          {/* Transform row 米白卡 */}
+          <div className="about-banner-card" style={{ padding: '12px 22px', width: '100%', maxWidth: 600 }}>
+            <div className="quickmode-transform-row" style={{ flex: 1 }}>
+              <RotationDot value={faceRotation} onChange={setFaceRotation} />
+              <button onClick={onFlipH} className={'qm-icon-btn ' + (faceFlipX ? 'qm-icon-btn-on' : '')} title={lang === 'zh' ? '水平翻转' : 'Flip horizontal'}>
+                <FlipHorizontal size={16} />
+              </button>
+              <button onClick={onResetTransform} className="qm-icon-btn" title={lang === 'zh' ? '重置' : 'Reset'}>
+                <RotateCcw size={14} />
+              </button>
+              <span className="qm-rotation-display">
+                {faceRotation > 0 ? '+' : ''}{faceRotation}°
+                {faceFlipX && ' ⇋'}
+              </span>
+            </div>
+            <span className="about-chip" style={{ padding: '4px 10px', fontSize: 11 }}>
+              {lang === 'zh' ? '拖圆点旋转' : 'Drag dot'}
+            </span>
+          </div>
+        </main>
+
+        {/* ===== 右栏: 文字编辑 + 随机 ===== */}
+        <aside style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Type size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{t('quickText')}</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <input
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={t('quickTextPlaceholder')}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '2px solid #0a4e97',
+                  background: '#fff',
+                  color: '#0a356d',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  outline: 'none',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={onRandomText} className="about-arcade-btn" style={{ padding: '6px 12px', fontSize: 12, flex: 1 }} title={t('quickRandomText')}>
+                  <Wand2 size={12} /> {lang === 'zh' ? '换文字' : 'Reroll'}
+                </button>
+                <div style={{ display: 'inline-flex', gap: 0, borderRadius: 10, overflow: 'hidden', border: '2px solid #0a4e97' }}>
+                  {TEXT_LANG_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => setTextLang(opt.id)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        background: textLang === opt.id ? 'linear-gradient(180deg, #1f92f8 0%, #116bcc 100%)' : '#fff',
+                        color: textLang === opt.id ? '#fff' : '#0a356d',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <select
+                value={fontKey}
+                onChange={(e) => setFontKey(e.target.value)}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '2px solid #0a4e97',
+                  background: '#fff',
+                  color: '#0a356d',
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {FONT_OPTIONS.map((f) => (
+                  <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Sparkles size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{lang === 'zh' ? '操作' : 'Actions'}</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={onRandomize} className="about-arcade-btn" style={{ width: '100%' }}>
+                <Wand2 size={14} /> {t('quickRandom')}
+              </button>
+              <button onClick={onToEditor} className="about-arcade-btn" style={{ width: '100%', background: 'linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%)', borderColor: '#7a5a1a' }}>
+                {t('quickToEditor')} <ArrowRight size={14} />
+              </button>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
+  );
+}
+
+// 选 panda / face 的小 panel — 用 about-panel + 2 列 grid
+interface PickPanelProps {
+  badge: string;
+  title: string;
+  items: Material[];
+  value: string;
+  onChange: (id: string) => void;
+  lang: 'zh' | 'en';
+}
+function PickPanel({ badge, title, items, value, onChange, lang }: PickPanelProps) {
+  return (
+    <section className="about-panel" style={{ padding: 12 }}>
+      <div className="about-panel-title" style={{ marginBottom: 10 }}>
+        <span className="about-panel-badge" style={{ fontSize: 18 }}>{badge}</span>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: '#0a356d' }}>{title}</h3>
+        <span className="about-chip" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 'auto' }}>{items.length}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+        {items.map((it) => (
+          <button
+            key={it.id}
+            onClick={() => onChange(it.id)}
+            title={lang === 'zh' ? it.labelCn : it.labelEn}
+            style={{
+              padding: 4,
+              borderRadius: 10,
+              background: it.id === value ? 'linear-gradient(180deg, #1f92f8 0%, #116bcc 100%)' : '#fff',
+              border: it.id === value ? '2px solid #09498f' : '2px solid rgba(10, 78, 151, 0.25)',
+              cursor: 'pointer',
+              aspectRatio: '1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'transform 120ms ease',
+            }}
+          >
+            <img src={it.src} alt={it.id} draggable={false} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

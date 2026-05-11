@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
-import { PANDA_HEADS, FACES, ALL_PANDAS, getLivePandaFaceOffset } from '@/data/materials';
+import { PANDA_HEADS, FACES, ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset } from '@/data/materials';
 import { calcEditorFaceLayout } from '@/lib/composeMeme';
+import { useQuickFavs, makeFavKey } from '@/hooks/useQuickFavs';
+import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
 import type { Material } from '@/data/materials';
@@ -14,13 +16,13 @@ function isElementActive(elements: MemeElement[], itemId: string): boolean {
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return PANDA_HEADS.some(p => p.id === name);
+  return ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return FACES.some(f => f.id === name);
+  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
@@ -50,6 +52,33 @@ function filterMaterials(items: Material[], query: string, lang: 'zh' | 'en'): M
 
 export function LeftSidebar() {
   const { state, dispatch, generateId, draftSlots, saveDraft, loadDraft, clearDraft } = useMeme();
+  const { toggle: toggleFav } = useQuickFavs();
+
+  // 存到草图本 — 联通 useQuickFavs（跟 Quick / Collection 共享）
+  const handleSaveToCollection = () => {
+    const pandaEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isPanda(e));
+    const faceEl = state.elements.find((e): e is ImageElement => e.type === 'image' && isFace(e));
+    if (!pandaEl) {
+      toast.error(lang === 'zh' ? '画布上至少要有一个熊猫头' : 'Need at least a panda');
+      return;
+    }
+    const textEl = state.elements.find(e => e.type === 'text') as { text: string; fontFamily: string } | undefined;
+    const text = textEl?.text ?? '';
+    const fontFamily = textEl?.fontFamily ?? 'sans-serif';
+    const pandaId = pandaEl.name;
+    const faceId = faceEl?.name ?? 'face-01';
+    const id = makeFavKey(pandaId, faceId, text, fontFamily);
+    const isCustomPanda = pandaId.startsWith('upload-panda-');
+    const isCustomFace = faceId.startsWith('upload-face-') || faceId.startsWith('custom-face-');
+    const fav: Parameters<typeof toggleFav>[0] = { id, pandaId, faceId, text, fontFamily };
+    if (isCustomPanda) {
+      fav.pandaSrc = pandaEl.src;
+      if (faceEl) fav.pandaFaceOffset = { x: faceEl.x - pandaEl.x, y: faceEl.y - pandaEl.y, w: faceEl.width, h: faceEl.height };
+    }
+    if (isCustomFace && faceEl) fav.faceSrc = faceEl.src;
+    toggleFav(fav);
+    toast.success(lang === 'zh' ? '已存到草图本（去顶部 草图 tab 看）' : 'Saved to Drafts (see top "Drafts" tab)');
+  };
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'panda' | 'face'>('panda');
@@ -237,6 +266,16 @@ export function LeftSidebar() {
         </div>
         <button className="draft-save-current-btn" onClick={() => void saveDraft(nextDraftSlot.id)}>
           {lang === 'zh' ? `保存当前到${nextDraftSlot.name}` : `Save to ${nextDraftSlot.name.replace('草稿', 'Draft ')}`}
+        </button>
+        {/* 存到草图本 — 联通 useQuickFavs (跟 Quick / Collection 共享) */}
+        <button
+          className="draft-save-current-btn"
+          onClick={handleSaveToCollection}
+          disabled={state.elements.filter(isPanda).length === 0}
+          style={{ marginTop: 6, background: 'linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%)', borderColor: '#a13a09', color: '#fff' }}
+          title={lang === 'zh' ? '存到顶部「草图」tab' : 'Save to top "Drafts" tab'}
+        >
+          {lang === 'zh' ? '💾 存到草图本' : '💾 Save to Drafts'}
         </button>
         {savedDraftSlots.length === 0 ? (
           <p className="draft-empty-hint">
