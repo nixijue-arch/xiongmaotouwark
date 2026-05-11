@@ -154,11 +154,12 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     ].join(';');
     const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     // panda translateY = captionOffset (panda 移, caption 不动), 跟 QuickMode 预览一致
+    // caption position:relative z-index:10 强制最高图层 (panda 大正 translate 时仍盖不住 caption)
     node.innerHTML = `
-      <div style="width:364px;height:364px;display:flex;align-items:flex-end;justify-content:center;">
+      <div style="width:364px;height:364px;display:flex;align-items:flex-end;justify-content:center;position:relative;z-index:1;">
         <img src="${composedDataUrl}" style="display:block;max-width:100%;max-height:100%;object-fit:contain;object-position:50% 100%;transform:translateY(${capOff}px);" />
       </div>
-      ${escapedText ? `<div style="margin-top:10px;width:100%;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;padding:0 12px;line-height:1.15;word-break:break-word;font-family:${fontStack};">${escapedText}</div>` : ''}
+      ${escapedText ? `<div style="margin-top:10px;width:100%;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;padding:0 12px;line-height:1.15;word-break:break-word;font-family:${fontStack};position:relative;z-index:10;">${escapedText}</div>` : ''}
     `;
     document.body.appendChild(node);
     await new Promise((r) => setTimeout(r, 80));
@@ -222,7 +223,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         elements.push({
           id: generateId(), type: 'text', text,
           x: 60, y: 410, width: 380, height: 56,
-          rotation: 0, opacity: 1, zIndex: 2,
+          rotation: 0, opacity: 1, zIndex: 100, // 强制最高图层
           fontFamily: fontStack, fontSize: 32, fontWeight: 'bold',
           textAlign: 'center', fillColor: '#000000', strokeColor: '#ffffff',
           strokeWidth: 0,
@@ -278,7 +279,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
           type: 'text' as const,
           text,
           x: 60, y: 410, width: 380, height: 56,
-          rotation: 0, opacity: 1, zIndex: 2,
+          rotation: 0, opacity: 1, zIndex: 100, // 强制最高图层 — 文字永远在 panda/face 之上
           fontFamily: fontStack,
           fontSize: 32, fontWeight: 'bold' as const,
           textAlign: 'center' as const,

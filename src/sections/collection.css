@@ -175,6 +175,13 @@
   padding: 0 4px;
   word-break: break-word;
   line-height: 1.1;
+  /* 跟 QuickMode 一致 — 最高图层 */
+  position: relative;
+  z-index: 10;
+}
+.col-root .draft-panda-frame {
+  position: relative;
+  z-index: 1;
 }
 
 /* Meta (name + rename input) */

@@ -86,6 +86,14 @@
   padding: 0 16px;
   line-height: 1.2;
   word-break: break-word;
+  /* 强制最高图层 — panda translateY 大正数时仍能覆盖在 panda 上 */
+  position: relative;
+  z-index: 10;
+}
+.quickmode-preview .qm-panda-frame {
+  /* panda 不允许超出图层影响 caption (caption z-index 更高时仍会覆盖) */
+  position: relative;
+  z-index: 1;
 }
 
 /* Actions */
