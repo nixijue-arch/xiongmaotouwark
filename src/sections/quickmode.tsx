@@ -122,10 +122,11 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     setText((cur) => pickRandomText(textLang, cur));
   }, [textLang]);
 
-  // 防顿感: 先预合成新图 (composeMeme cache 里就绪) 再一次性切 state
-  // 不然 setPandaId/setFaceId/setText 立刻改, 但图还在 compose
-  // → 用户看到 text/caption 已动, 但 panda 还是旧的, 视觉错位
-  const onRandomize = useCallback(async () => {
+  // 视觉同步: imgReady 在 panda/face 切换瞬间置 false, PandaCanvas onRendered 完置 true
+  // caption/text 看到 imgReady=false 就藏起来, 等图就位再显示, 无错位
+  const [imgReady, setImgReady] = useState(true);
+
+  const onRandomize = useCallback(() => {
     const otherPandas = PANDA_HEADS.filter((p) => p.id !== pandaId);
     const otherFaces = FACES.filter((f) => f.id !== faceId);
     const np = otherPandas.length ? otherPandas : PANDA_HEADS;
@@ -134,20 +135,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     const newFace = nf[Math.floor(Math.random() * nf.length)];
     const newText = pickRandomText(textLang, text);
 
-    // 1. 预热: 在新 state 切换之前先把组合图扔进 composeMeme cache
-    try {
-      await composeMeme({
-        pandaSrc: newPanda.src,
-        faceSrc: newFace.src,
-        faceOffset: getLivePandaFaceOffset(newPanda),
-        size: 512,
-      });
-    } catch {
-      // 预热失败不阻断, 继续切 state (会走正常 cold 路径)
-    }
-
-    // 2. 一次性 batch 所有 state — PandaCanvas useEffect 再调 composeMeme
-    //    缓存命中, 同步返回, 文字/图片/位置 同帧更新, 无错位
+    // 不再 await 预合成 → 点击瞬间响应, 不卡 ~100-200ms
+    // PandaCanvas onRendered 触发 setImgReady(true), caption 同帧出现
+    setImgReady(false);
     setPandaId(newPanda.id);
     setFaceId(newFace.id);
     setText(newText);
@@ -398,15 +388,16 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   // 性能: preview 显示 350×350, 用 512 足够 (1024 编码慢 4x)
                   // 复制/下载时单独 composeMeme(size:1024) 拿高清
                   size={512}
+                  onRendered={() => setImgReady(true)}
                   // 校准: panda 图片整体上下移, caption 位置不动
                   // 正数 = panda 往下挪 (贴近 caption, 缩小间距); 负数 = panda 往上挪
-                  style={{ transform: `translateY(${getLiveCaptionOffset(panda)}px)` }}
+                  style={{ transform: `translateY(${getLiveCaptionOffset(panda)}px)`, opacity: imgReady ? 1 : 0.5, transition: 'opacity 120ms ease-out' }}
                 />
               </div>
               {text && (
                 <div
                   className="qm-caption"
-                  style={{ fontFamily: fontStack }}
+                  style={{ fontFamily: fontStack, visibility: imgReady ? 'visible' : 'hidden' }}
                 >{text}</div>
               )}
             </div>
