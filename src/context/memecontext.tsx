@@ -486,10 +486,16 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [draftSlots]);
 
   const clearDraft = useCallback((slotId: string) => {
-    // Dynamic schema：直接移除 slot（不再保留 state=null 的占位）
-    const nextDraftSlots = draftSlots.filter(slot => slot.id !== slotId);
-    persistDraftSlots(nextDraftSlots);
-  }, [draftSlots, persistDraftSlots]);
+    // 用 functional update 读最新 state, 防 forEach 多删时闭包捕获 stale draftSlots 导致
+    // 只有最后一次 persist 生效 (= 多选删只删一个)
+    setDraftSlots(prev => {
+      const next = prev.filter(slot => slot.id !== slotId);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
 
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();

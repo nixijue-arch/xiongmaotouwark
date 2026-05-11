@@ -386,7 +386,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             title={t('quickPickPanda')}
             items={PANDA_HEADS}
             value={pandaId}
-            onChange={setPandaId}
+            onChange={(id) => { setImgReady(false); setPandaId(id); }}
             lang={lang}
           />
           <PickPanel
@@ -394,7 +394,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             title={t('quickPickFace')}
             items={FACES}
             value={customFace ? '__custom__' : faceId}
-            onChange={(id) => { setFaceId(id); setCustomFace(null); }}
+            onChange={(id) => { setImgReady(false); setFaceId(id); setCustomFace(null); }}
             lang={lang}
           />
         </aside>
