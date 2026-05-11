@@ -6,7 +6,7 @@ import { Download, Trash2, Shuffle, Image, MessageCircle, Sparkles, Settings2, U
 import { PANDA_HEADS, ALL_PANDAS, ALL_FACES, getPandaFaceOffset, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
 import { PhotoCropModal } from '@/components/photocropmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
-import { calcEditorFaceLayout } from '@/lib/composeMeme';
+import { calcEditorFaceLayout, getEditorPandaBox } from '@/lib/composeMeme';
 // 编辑器推荐文字 / 随机文案 ← 与 QuickMode 共享同一个池
 import { RECOMMEND_TEXTS_ZH as ZH_TEXTS, RECOMMEND_TEXTS_EN as EN_TEXTS } from '@/data/quickModeTexts';
 import { toast } from 'sonner';
@@ -372,14 +372,17 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
     const texts = state.language === 'zh' ? ZH_TEXTS : EN_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
+    // v3: panda bbox-crop + 实际 box 计算 → face anchor 跟 QuickMode (PandaCanvas) 100% 对齐
+    const pandaBox = await getEditorPandaBox(randomPanda.src);
     const faceLayout = await calcEditorFaceLayout({
       pandaSrc: randomPanda.src,
       faceSrc: randomFace.src,
       faceOffset350: getLivePandaFaceOffset(randomPanda),
+      panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+      panda350W: pandaBox.w, panda350H: pandaBox.h,
     });
-    // 图层方案根据 panda 类型自动决定 (透明 ↔ 不透明)
     const layering = getShellLayering(randomPanda.id);
-    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: randomPanda.src, name: randomPanda.id, x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1, zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false };
+    const pandaEl: ImageElement = { id: generateId(), type: 'image', src: pandaBox.croppedSrc, name: randomPanda.id, x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h, rotation: 0, opacity: 1, zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false };
     const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height, rotation: 0, opacity: 1, zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: false };
     const textEl: TextElement = { id: generateId(), type: 'text', text: randomText, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'CLEAR_CANVAS' });
@@ -400,19 +403,25 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     const newFace = currentFace
       ? (() => { const others = ALL_FACES.filter(f => f.id !== currentFace.name); return others.length ? others[Math.floor(Math.random() * others.length)] : null; })()
       : null;
+    // v3: 切换 panda 时 bbox-crop + 实际 box 算 face anchor
     if (newPanda && currentPanda) {
-      // 换 panda 后图层方案可能变 (透明 ↔ 不透明)
       const lay = getShellLayering(newPanda.id);
-      dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: newPanda.src, name: newPanda.id, zIndex: lay.pandaZ, blendMode: lay.pandaBlend } });
+      const pandaBox = await getEditorPandaBox(newPanda.src);
+      dispatch({ type: 'UPDATE_ELEMENT', id: currentPanda.id, updates: { src: pandaBox.croppedSrc, name: newPanda.id, x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h, zIndex: lay.pandaZ, blendMode: lay.pandaBlend } });
       if (currentFace) {
-        // 同步更新 face 的图层
         dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { zIndex: lay.faceZ, blendMode: lay.faceBlend } });
       }
     }
     if (newFace && currentFace) {
       const anchorPanda = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda?.name);
       if (anchorPanda) {
-        const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: newFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
+        const pandaBox = await getEditorPandaBox(anchorPanda.src);
+        const layout = await calcEditorFaceLayout({
+          pandaSrc: anchorPanda.src, faceSrc: newFace.src,
+          faceOffset350: getLivePandaFaceOffset(anchorPanda),
+          panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+          panda350W: pandaBox.w, panda350H: pandaBox.h,
+        });
         const lay = getShellLayering(anchorPanda.id);
         dispatch({ type: 'UPDATE_ELEMENT', id: currentFace.id, updates: { src: newFace.src, name: newFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, zIndex: lay.faceZ, blendMode: lay.faceBlend } });
       } else {
@@ -423,7 +432,13 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       const anchorPanda = newPanda ?? ALL_PANDAS.find(p => p.id === currentPanda.name);
       const randomFace = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
       if (anchorPanda) {
-        const layout = await calcEditorFaceLayout({ pandaSrc: anchorPanda.src, faceSrc: randomFace.src, faceOffset350: getLivePandaFaceOffset(anchorPanda) });
+        const pandaBox = await getEditorPandaBox(anchorPanda.src);
+        const layout = await calcEditorFaceLayout({
+          pandaSrc: anchorPanda.src, faceSrc: randomFace.src,
+          faceOffset350: getLivePandaFaceOffset(anchorPanda),
+          panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+          panda350W: pandaBox.w, panda350H: pandaBox.h,
+        });
         const lay = getShellLayering(anchorPanda.id);
         const faceEl: ImageElement = { id: generateId(), type: 'image', src: randomFace.src, name: randomFace.id, x: layout.x, y: layout.y, width: layout.width, height: layout.height, rotation: 0, opacity: 1, zIndex: lay.faceZ, blendMode: lay.faceBlend, flipX: false };
         dispatch({ type: 'ADD_ELEMENT', element: faceEl });

@@ -20,7 +20,7 @@ import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { PhotoCropModal } from '@/components/photocropmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
-import { calcEditorFaceLayout, composeMeme, getContentBbox } from '@/lib/composeMeme';
+import { calcEditorFaceLayout, composeMeme, getContentBbox, getEditorPandaBox } from '@/lib/composeMeme';
 import { Camera } from 'lucide-react';
 import {
   Sparkles, Copy, Download, Heart, Wand2, ArrowRight, Type,
@@ -290,12 +290,15 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     }
     try {
       const offset350 = getLivePandaFaceOffset(panda);
+      // v3: panda bbox-crop + 实际 box → face anchor 跟 QuickMode 预览 100% 对齐
+      const pandaBox = await getEditorPandaBox(panda.src);
       const faceLayout = await calcEditorFaceLayout({
         pandaSrc: panda.src,
         faceSrc: face.src,
         faceOffset350: offset350,
+        panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+        panda350W: pandaBox.w, panda350H: pandaBox.h,
       });
-      // 图层方案: 透明 panda → panda 上 multiply, face 下; 不透明 panda → face 上 multiply, panda 下
       const layering = getShellLayering(panda.id);
       const elements: any[] = [
         {
@@ -305,8 +308,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
           zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: faceFlipX,
         },
         {
-          id: generateId(), type: 'image', src: panda.src, name: panda.id,
-          x: 75, y: 50, width: 350, height: 350,
+          id: generateId(), type: 'image', src: pandaBox.croppedSrc, name: panda.id,
+          x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h,
           rotation: 0, opacity: 1,
           zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
         },
@@ -338,14 +341,16 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   }, [favSlotId, renameDraft]);
 
   const onToEditor = useCallback(async () => {
-    // 用 calcEditorFaceLayout 让编辑器里 face 元素位置/大小跟 QuickMode 预览视觉一致
+    // v3: panda bbox-crop + 实际 box → 跟 QuickMode 预览 100% 一致
     const offset350 = getLivePandaFaceOffset(panda);
+    const pandaBox = await getEditorPandaBox(panda.src);
     const faceLayout = await calcEditorFaceLayout({
       pandaSrc: panda.src,
       faceSrc: face.src,
       faceOffset350: offset350,
+      panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+      panda350W: pandaBox.w, panda350H: pandaBox.h,
     });
-    // 图层方案根据 panda 类型决定 (透明 vs 不透明)
     const layering = getShellLayering(panda.id);
     const faceEl = {
       id: generateId(),
@@ -359,9 +364,9 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     const pandaEl = {
       id: generateId(),
       type: 'image' as const,
-      src: panda.src,
+      src: pandaBox.croppedSrc,
       name: panda.id,
-      x: 75, y: 50, width: 350, height: 350,
+      x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h,
       rotation: 0, opacity: 1,
       zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
     };
