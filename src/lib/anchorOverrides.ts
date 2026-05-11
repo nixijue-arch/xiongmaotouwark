@@ -53,22 +53,29 @@ export function clearAllAnchorOverrides(): void {
 }
 
 // 导出 TS code，可直接粘贴到 panda-manual-overrides.ts
+// 输出两个 export: PANDA_MANUAL_OVERRIDES (face anchor) + PANDA_CAPTION_OFFSETS (caption 偏移)
 export function exportToTSCode(): string {
   const all = readAnchorOverrides();
   const ids = Object.keys(all).sort();
   const lines: string[] = [];
   lines.push('// 校准工具导出 — paste 到 src/data/panda-manual-overrides.ts 永久生效');
   lines.push(`// generated at ${new Date().toISOString()}`);
+  lines.push('');
   lines.push('export const PANDA_MANUAL_OVERRIDES: Record<string, { x: number; y: number; w: number; h: number }> = {');
   for (const id of ids) {
     const o = all[id].faceOffset;
     const fill = all[id].faceFill;
-    const cap = all[id].captionOffset;
-    const notes: string[] = [];
-    if (fill && fill !== 0.95) notes.push(`faceFill ${fill.toFixed(2)}`);
-    if (cap) notes.push(`captionOffset ${cap}`);
-    const tail = notes.length ? ` // ${notes.join(', ')}` : '';
-    lines.push(`  '${id}': { x: ${o.x}, y: ${o.y}, w: ${o.w}, h: ${o.h} },${tail}`);
+    const note = fill && fill !== 0.95 ? ` // faceFill ${fill.toFixed(2)}` : '';
+    lines.push(`  '${id}': { x: ${o.x}, y: ${o.y}, w: ${o.w}, h: ${o.h} },${note}`);
+  }
+  lines.push('};');
+  lines.push('');
+
+  // captionOffset 单独一个 map (仅输出非零值)
+  const capIds = ids.filter(id => typeof all[id].captionOffset === 'number' && all[id].captionOffset !== 0);
+  lines.push('export const PANDA_CAPTION_OFFSETS: Record<string, number> = {');
+  for (const id of capIds) {
+    lines.push(`  '${id}': ${all[id].captionOffset},`);
   }
   lines.push('};');
   return lines.join('\n');

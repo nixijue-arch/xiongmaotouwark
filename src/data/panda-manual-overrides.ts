@@ -79,3 +79,11 @@ export const PANDA_MANUAL_OVERRIDES: Record<string, { x: number; y: number; w: n
   'panda-ph-045': { x: 105, y: 92, w: 161, h: 146 },
   'panda-ph-046': { x: 108, y: 83, w: 132, h: 142 },
 };
+
+// caption 上下偏移 (px in 350-coord) — 由校准工具的"图片上下偏移"滑块调好后 export
+// 正数 = panda 图片往下挪贴近 caption (缩小间距)
+// 负数 = panda 图片往上挪 (拉远 caption)
+// 仅对有 visible 偏移需求的 panda 列出, 不在 map 里 = 0 (默认位置)
+export const PANDA_CAPTION_OFFSETS: Record<string, number> = {
+  // user 校准后 export 填入, e.g. 'panda-ph-024': 30
+};

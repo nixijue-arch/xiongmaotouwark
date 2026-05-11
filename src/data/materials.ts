@@ -6,6 +6,9 @@ export interface Material {
   tags: string[];
   tagsEn: string[];
   faceOffset: { x: number; y: number; w: number; h: number };
+  // 字幕偏移 (px, 350-coord 空间): 正数 = panda 图片往下挪贴近 caption (缩小间距)
+  // 由校准工具调好后 export 到 panda-manual-overrides.ts 永久生效
+  captionOffset?: number;
 }
 
 const defaultOffset = { x: 100, y: 70, w: 250, h: 250 };
@@ -144,12 +147,17 @@ PANDA_HEADS.forEach(p => {
 
 // ===== 手动校准 — 70 个 panda 全部肉眼校准的 anchor (最高优先级) =====
 // 必须迭代 [PANDA_HEADS, PANDAHEAD_PANDAS] 70 个全应用，不能只迭代 PANDA_HEADS
-import { PANDA_MANUAL_OVERRIDES } from './panda-manual-overrides';
+import { PANDA_MANUAL_OVERRIDES, PANDA_CAPTION_OFFSETS } from './panda-manual-overrides';
 [...PANDA_HEADS, ...PANDAHEAD_PANDAS].forEach((p) => {
   const manual = PANDA_MANUAL_OVERRIDES[p.id];
   if (manual) {
     p.faceOffset = manual;
     pandaOffsetMap[p.id] = manual;
+  }
+  // 同名 record: caption 偏移 (校准工具 export 时输出, 老版本可能没有 → 兼容缺失)
+  const capOff = PANDA_CAPTION_OFFSETS?.[p.id];
+  if (typeof capOff === 'number') {
+    p.captionOffset = capOff;
   }
 });
 
@@ -169,17 +177,30 @@ export function getLivePandaFaceOffset(panda: Material): { x: number; y: number;
   return panda.faceOffset;
 }
 
-// 字幕偏移 (px, 350-coord 空间) — 校准工具改, 正数让 caption 往上移贴近 panda 内容底部
-// 修不同 shell 透明 padding 不均, caption 距离感觉不一致的问题
+// 字幕偏移 (px, 350-coord 空间) — 校准工具改, 正数让 panda 图片往下挪
+// 优先级: DEV localStorage (实时校准) > Material.captionOffset (永久 shipped 值) > 0
 export function getLiveCaptionOffset(pandaOrId: Material | string): number {
-  if (typeof window === 'undefined') return 0;
-  const id = typeof pandaOrId === 'string' ? pandaOrId : pandaOrId.id;
-  try {
-    const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
-    const ov = stored[id];
-    if (typeof ov?.captionOffset === 'number') return ov.captionOffset;
-  } catch {
-    /* ignore */
+  if (typeof window === 'undefined') {
+    return typeof pandaOrId !== 'string' ? (pandaOrId.captionOffset ?? 0) : 0;
   }
+  const id = typeof pandaOrId === 'string' ? pandaOrId : pandaOrId.id;
+  // 1. DEV 实时 localStorage (仅本地校准)
+  if (import.meta.env.DEV) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('pmw-anchor-overrides-v1') || '{}');
+      const ov = stored[id];
+      if (typeof ov?.captionOffset === 'number') return ov.captionOffset;
+    } catch {
+      /* ignore */
+    }
+  }
+  // 2. Material 永久值 (panda-manual-overrides.ts shipped 到 prod)
+  if (typeof pandaOrId !== 'string' && typeof pandaOrId.captionOffset === 'number') {
+    return pandaOrId.captionOffset;
+  }
+  // 3. 通过 id 查找 (兜底, 给 collection 等只有 id 的调用方)
+  const all = [...PANDA_HEADS, ...PANDAHEAD_PANDAS];
+  const found = all.find(p => p.id === id);
+  if (found && typeof found.captionOffset === 'number') return found.captionOffset;
   return 0;
 }

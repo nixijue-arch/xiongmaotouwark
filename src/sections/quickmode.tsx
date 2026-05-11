@@ -139,27 +139,26 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       size: 1024,
     });
     const capOff = getLiveCaptionOffset(panda);
+    // 紧凑节点 — 不再用固定 frame, 让 IMG 按自然 bbox 渲染 (无额外上下留白)
+    // composeMeme 输出已经是 bbox-tight, 所以 IMG 自身就是紧凑的
     const node = document.createElement('div');
     node.style.cssText = [
       'position:absolute',
       'left:-99999px',
       'top:0',
-      'width:400px',
       'background:#fff',
-      'display:flex',
-      'flex-direction:column',
-      'align-items:center',
-      'padding:18px 18px 22px',
+      'display:inline-block', // 容器自动按内容收缩
+      'padding:14px 18px 18px',
       'box-sizing:border-box',
+      'text-align:center',
     ].join(';');
     const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // panda translateY = captionOffset (panda 移, caption 不动), 跟 QuickMode 预览一致
-    // caption position:relative z-index:10 强制最高图层 (panda 大正 translate 时仍盖不住 caption)
+    // 导出时不用 translateY (会撑出多余空间); 用 caption marginTop 直接控制间距
+    // 最终图像里"谁动谁不动"无所谓 — 只看最终的 panda 内容底 ↔ caption 顶 间距
+    const captionMargin = Math.max(2, 12 - capOff);
     node.innerHTML = `
-      <div style="width:364px;height:364px;display:flex;align-items:flex-end;justify-content:center;position:relative;z-index:1;">
-        <img src="${composedDataUrl}" style="display:block;max-width:100%;max-height:100%;object-fit:contain;object-position:50% 100%;transform:translateY(${capOff}px);" />
-      </div>
-      ${escapedText ? `<div style="margin-top:10px;width:100%;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;padding:0 12px;line-height:1.15;word-break:break-word;font-family:${fontStack};position:relative;z-index:10;">${escapedText}</div>` : ''}
+      <img src="${composedDataUrl}" style="display:block;max-width:380px;max-height:380px;width:auto;height:auto;margin:0 auto;" />
+      ${escapedText ? `<div style="margin:${captionMargin}px auto 0;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;line-height:1.15;word-break:break-word;font-family:${fontStack};">${escapedText}</div>` : ''}
     `;
     document.body.appendChild(node);
     await new Promise((r) => setTimeout(r, 80));
