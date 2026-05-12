@@ -75,7 +75,7 @@ export function EditorBottomBar({ canvasRef, setPage }: Props) {
 
   return (
     <div className="editor-bottom-bar" role="toolbar" aria-label={lang === 'zh' ? '编辑器工具' : 'Editor toolbar'}>
-      <div className="editor-bb-group">
+      <div className="editor-bb-group editor-bb-group-nav">
         <button
           onClick={() => setPage('quick')}
           className="editor-bb-btn"
@@ -96,7 +96,7 @@ export function EditorBottomBar({ canvasRef, setPage }: Props) {
         </button>
       </div>
 
-      <div className="editor-bb-divider" />
+      <div className="editor-bb-divider editor-bb-divider-nav" />
 
       <div className="editor-bb-group">
         <button onClick={onAddText} className="editor-bb-btn" type="button">
