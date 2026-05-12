@@ -504,22 +504,33 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </div>
           </div>
 
-          {/* Mobile-only control stack — Phase 2 (mode chip + caption + pick row + upload row) */}
+          {/* Mobile-only control stack — Phase 2.7 重排:
+              JSX 顺序: preview / action(模式+随机) / caption / pick-row-4(熊猫/脸/自制/提取) / customFace-clear
+              视觉顺序 (CSS order): preview → transform(.about-banner-card 卡, 见 main 末尾) → action → caption → pick → clear
+              目标: 一屏到底, sticky bottom 走 (复制 / 下载 / ♥ / 编辑器)  */}
           {isMobile && (
             <>
-              <button
-                className="qmm-mode-chip"
-                onClick={cycleMode}
-                title={lang === 'zh' ? '点击切换模式 (循环)' : 'Tap to cycle mode'}
-                type="button"
-              >
-                <span key={cycleKey} className="qmm-mode-chip-icon" aria-hidden="true">
-                  <RefreshCw size={12} strokeWidth={2.8} />
-                </span>
-                <span>{lang === 'zh' ? '模式' : 'Mode'}:</span>
-                <span>{lang === 'zh' ? MODE_LABELS[mode].zh : MODE_LABELS[mode].en}</span>
-              </button>
+              {/* 行 2: 模式 chip + 🎲 随机生图 */}
+              <div className="qmm-action-row">
+                <button
+                  className="qmm-mode-chip"
+                  onClick={cycleMode}
+                  title={lang === 'zh' ? '点击切换模式 (循环)' : 'Tap to cycle mode'}
+                  type="button"
+                >
+                  <span key={cycleKey} className="qmm-mode-chip-icon" aria-hidden="true">
+                    <RefreshCw size={12} strokeWidth={2.8} />
+                  </span>
+                  <span>{lang === 'zh' ? '模式' : 'Mode'}:</span>
+                  <span>{lang === 'zh' ? MODE_LABELS[mode].zh : MODE_LABELS[mode].en}</span>
+                </button>
+                <button onClick={onRandomize} className="qmm-random-btn" type="button">
+                  <span className="qmm-pick-btn-emoji">🎲</span>
+                  <span>{lang === 'zh' ? '随机生图' : 'Random'}</span>
+                </button>
+              </div>
 
+              {/* Caption card (textarea + 换文字 / 中En / font) */}
               <div className="qmm-caption-card">
                 <textarea
                   value={text}
@@ -557,39 +568,35 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                 </div>
               </div>
 
-              <div className="qmm-pick-row">
+              {/* Pick row 4-col: 熊猫 / 脸 / 自制 / 提取 (替代原 3-col + upload row, 节省一行) */}
+              <div className="qmm-pick-row qmm-pick-row-4">
                 <button onClick={() => setPandaSheetOpen(true)} className="qmm-pick-btn" type="button">
                   <span className="qmm-pick-btn-emoji">🐼</span>
-                  <span>{lang === 'zh' ? '选熊猫' : 'Pandas'}</span>
+                  <span>{lang === 'zh' ? '熊猫' : 'Panda'}</span>
                 </button>
                 <button onClick={() => setFaceSheetOpen(true)} className="qmm-pick-btn" type="button">
                   <span className="qmm-pick-btn-emoji">😂</span>
-                  <span>{lang === 'zh' ? '选脸' : 'Faces'}</span>
+                  <span>{lang === 'zh' ? '脸' : 'Face'}</span>
                 </button>
-                <button onClick={onRandomize} className="qmm-pick-btn qmm-pick-btn-primary" type="button">
-                  <span className="qmm-pick-btn-emoji">🎲</span>
-                  <span>{lang === 'zh' ? '随机' : 'Random'}</span>
+                <button onClick={() => setCustomFaceModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-photo" type="button">
+                  <Camera size={20} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '自制' : 'Custom'}</span>
+                </button>
+                <button onClick={() => setSmartModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-emerald" type="button">
+                  <Sparkles size={20} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '提取' : 'Extract'}</span>
                 </button>
               </div>
 
-              <div className="qmm-upload-row">
-                <button onClick={() => setCustomFaceModalOpen(true)} className="qmm-upload-btn qmm-upload-btn-photo" type="button">
-                  <Camera size={16} /> {t('customFace')}
+              {customFace && (
+                <button
+                  onClick={() => setCustomFace(null)}
+                  className="qmm-clear-custom-btn"
+                  type="button"
+                >
+                  <X size={14} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
                 </button>
-                <button onClick={() => setSmartModalOpen(true)} className="qmm-upload-btn qmm-upload-btn-smart" type="button">
-                  <Sparkles size={16} /> {t('smartExtract')}
-                </button>
-                {customFace && (
-                  <button
-                    onClick={() => setCustomFace(null)}
-                    className="qmm-upload-btn"
-                    style={{ gridColumn: '1 / -1', background: '#fff', borderColor: '#888', color: '#0a356d' }}
-                    type="button"
-                  >
-                    <X size={14} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
-                  </button>
-                )}
-              </div>
+              )}
             </>
           )}
 
@@ -831,7 +838,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               className="quickmode-mobile-bottom-btn quickmode-mobile-bottom-btn-primary"
               type="button"
             >
-              <span>{t('quickToEditor')}</span>
+              <span>{lang === 'zh' ? '编辑器' : 'Editor'}</span>
               <ArrowRight size={16} strokeWidth={2.4} />
             </button>
           </div>
