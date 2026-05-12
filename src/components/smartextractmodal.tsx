@@ -113,8 +113,9 @@ function deriveEffective(purify: number | undefined): EffectiveParams {
     sharpness: Math.max(0.5, 4 - m * 3.5),
     blend: m,
     eraseBand: meanRadius + 12,
-    // master<40 不 blur (保 image #25 干净); master 50→1px mild; master 100→5px (抹 wrinkly 老脸)
-    preBlurR: Math.max(0, Math.round((m - 0.4) * 8)),
+    // master<30 不 blur (保 image #25 干净); master 50→3px (实测够抹 wrinkle); master 100→7px (强)
+    // 之前 master 50→1px 实测太弱 (Trump image #35 wrinkle 几乎无改善)
+    preBlurR: Math.max(0, Math.round((m - 0.3) * 10)),
   };
 }
 
