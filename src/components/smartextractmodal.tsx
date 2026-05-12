@@ -495,12 +495,15 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     }
     const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
 
-    // 3) 精确 edge distance via Chamfer DT (修 v4 第一版 boxBlur 边距估不准的 outline 残留)
+    // 3) 精确 edge distance via Chamfer DT
+    // W: alpha >= 200 算 polygon 内 (跟 main loop 一致, 不用 > 200)
     const W = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] > 200 ? 255 : 0;
+    for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] >= 200 ? 255 : 0;
     const edgeDist = chamferDT(W, w, h);
-    const eraseDistance = eff.eraseBand; // px, 精确距离阈值
+    const eraseDistance = eff.eraseBand;          // inner erase: 全部统一处理
+    const extendedDistance = eraseDistance + 18;  // outer erase: 暗肤色阴影也强制涂白
     const eraseLum = 50;
+    const extendedLumThr = 120;                   // outer 区: lum<120 → 涂白
 
     // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
     const sigmoidLut = new Uint8ClampedArray(256);
@@ -520,15 +523,24 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       if (d[di + 3] < 200) continue; // polygon 外不动
 
       const lum = G[i];
-      const edgeNear = edgeDist[i] < eraseDistance;
+      const dist = edgeDist[i];
 
-      if (edgeNear) {
-        // 边缘环带 (固定 full strength, 让 polygon outline 100% 消失)
+      if (dist < eraseDistance) {
+        // Inner erase: polygon 边缘 hard 处理
         if (lum < eraseLum) {
           d[di + 3] = 0; // 头发/阴影渗入 → 透明
         } else {
-          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; // 涂白融入 panda
+          // 涂白 + 强制 alpha=255 (消除 polygon anti-alias 半透明 dark mix)
+          // 关键: anti-alias 边缘 alpha∈[200,254] 像素 RGB 是 face 边缘 dark color,
+          // 半透明显示在 panda 上呈现"细黑线" → 强制 alpha=255 + RGB=255 让边缘 100% 纯白
+          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
         }
+        continue;
+      }
+
+      if (dist < extendedDistance && lum < extendedLumThr) {
+        // Outer erase: 距 edge 18px 内的暗肤色阴影 (lum<120) 强行涂白
+        d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
         continue;
       }
 
