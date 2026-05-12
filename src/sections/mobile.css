@@ -708,6 +708,26 @@
     /* mobile 编辑器三栏先不动 (Phase 3 重做) — 但留个最小可读宽度 */
     flex-wrap: nowrap;
   }
+
+  /* === Editor mobile: editor-layout fixed height (消 canvas → panel 中间 127px 空白) ===
+     Probe 实测: 之前 editor-layout flex-1 占 539, canvas auto-scaled 394 (width-limited),
+     justify-start → 145px blank below canvas. user 反馈 "画板到下面功能区距离太远".
+     真凶: canvas 必须 square + width-limited 在 iPhone 17 PM 430 viewport (canvas 406 max),
+     而 editor-layout flex-1 抢到的 539 比 canvas 大 → blank 必然.
+     修法: editor-layout 改 fixed height = canvas 大小 (即 viewport-width - 24px),
+     不再 flex-1 grow. emp-root flex-grow 1 顺势填补 remaining → canvas / panel 紧贴. */
+  .editor-layout {
+    flex: 0 0 auto !important;
+    height: calc(min(var(--visual-vh, 100dvh) - 240px, 100vw - 24px)) !important;
+    min-height: 240px;
+    overflow: hidden !important;
+  }
+
+  /* EditorMobilePanel flex-grow 1 让它顺势填补 editor-layout 后剩余空间 */
+  .emp-root {
+    flex: 1 1 auto !important;
+    justify-content: flex-start !important;
+  }
 }
 
 /* ================================================================
