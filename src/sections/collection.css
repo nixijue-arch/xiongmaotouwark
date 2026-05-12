@@ -427,6 +427,18 @@
   cursor: pointer;
   transition: all 160ms ease;
   font-family: inherit;
+  /* 防选中后 action bar 在窄屏 button 内文字竖排两字 — nowrap + flex-shrink:0 */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.col-bar-count {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.col-action-bar {
+  flex-wrap: wrap;
+  max-width: calc(100vw - 32px);
+  justify-content: center;
 }
 .col-bar-btn:hover { background: #333; color: #fff; }
 .col-bar-btn-primary {
