@@ -312,25 +312,29 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
 
-  // RPC for EditorMobilePanel — 通过 window event 调用本组件内部 handler
+  // RPC for EditorMobilePanel + EditorBottomBar — 通过 window event 调用本组件内部 handler
   // 用 ref 模式避免 useEffect 反复 attach/remove listener (handler 每渲染都重新创建)
   const editorRpcRef = useRef<{
     switchImage?: () => void;
     recommendText?: () => void;
     openSheet?: () => void;
+    saveDraft?: () => void;
   }>({});
 
   useEffect(() => {
     const onSwitchImg = () => editorRpcRef.current.switchImage?.();
     const onRecText = () => editorRpcRef.current.recommendText?.();
     const onOpen = () => editorRpcRef.current.openSheet?.();
+    const onSaveDraft = () => editorRpcRef.current.saveDraft?.();
     window.addEventListener('xmw-editor-switch-image', onSwitchImg);
     window.addEventListener('xmw-editor-recommend-text', onRecText);
     window.addEventListener('xmw-editor-open-right-sheet', onOpen);
+    window.addEventListener('xmw-editor-save-draft', onSaveDraft);
     return () => {
       window.removeEventListener('xmw-editor-switch-image', onSwitchImg);
       window.removeEventListener('xmw-editor-recommend-text', onRecText);
       window.removeEventListener('xmw-editor-open-right-sheet', onOpen);
+      window.removeEventListener('xmw-editor-save-draft', onSaveDraft);
     };
   }, []);
   const previewRequestIdRef = useRef(0);
@@ -379,10 +383,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       toast.error(state.language === 'zh' ? '需要至少有 panda 和 face 才能存草图' : 'Need at least panda + face to save');
       return;
     }
-    const slotId = `draft-${Date.now()}-${draftSlots.length + 1}`;
+    // slotId 加随机后缀 — Date.now() ms-level 已唯一, 但 Math.random 兜底连点 (同 ms 多次)
+    const slotId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     void saveDraft(slotId);
-    toast.success(state.language === 'zh' ? '已存到草图（左上角本地草稿 + 草图 tab 同步）' : 'Saved to drafts');
-  }, [state.elements, state.language, saveDraft, draftSlots.length]);
+    toast.success(state.language === 'zh' ? '已存到草图（草图本可见, 也可重新载入）' : 'Saved to drafts');
+  }, [state.elements, state.language, saveDraft]);
+
+  // expose saveDraft handler 给 EditorBottomBar 通过 window event 调用
+  editorRpcRef.current.saveDraft = handleSaveDraft;
 
   // 预览自动刷新 — elements 变化后 debounce 600ms 重生成（user 反馈手动按钮繁琐）
   const elementsKey = state.elements.map(e => e.id + ':' + ((e as ImageElement).src ?? '') + ':' + (e.type === 'text' ? (e as TextElement).text : '')).join('|');

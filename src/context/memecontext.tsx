@@ -432,46 +432,59 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
       language: state.language,
     } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
 
-    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
-    let nextDraftSlots: DraftSlot[];
-
-    if (existingIndex >= 0) {
-      // 覆盖已有 slot
-      nextDraftSlots = draftSlots.map(slot => (
-        slot.id === slotId
-          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
-          : slot
-      ));
-    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
-      // 追加新 slot
-      const index = draftSlots.length + 1;
-      nextDraftSlots = [
-        ...draftSlots,
-        {
-          id: slotId,
-          name: `草稿${index}`,
-          updatedAt: Date.now(),
-          previewUrl,
-          elementCount: state.elements.length,
-          state: savedState,
-        },
-      ];
-    } else {
-      // 已满 40 — 覆盖最旧的（updatedAt 最小）
-      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
-        const cur = slot.updatedAt ?? 0;
-        const min = arr[minIdx].updatedAt ?? 0;
-        return cur < min ? idx : minIdx;
-      }, 0);
-      nextDraftSlots = draftSlots.map((slot, idx) => (
-        idx === oldestIndex
-          ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
-          : slot
-      ));
-    }
-
-    persistDraftSlots(nextDraftSlots);
-  }, [draftSlots, persistDraftSlots, state.elements, state.language, state.selectedId]);
+    // 用 functional setState 防 race: 之前用 closure 的 draftSlots 在 await 期间陈旧,
+    // 连续点击 → 多个 saveDraft 看同 stale draftSlots → setDraftSlots(...) 后写覆盖前 →
+    // 最终只剩 1 张 ('只能存一个草稿' bug). prev 永远是 React 内部最新.
+    setDraftSlots(prev => {
+      const existingIndex = prev.findIndex(slot => slot.id === slotId);
+      let next: DraftSlot[];
+      if (existingIndex >= 0) {
+        next = prev.map(slot => (
+          slot.id === slotId
+            ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+            : slot
+        ));
+      } else if (prev.length < DRAFT_SLOT_MAX) {
+        const index = prev.length + 1;
+        next = [
+          ...prev,
+          {
+            id: slotId,
+            name: `草稿${index}`,
+            updatedAt: Date.now(),
+            previewUrl,
+            elementCount: state.elements.length,
+            state: savedState,
+          },
+        ];
+      } else {
+        const oldestIndex = prev.reduce((minIdx, slot, idx, arr) => {
+          const cur = slot.updatedAt ?? 0;
+          const min = arr[minIdx].updatedAt ?? 0;
+          return cur < min ? idx : minIdx;
+        }, 0);
+        next = prev.map((slot, idx) => (
+          idx === oldestIndex
+            ? { ...slot, updatedAt: Date.now(), previewUrl, elementCount: state.elements.length, state: savedState }
+            : slot
+        ));
+      }
+      // quota-aware persist 内联到 functional setter, 防止 setState + persist 不同步
+      if (typeof window !== 'undefined') {
+        const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, next);
+        if (evicted > 0) {
+          toast.info(
+            state.language === 'zh'
+              ? `存储已满, 自动删除 ${evicted} 张最旧草图`
+              : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
+            { duration: 4000 }
+          );
+        }
+        return saved;
+      }
+      return next;
+    });
+  }, [state.elements, state.language, state.selectedId]);
 
   const saveDraftWithState = useCallback(async (
     slotId: string,
@@ -482,52 +495,63 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     const safe = sanitizeStoredState(snapshot);
     if (!safe) return;
 
-    const existingIndex = draftSlots.findIndex(slot => slot.id === slotId);
-    let nextDraftSlots: DraftSlot[];
-
-    if (existingIndex >= 0) {
-      // 覆盖已有 slot (保留原 name 除非显式传新名)
-      nextDraftSlots = draftSlots.map(slot => (
-        slot.id === slotId
-          ? {
-              ...slot,
-              name: name || slot.name,
-              updatedAt: Date.now(),
-              previewUrl,
-              elementCount: safe.elements.length,
-              state: safe,
-            }
-          : slot
-      ));
-    } else if (draftSlots.length < DRAFT_SLOT_MAX) {
-      const idx = draftSlots.length + 1;
-      nextDraftSlots = [
-        ...draftSlots,
-        {
-          id: slotId,
-          name: name || `草稿${idx}`,
-          updatedAt: Date.now(),
-          previewUrl,
-          elementCount: safe.elements.length,
-          state: safe,
-        },
-      ];
-    } else {
-      // 满 40 — 覆盖最旧的
-      const oldestIndex = draftSlots.reduce((minIdx, slot, idx, arr) => {
-        const cur = slot.updatedAt ?? 0;
-        const min = arr[minIdx].updatedAt ?? 0;
-        return cur < min ? idx : minIdx;
-      }, 0);
-      nextDraftSlots = draftSlots.map((slot, idx) => (
-        idx === oldestIndex
-          ? { ...slot, name: name || slot.name, updatedAt: Date.now(), previewUrl, elementCount: safe.elements.length, state: safe }
-          : slot
-      ));
-    }
-
-    persistDraftSlots(nextDraftSlots);
-  }, [draftSlots, persistDraftSlots]);
+    // functional setState 防 race (同 saveDraft 修法)
+    setDraftSlots(prev => {
+      const existingIndex = prev.findIndex(slot => slot.id === slotId);
+      let next: DraftSlot[];
+      if (existingIndex >= 0) {
+        next = prev.map(slot => (
+          slot.id === slotId
+            ? {
+                ...slot,
+                name: name || slot.name,
+                updatedAt: Date.now(),
+                previewUrl,
+                elementCount: safe.elements.length,
+                state: safe,
+              }
+            : slot
+        ));
+      } else if (prev.length < DRAFT_SLOT_MAX) {
+        const idx = prev.length + 1;
+        next = [
+          ...prev,
+          {
+            id: slotId,
+            name: name || `草稿${idx}`,
+            updatedAt: Date.now(),
+            previewUrl,
+            elementCount: safe.elements.length,
+            state: safe,
+          },
+        ];
+      } else {
+        const oldestIndex = prev.reduce((minIdx, slot, idx, arr) => {
+          const cur = slot.updatedAt ?? 0;
+          const min = arr[minIdx].updatedAt ?? 0;
+          return cur < min ? idx : minIdx;
+        }, 0);
+        next = prev.map((slot, idx) => (
+          idx === oldestIndex
+            ? { ...slot, name: name || slot.name, updatedAt: Date.now(), previewUrl, elementCount: safe.elements.length, state: safe }
+            : slot
+        ));
+      }
+      if (typeof window !== 'undefined') {
+        const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, next);
+        if (evicted > 0) {
+          toast.info(
+            state.language === 'zh'
+              ? `存储已满, 自动删除 ${evicted} 张最旧草图`
+              : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
+            { duration: 4000 }
+          );
+        }
+        return saved;
+      }
+      return next;
+    });
+  }, [state.language]);
 
   const loadDraft = useCallback((slotId: string) => {
     const slot = draftSlots.find(item => item.id === slotId);

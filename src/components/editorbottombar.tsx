@@ -4,7 +4,7 @@
 //
 // 操作: 快速 / 草图 / 加文字 / 清空 / 复制 / 下载
 
-import { Copy, Download, Type, Trash2, Zap, FolderOpen } from 'lucide-react';
+import { Copy, Download, Type, Trash2, Zap, FolderOpen, Save, FolderHeart } from 'lucide-react';
 import { useMeme } from '@/context/memecontext';
 import { copyImageToClipboard, downloadImage } from '@/lib/exportImage';
 import { toast } from 'sonner';
@@ -73,6 +73,16 @@ export function EditorBottomBar({ canvasRef, setPage }: Props) {
     toast.info(lang === 'zh' ? '画布已清空' : 'Canvas cleared');
   };
 
+  // 存当前画布到草稿 — 通过 window event 调 RightSidebar 已实现 handleSaveDraft
+  // (含 panda+face 必需校验 + slot LRU + toast 反馈, 不重复造)
+  const onSaveDraft = () => {
+    if (!hasContent) return;
+    window.dispatchEvent(new CustomEvent('xmw-editor-save-draft'));
+  };
+
+  // 选草稿 = 跳到 Collection 页面 (mobile 已 polished, 缩略图 grid + 点选载入)
+  const onPickDraft = () => setPage('collection');
+
   return (
     <div className="editor-bottom-bar" role="toolbar" aria-label={lang === 'zh' ? '编辑器工具' : 'Editor toolbar'}>
       <div className="editor-bb-group editor-bb-group-nav">
@@ -97,6 +107,31 @@ export function EditorBottomBar({ canvasRef, setPage }: Props) {
       </div>
 
       <div className="editor-bb-divider editor-bb-divider-nav" />
+
+      {/* NEW: drafts group — 存当前 / 选已存 (mobile + desktop) */}
+      <div className="editor-bb-group">
+        <button
+          onClick={onSaveDraft}
+          disabled={!hasContent}
+          className="editor-bb-btn"
+          type="button"
+          title={lang === 'zh' ? '存当前为草稿' : 'Save as draft'}
+        >
+          <Save size={16} strokeWidth={2.2} />
+          <span>{lang === 'zh' ? '存稿' : 'Save'}</span>
+        </button>
+        <button
+          onClick={onPickDraft}
+          className="editor-bb-btn"
+          type="button"
+          title={lang === 'zh' ? '打开草图本选取' : 'Open drafts'}
+        >
+          <FolderHeart size={16} strokeWidth={2.2} />
+          <span>{lang === 'zh' ? '选稿' : 'Pick'}</span>
+        </button>
+      </div>
+
+      <div className="editor-bb-divider" />
 
       <div className="editor-bb-group">
         <button onClick={onAddText} className="editor-bb-btn" type="button">

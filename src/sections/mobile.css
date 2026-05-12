@@ -2239,44 +2239,52 @@
   }
 }
 
-/* Mobile: 紧凑 + 隐藏 nav buttons (Quick/Drafts) 避免跟 LeftSidebar/RightSidebar
-   的 .mobile-fab-left/right (bottom corner fixed FAB) 重叠. Hamburger 已提供 nav. */
+/* Mobile: 6 buttons (存稿/选稿/加字/清空/复制/下载) fit 430 viewport
+   FAB 已删 (display:none). hamburger 已提供 Quick/Drafts nav. dividers mobile 隐藏省空间 */
 @media (max-width: 768px) {
   .editor-bottom-bar {
-    gap: 6px;
-    padding: 6px 8px;
-    /* FAB 删了不需要 padding-left/right buffer 了 */
+    gap: 4px;
+    padding: 6px 6px;
     padding-bottom: calc(6px + var(--mobile-safe-bottom));
     flex-wrap: nowrap;
     overflow: visible;
-    justify-content: center;
+    justify-content: space-between;
   }
 
-  /* mobile 隐藏 Quick / Drafts 导航组 — 已在 hamburger 菜单 */
+  /* mobile 隐藏 Quick / Drafts nav 组 + dividers (空间不够给 6 个 button) */
   .editor-bb-group-nav,
-  .editor-bb-divider-nav {
+  .editor-bb-divider-nav,
+  .editor-bb-divider {
     display: none !important;
   }
 
   .editor-bb-group {
     gap: 4px;
+    flex: 1 1 auto;
+    justify-content: center;
   }
 
   .editor-bb-btn {
-    min-height: 40px;
-    padding: 0 8px;
-    font-size: 11px;
-    gap: 3px;
+    min-height: 42px;
+    padding: 0 6px;
+    font-size: 10px;
+    gap: 2px;
     border-radius: 8px;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .editor-bb-btn span {
     white-space: nowrap;
-    font-size: 11px;
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .editor-bb-divider {
-    height: 26px;
+  .editor-bb-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+    flex-shrink: 0;
   }
 }
 
