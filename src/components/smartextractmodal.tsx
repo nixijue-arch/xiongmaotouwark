@@ -89,20 +89,27 @@ const PRESETS: Record<string, Params> = {
 };
 
 // ============================================================
-// Master "净化" mapping v2 — purify (0-100) → 2 个 effective 参数 (SSOT)
-// v1 用 alpha 半透明 → 用户反馈产生橙色 ring + 眼睛被淡化, 弃用
-// v2 改用 "边缘暗色硬切透明 + 边缘/低对比区涂白" — 不再用半透明
+// Master "净化" mapping v3 — purify (0-100) → 4 个 effective 参数 (SSOT)
+// v1 (alpha 半透明) / v2 (edge erase + whiten) 都不够干净 →
+// v3 用 Wellner/Bradley adaptive threshold (cv2.adaptiveThreshold 经典算法):
+//   - 内部每像素 lum < (local_mean - C) → 黑 (五官细节)
+//   - 否则 → 白 (大面积阴影自然消失, 因为它们的 local_mean 也低)
+//   - 边缘环带统一涂白/erase, 避免 face polygon 轮廓可见
 // ============================================================
 interface EffectiveParams {
-  edgeBand: number;            // 0-28 px, 距 polygon edge 的环带宽度 (erase + whiten 影响范围)
-  whitenStrength: number;      // 0..1, 内部低对比中灰区涂白强度
+  enabled: boolean;        // master > 0 才启用 v3, =0 时整段短路
+  adaptiveC: number;       // 8-24, lum < mean - C 判黑; 越大 = 抹掉越多阴影
+  meanRadius: number;      // 40-70 px, local mean 计算半径; 大半径分辨"大阴影 vs 五官"更准
+  edgeBand: number;        // 8-26 px, 边缘统一涂白环带 (融入 panda 不出 outline)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
   const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
   return {
-    edgeBand: Math.round(m * 28),
-    whitenStrength: m * 0.85,
+    enabled: m > 0,
+    adaptiveC: 8 + Math.round(m * 16),
+    meanRadius: Math.max(20, Math.round(40 + m * 30)),
+    edgeBand: Math.max(6, Math.round(8 + m * 18)),
   };
 }
 
@@ -417,75 +424,76 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     ctx.putImageData(orig, 0, 0);
   }
 
-  // === [L2-v2] Edge erase + Whiten (取代旧 alpha 半透明方案) ===
-  // 用户反馈: 透明度不是好解法 → 橙色 ring / 眼睛被淡化
-  // 新设计: 距 polygon edge < edgeBand 像素的环带:
-  //   - 暗像素 (lum<100) → alpha=0 硬切 (脸的轮廓不出现黑线)
-  //   - 中灰平坦像素 (lum<210, std<18) → RGB 涂白 (融入 panda 白脸, "看不出轮廓")
-  // 内部 (距 edge >= edgeBand): 低对比中灰 (std<12, lum∈[80,220]) → RGB 涂白 (抹平肤纹/皱纹根)
-  // 高 std (五官 contour) 永远保留. 不动 alpha 半透明 → 不会有 ring / 灰眼睛.
-  if (eff.edgeBand > 0 || eff.whitenStrength > 0) {
+  // === [L2-v3] Wellner/Bradley adaptive threshold + edge unify ===
+  // 用户反馈 v2 还不够: face 还有轮廓线 + 大面积黑色阴影
+  // 目标参考 Image #11 (标准熊猫头风格): 内部纯黑/纯白二值化, 边缘 invisible
+  // 算法 (cv2.adaptiveThreshold 经典做法, OpenCV ADAPTIVE_THRESH_MEAN_C):
+  //   1. 算 luma map G
+  //   2. mask-aware 加权 local mean (polygon 外不参与, 避免 edge bias)
+  //   3. polygon 内每像素:
+  //      - 边缘环带: 暗→透明 / 其他→白 (面 polygon 边界完全融入 panda)
+  //      - 内部: lum < (local_mean - adaptiveC) → 黑 (五官) / 否则 → 白
+  //      - "大面积黑色阴影": local_mean 也低 → diff 小 → 判白 → 消失 ✓
+  if (eff.enabled) {
     const w = out, h = out;
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
 
-    // 1) 距 polygon edge 距离场: 用 alpha map (0/255) 算大半径 boxBlur,
-    //    blurred 值越小 = 越靠 edge (因为模糊后边缘内侧 alpha < 255)
-    const alphaIn = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) alphaIn[i] = d[i * 4 + 3] > 200 ? 255 : 0;
-    const distR = Math.max(1, eff.edgeBand);
-    const distBlur = boxBlur1D(alphaIn, w, h, distR);
-
-    // 2) luma + local std (5×5) — 用现有 boxBlur1D 复用
+    // 1) luma map G
     const G = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
       G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
     }
-    const meanG = boxBlur1D(G, w, h, 2);
-    const G2 = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) G2[i] = ((G[i] * G[i]) / 255) | 0;
-    const meanG2 = boxBlur1D(G2, w, h, 2);
-    const stdMap = new Uint8ClampedArray(w * h);
+
+    // 2) polygon mask W + masked luma lumW
+    const W = new Uint8ClampedArray(w * h);
+    const lumW = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) {
-      const v = meanG2[i] * 255 - meanG[i] * meanG[i];
-      stdMap[i] = Math.min(255, Math.sqrt(Math.max(0, v))) | 0;
+      W[i] = d[i * 4 + 3] > 200 ? 255 : 0;
+      lumW[i] = W[i] > 0 ? G[i] : 0;
     }
 
-    // 3) 像素处理
-    const whitenS = eff.whitenStrength; // 0..1
-    const inEdgeThr = 245; // distBlur < 245 表示在边缘环带内 (255-10≈245 留 10 弹性)
+    // 3) mask-aware weighted local mean (避免 polygon 边缘 mean 被外部 0 拉低)
+    const R = eff.meanRadius;
+    const lumMeanBlur = boxBlur1D(lumW, w, h, R);
+    const wMeanBlur = boxBlur1D(W, w, h, R);
+    // 真 mean (考虑 mask): meanLocal = lumMeanBlur * 255 / wMeanBlur
+
+    // 4) 距 polygon edge 距离场
+    const edgeR = eff.edgeBand;
+    const edgeDist = boxBlur1D(W, w, h, edgeR);
+    const edgeThr = 245; // edgeDist[i] < edgeThr → 在边缘环带内
+    const eraseLum = 50; // 边缘极暗像素 (头发渗入) → 完全透明
+
+    // 5) 像素分类: edge unify + internal adaptive threshold
+    const C = eff.adaptiveC;
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
-      if (d[di + 3] < 200) continue;
+      if (d[di + 3] < 200) continue; // polygon 外不动
+
       const lum = G[i];
-      const std = stdMap[i];
-      const edgeNear = distBlur[i] < inEdgeThr;
+      const edgeNear = edgeDist[i] < edgeThr;
 
       if (edgeNear) {
-        // 边缘环带
-        if (lum < 100) {
-          // 暗 → 硬切透明 (头发/阴影渗入 face 边缘 → 完全擦除)
-          d[di + 3] = 0;
-          continue;
-        }
-        if (lum < 210 && std < 18) {
-          // 中灰 + 平坦 → 涂白 (融入 panda 白脸; whitenS 控制强度)
-          d[di]     = Math.round(d[di]     * (1 - whitenS) + 255 * whitenS);
-          d[di + 1] = Math.round(d[di + 1] * (1 - whitenS) + 255 * whitenS);
-          d[di + 2] = Math.round(d[di + 2] * (1 - whitenS) + 255 * whitenS);
+        // 边缘环带: 统一处理避免 face polygon outline 可见
+        if (lum < eraseLum) {
+          d[di + 3] = 0; // 头发/阴影渗入 face 边缘 → 完全透明
+        } else {
+          // 任何非极暗的边缘像素 → 涂白 (跟 panda 白脸同色, 边界消失)
+          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255;
         }
         continue;
       }
 
-      // 内部 — 低 std 中灰平坦区 → 涂白 (抹平肤纹/皱纹根, 保五官 contour)
-      if (whitenS > 0 && std < 12 && lum > 80 && lum < 220) {
-        // smooth fade 0→1 over std∈[12, 4]
-        const sFade = Math.max(0, Math.min(1, (12 - std) / 8));
-        const s = whitenS * sFade;
-        d[di]     = Math.round(d[di]     * (1 - s) + 255 * s);
-        d[di + 1] = Math.round(d[di + 1] * (1 - s) + 255 * s);
-        d[di + 2] = Math.round(d[di + 2] * (1 - s) + 255 * s);
+      // 内部: adaptive threshold
+      const meanLocal = wMeanBlur[i] > 32 ? ((lumMeanBlur[i] * 255 / wMeanBlur[i]) | 0) : lum;
+      if (lum < meanLocal - C) {
+        // 比局部均值暗 C 以上 → 黑色细节 (眉/眼/鼻/嘴 contour)
+        d[di] = 0; d[di + 1] = 0; d[di + 2] = 0;
+      } else {
+        // 否则 → 纯白 (大面积阴影自动消失, 因为其 local mean 也低 → diff 小)
+        d[di] = 255; d[di + 1] = 255; d[di + 2] = 255;
       }
     }
     ctx.putImageData(cur, 0, 0);
