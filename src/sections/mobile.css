@@ -679,8 +679,12 @@
 /* === 防顶栏挡住 page content === */
 @media (max-width: 768px) {
   .app-shell {
-    /* dvh 让 iOS Safari 地址栏收起时不闪屏 */
+    /* 双 fallback: vh 是 baseline 兼容 (iOS Safari < 15.4 也接受);
+       dvh 在新版上更准, 若浏览器不识别会忽略, vh 兜底.
+       重要: 不能让 height 计算成 0, 否则 overflow:hidden 把所有内容剪没看见 = "黑屏" */
+    height: 100vh !important;
     height: 100dvh !important;
+    min-height: 100vh;
   }
 
   .editor-layout {
