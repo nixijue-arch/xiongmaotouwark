@@ -692,6 +692,9 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
   const [faceDataUrl, setFaceDataUrl] = useState<string>('');
   // polygon 拖拽
   const [draggingHandle, setDraggingHandle] = useState(-1);
+  // hover handle: 用 ref + rAF redraw 避免 React state 触发频繁重渲染
+  const hoverHandleRef = useRef(-1);
+  const hoverRedrawRafRef = useRef<number | null>(null);
 
   const outputPreviewRef = useRef<HTMLCanvasElement>(null);
   const originalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -851,24 +854,37 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(img, 0, 0, cw, ch);
-    // 圆滑 face polygon (橙色)
-    ctx.strokeStyle = 'rgba(245, 197, 106, 0.9)';
+
+    // 圆滑 face polygon outline
+    ctx.strokeStyle = 'rgba(245, 197, 106, 0.95)';
     ctx.lineWidth = Math.max(2, cw / 400);
     ctx.beginPath();
     tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })));
     ctx.closePath();
     ctx.stroke();
-    // 拖动中的 handle hint
-    if (draggingHandle >= 0 && item.maskHandles[draggingHandle]) {
-      const h = item.maskHandles[draggingHandle];
+
+    // === Quality-of-life: 永久画所有 anchor dots ===
+    // idle: 5px 浅蓝 dot + 白色 1px ring
+    // hover: 9px 深蓝 + 白色 2px ring
+    // dragging: 12px 橙红 + 白色 2px ring
+    const baseR = Math.max(4, cw / 130);
+    const hoverR = baseR * 1.7;
+    const dragR = baseR * 2.2;
+    item.maskHandles.forEach((h, i) => {
       const x = h.x * cw, y = h.y * ch;
-      const r = Math.max(6, cw / 80);
-      ctx.fillStyle = '#E97B7B';
-      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
-    }
+      const isDragging = i === draggingHandle;
+      const isHover = i === hoverHandleRef.current && !isDragging;
+      const r = isDragging ? dragR : isHover ? hoverR : baseR;
+      const fill = isDragging ? '#E97B7B' : isHover ? '#1767c7' : 'rgba(31, 146, 248, 0.85)';
+      // white halo for contrast against image
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = isDragging || isHover ? 2 : 1.4;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
   }
 
   // 原图 cell pointer events (polygon 拖拽)
@@ -891,7 +907,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     let nearestI = -1, nearestD = Infinity;
     activeItem.maskHandles.forEach((h, i) => {
       const d = Math.hypot(h.x - nx, h.y - ny);
-      if (d < 0.04 && d < nearestD) { nearestI = i; nearestD = d; }
+      // 0.05 hit radius — slightly larger than visual dot for easier grab (~32px @ 640 canvas)
+      if (d < 0.05 && d < nearestD) { nearestI = i; nearestD = d; }
     });
     if (nearestI < 0 && activeItem.maskHandles.length < 64) {
       // 找最近 edge 插入新点
@@ -906,7 +923,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
         tt = Math.max(0, Math.min(1, tt));
         const px = a.x + dx * tt, py = a.y + dy * tt;
         const d = Math.hypot(nx - px, ny - py);
-        if (d < 0.05 && d < bestD) { bestSeg = i; bestD = d; }
+        if (d < 0.06 && d < bestD) { bestSeg = i; bestD = d; }
       }
       if (bestSeg >= 0) {
         const newHandles = [...activeItem.maskHandles];
@@ -922,7 +939,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     }
   };
   const onOriginalPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (draggingHandle < 0 || !activeItem) return;
+    if (!activeItem) return;
     const cell = e.currentTarget;
     const canvas = originalCanvasRef.current;
     if (!canvas) return;
@@ -936,12 +953,38 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     const mx = e.clientX - r.left - offX, my = e.clientY - r.top - offY;
     const nx = Math.max(0, Math.min(1, mx / dispW));
     const ny = Math.max(0, Math.min(1, my / dispH));
-    setItems(prev => prev.map(it => {
-      if (it.id !== activeItem.id) return it;
-      const nh = [...it.maskHandles];
-      nh[draggingHandle] = { x: nx, y: ny };
-      return { ...it, maskHandles: nh };
-    }));
+
+    if (draggingHandle >= 0) {
+      // Dragging — 更新 handle 位置
+      setItems(prev => prev.map(it => {
+        if (it.id !== activeItem.id) return it;
+        const nh = [...it.maskHandles];
+        nh[draggingHandle] = { x: nx, y: ny };
+        return { ...it, maskHandles: nh };
+      }));
+      return;
+    }
+
+    // Not dragging — 检测 hover 让 anchor 高亮 + cursor 反馈
+    let nearestI = -1, nearestD = Infinity;
+    activeItem.maskHandles.forEach((h, i) => {
+      const d = Math.hypot(h.x - nx, h.y - ny);
+      if (d < 0.05 && d < nearestD) { nearestI = i; nearestD = d; }
+    });
+    if (nearestI !== hoverHandleRef.current) {
+      hoverHandleRef.current = nearestI;
+      if (hoverRedrawRafRef.current) cancelAnimationFrame(hoverRedrawRafRef.current);
+      hoverRedrawRafRef.current = requestAnimationFrame(() => {
+        if (activeItem) drawOriginalWithOverlay(activeItem);
+      });
+    }
+  };
+
+  const onOriginalPointerLeave = () => {
+    if (hoverHandleRef.current !== -1) {
+      hoverHandleRef.current = -1;
+      if (activeItem) drawOriginalWithOverlay(activeItem);
+    }
   };
   const onOriginalPointerUp = () => {
     if (draggingHandle < 0) return;
@@ -984,7 +1027,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     let nearest = -1, nd = Infinity;
     activeItem.maskHandles.forEach((h, i) => {
       const d = Math.hypot(h.x - nx, h.y - ny);
-      if (d < 0.04 && d < nd) { nearest = i; nd = d; }
+      if (d < 0.05 && d < nd) { nearest = i; nd = d; }
     });
     if (nearest >= 0) {
       const nh = activeItem.maskHandles.filter((_, i) => i !== nearest);
@@ -1006,6 +1049,38 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     if (!activeItem) return;
     const handles = FACE_OVAL_INDICES.map(idx => ({ x: activeItem.landmarks[idx].x, y: activeItem.landmarks[idx].y }));
     setItems(prev => prev.map(it => it.id === activeItem.id ? { ...it, maskHandles: handles } : it));
+    pushHistory(true);
+  };
+
+  // === Quick actions: 整体扩大 / 缩小 / 平滑 (设计软件常用) ===
+  const expandAll = (factor: number) => {
+    if (!activeItem) return;
+    const handles = activeItem.maskHandles;
+    const cx = handles.reduce((s, h) => s + h.x, 0) / handles.length;
+    const cy = handles.reduce((s, h) => s + h.y, 0) / handles.length;
+    const newHandles = handles.map(h => ({
+      x: Math.max(0.01, Math.min(0.99, cx + (h.x - cx) * (1 + factor))),
+      y: Math.max(0.01, Math.min(0.99, cy + (h.y - cy) * (1 + factor))),
+    }));
+    setItems(prev => prev.map(it => it.id === activeItem.id ? { ...it, maskHandles: newHandles } : it));
+    pushHistory(true);
+  };
+
+  const smoothAll = () => {
+    if (!activeItem) return;
+    const handles = activeItem.maskHandles;
+    const n = handles.length;
+    if (n < 4) return;
+    // 3-tap weighted average pass, 保留整体形状但削掉锯齿
+    const newHandles = handles.map((h, i) => {
+      const prev = handles[(i - 1 + n) % n];
+      const next = handles[(i + 1) % n];
+      return {
+        x: h.x * 0.6 + (prev.x + next.x) * 0.2,
+        y: h.y * 0.6 + (prev.y + next.y) * 0.2,
+      };
+    });
+    setItems(prev => prev.map(it => it.id === activeItem.id ? { ...it, maskHandles: newHandles } : it));
     pushHistory(true);
   };
 
@@ -1104,16 +1179,35 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             <div className="grid gap-3 md:grid-cols-3 grid-cols-1">
               <div>
                 <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#456' }}>
-                  <span style={{ fontWeight: 600 }}>原图 · 拖曲线 / 双击删点</span>
-                  <button onClick={resetHandles} className="text-[10px] font-semibold" style={{ color: '#0a8552' }}>重置 mask</button>
+                  <span style={{ fontWeight: 600 }}>原图 · 拖锚点 / 双击删 / 空白处单击加</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => expandAll(0.05)} title="整体扩大 5%"
+                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>⤢</button>
+                    <button onClick={() => expandAll(-0.05)} title="整体缩小 5%"
+                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>⤡</button>
+                    <button onClick={smoothAll} title="一键平滑"
+                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>～</button>
+                    <button onClick={resetHandles} title="重置 mask"
+                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a8552', color: '#0a5c39' }}>↺</button>
+                  </div>
                 </div>
                 <div
                   className="rounded-lg overflow-hidden aspect-square flex items-center justify-center select-none"
-                  style={{ background: '#fff', border: '2px solid #0a4e97', cursor: draggingHandle >= 0 ? 'grabbing' : 'grab', touchAction: 'none' }}
+                  style={{
+                    background: '#fff',
+                    border: '2px solid #0a4e97',
+                    cursor: draggingHandle >= 0 ? 'grabbing' : (hoverHandleRef.current >= 0 ? 'grab' : 'crosshair'),
+                    touchAction: 'none',
+                  }}
                   onPointerDown={onOriginalPointerDown}
                   onPointerMove={onOriginalPointerMove}
                   onPointerUp={onOriginalPointerUp}
                   onPointerCancel={onOriginalPointerUp}
+                  onPointerLeave={onOriginalPointerLeave}
                   onDoubleClick={onOriginalDblClick}
                 >
                   <canvas ref={originalCanvasRef} className="max-w-full max-h-full" />

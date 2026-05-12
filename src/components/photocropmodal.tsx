@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Upload, Check, RotateCcw, Move, Square, PenTool, Eraser, Undo2 } from 'lucide-react';
+import { X, Upload, Check, RotateCcw, Move, Square, PenTool, Eraser, Undo2, Sparkles } from 'lucide-react';
 import { PANDA_HEADS } from '@/data/materials';
 
 type Tool = 'rect' | 'lasso';
@@ -517,7 +517,7 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
 
     return (
       <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <path d={path + (isClosed ? ' Z' : '')} fill={isClosed ? 'rgba(255,94,0,0.12)' : 'none'} stroke="#FF5E00" strokeWidth="0.25" strokeDasharray="0.6,0.3" />
+        <path d={path + (isClosed ? ' Z' : '')} fill={isClosed ? 'rgba(31,146,248,0.15)' : 'none'} stroke="#FF5E00" strokeWidth="0.25" strokeDasharray="0.6,0.3" />
         {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="0.4" fill="#FF5E00" />)}
       </svg>
     );
@@ -534,7 +534,7 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
         <div className="absolute cursor-move select-none" style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`, pointerEvents: 'auto' }} onPointerDown={onPointerDownBox}>
           <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)' }} />
           <div className="absolute inset-0 pointer-events-none" style={{ border: '2px dashed #FF5E00' }} />
-          <div className="absolute bottom-0 right-0 w-6 h-6 cursor-se-resize flex items-center justify-center z-10" style={{ backgroundColor: '#FF5E00', transform: 'translate(50%, 50%)', borderRadius: '50%' }} onPointerDown={onPointerDownCorner}><Move size={12} color="#fff" /></div>
+          <div className="absolute bottom-0 right-0 w-6 h-6 cursor-se-resize flex items-center justify-center z-10" style={{ backgroundColor: '#1f92f8', transform: 'translate(50%, 50%)', borderRadius: '50%' }} onPointerDown={onPointerDownCorner}><Move size={12} color="#fff" /></div>
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Move size={16} color="rgba(255,255,255,0.5)" /></div>
         </div>
       </>
@@ -544,7 +544,7 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
 
 
   const edgeHandle = (pos: string): React.CSSProperties => {
-    const s: React.CSSProperties = { position: 'absolute', backgroundColor: '#FF5E00', zIndex: 10 };
+    const s: React.CSSProperties = { position: 'absolute', backgroundColor: '#1f92f8', zIndex: 10 };
     switch (pos) {
       case 'n': return { ...s, top: -4, left: '25%', right: '25%', height: 8, cursor: 'ns-resize', borderRadius: 4 };
       case 's': return { ...s, bottom: -4, left: '25%', right: '25%', height: 8, cursor: 'ns-resize', borderRadius: 4 };
@@ -561,36 +561,45 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-2" style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}>
-      <div className="relative w-full max-w-[960px] max-h-[94dvh] overflow-y-auto rounded-xl p-3 sm:p-5 flex flex-col gap-2 sm:gap-3" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-2" style={{ backgroundColor: 'rgba(10, 53, 109, 0.6)' }} onClick={handleClose}>
+      <div className="relative w-full max-w-[960px] max-h-[94dvh] overflow-y-auto rounded-2xl p-3 sm:p-5 flex flex-col gap-2 sm:gap-3"
+        style={{ background: 'linear-gradient(180deg, #fffdf7 0%, #f7f1e3 100%)', border: '3px solid #0a4e97', boxShadow: '0 8px 24px rgba(7, 48, 95, 0.22)' }}
+        onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-base sm:text-lg font-bold" style={{ color: '#fff' }}>{t.title}</h2>
-          <button onClick={handleClose} className="p-2 rounded-lg hover:bg-white/10"><X size={20} color="#ccc" /></button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Sparkles size={20} style={{ color: '#1767c7' }} />
+            <h2 className="text-base sm:text-lg font-bold" style={{ color: '#0a356d' }}>{t.title}</h2>
+            <span className="text-xs hidden sm:inline" style={{ color: '#456' }}>· {language === 'zh' ? '上传照片自定义熊猫头脸' : 'Upload your own photo'}</span>
+          </div>
+          <button onClick={handleClose} className="p-1.5 rounded" style={{ color: '#0a356d' }}><X size={18} /></button>
         </div>
 
         {/* Upload */}
         {!sourceUrl && (
-          <div
-            className="flex flex-col items-center justify-center gap-3 py-10 sm:py-12 rounded-xl border border-dashed transition-all"
-            style={{
-              borderColor: isDragOverUpload ? '#FF5E00' : '#333',
-              backgroundColor: isDragOverUpload ? 'rgba(255,94,0,0.08)' : 'transparent',
-            }}
-            onDragOver={handleUploadDragOver}
-            onDragLeave={handleUploadDragLeave}
-            onDrop={handleUploadDrop}
-          >
-            <label className="flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white cursor-pointer transition-all hover:scale-[1.02]" style={{ backgroundColor: '#FF5E00' }}>
-              <Upload size={18} />{t.upload}
+          <>
+            <label
+              className="block border-2 border-dashed rounded-xl py-8 px-6 text-center cursor-pointer transition-all hover:scale-[1.01]"
+              style={{
+                borderColor: isDragOverUpload ? '#0a8552' : '#0a8552',
+                background: isDragOverUpload ? 'linear-gradient(180deg, #c6ecd9 0%, #a5e0c1 100%)' : 'linear-gradient(180deg, #fff 0%, #ddf5e8 100%)',
+              }}
+              onDragOver={handleUploadDragOver}
+              onDragLeave={handleUploadDragLeave}
+              onDrop={handleUploadDrop}
+            >
+              <Upload size={28} className="mx-auto mb-2" style={{ color: '#0a8552' }} />
+              <div className="font-bold text-sm" style={{ color: '#0a356d' }}>{t.upload}</div>
+              <div className="text-[11px] mt-1" style={{ color: '#456', fontWeight: 500 }}>JPG / PNG / GIF · {language === 'zh' ? '拖拽 / 点击' : 'Drag / Click'}</div>
               <input type="file" accept="image/*" onChange={handleFile} className="hidden" ref={fileInputRef} />
             </label>
-            <p className="text-xs text-center" style={{ color: '#888' }}>
-              {language === 'zh'
-                ? '上传照片生成熊猫脸 · 支持 JPG / PNG / GIF · 支持拖拽上传图片'
-                : 'Upload photo to generate panda face · Supports JPG / PNG / GIF · Drag images here to upload'}
-            </p>
-          </div>
+            <div className="mt-1 p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: 'linear-gradient(180deg, #dff0ff 0%, #d5ebff 100%)', border: '2px solid #0a4e97', color: '#0a356d' }}>
+              <div className="font-bold mb-1" style={{ color: '#1767c7' }}>📌 几个小提醒</div>
+              <div>· {language === 'zh' ? '上传照片后, 用矩形或套索框选脸部区域' : 'Upload a photo, then crop face with rect or lasso tool'}</div>
+              <div>· {language === 'zh' ? '右侧预览实时显示效果, 可拖滑块调整强度' : 'Preview shows results live, drag sliders to tune'}</div>
+              <div>· {language === 'zh' ? '橡皮擦可擦除不想要的部分' : 'Use eraser to remove unwanted parts'}</div>
+            </div>
+          </>
         )}
 
         {/* Editor */}
@@ -598,21 +607,36 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
           <>
             {/* Tool Bar */}
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              <span className="text-[11px] sm:text-xs mr-0.5" style={{ color: '#aaa' }}>{language === 'zh' ? '工具:' : 'Tool:'}</span>
+              <span className="text-[11px] sm:text-xs mr-0.5 font-bold" style={{ color: '#0a356d' }}>{language === 'zh' ? '工具:' : 'Tool:'}</span>
               {([
                 ['rect', t.rect, Square], ['lasso', t.lasso, PenTool]
-              ] as const).map(([key, label, Icon]) => (
-                <button key={key} onClick={() => { setTool(key); setMode('crop'); }} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-all" style={{ backgroundColor: tool === key && mode === 'crop' ? '#FF5E00' : '#2a2a2a', color: tool === key && mode === 'crop' ? '#fff' : '#ccc', border: tool === key && mode === 'crop' ? 'none' : '1px solid #444' }}>
-                  <Icon size={12} />{label}
-                </button>
-              ))}
-              <button onClick={() => setMode('eraser')} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-all" style={{ backgroundColor: mode === 'eraser' ? '#EF4444' : '#2a2a2a', color: mode === 'eraser' ? '#fff' : '#ccc', border: mode === 'eraser' ? 'none' : '1px solid #444' }}>
+              ] as const).map(([key, label, Icon]) => {
+                const isActive = tool === key && mode === 'crop';
+                return (
+                  <button key={key} onClick={() => { setTool(key); setMode('crop'); }}
+                    className="about-arcade-btn"
+                    style={isActive
+                      ? { padding: '6px 10px', fontSize: 11 }
+                      : { padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', borderColor: '#0a4e97', color: '#0a356d' }}>
+                    <Icon size={12} />{label}
+                  </button>
+                );
+              })}
+              <button onClick={() => setMode('eraser')}
+                className="about-arcade-btn"
+                style={mode === 'eraser'
+                  ? { padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #cc5050 0%, #a74040 100%)', borderColor: '#7a2d2d', color: '#fff' }
+                  : { padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', borderColor: '#0a4e97', color: '#0a356d' }}>
                 <Eraser size={12} />{t.eraser}
               </button>
-              <button onClick={undo} disabled={historyIndex < 0} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-all disabled:opacity-30" style={{ backgroundColor: '#2a2a2a', color: '#ccc', border: '1px solid #444' }}>
+              <button onClick={undo} disabled={historyIndex < 0}
+                className="about-arcade-btn disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', borderColor: '#0a4e97', color: '#0a356d' }}>
                 <Undo2 size={12} />{t.undo}
               </button>
-              <button onClick={() => { setSourceUrl(''); fileInputRef.current?.click(); }} className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium ml-auto" style={{ backgroundColor: '#2a2a2a', color: '#ccc', border: '1px solid #444' }}>
+              <button onClick={() => { setSourceUrl(''); fileInputRef.current?.click(); }}
+                className="about-arcade-btn ml-auto"
+                style={{ padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d' }}>
                 <RotateCcw size={12} />{t.reset}
               </button>
             </div>
@@ -621,21 +645,21 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
               {/* Source image */}
               <div className="flex-1 flex flex-col gap-1.5 sm:gap-2 min-w-0">
                 <div className="min-h-[40px]">
-                  <div className="px-3 py-2 rounded-lg text-xs text-center" style={{ backgroundColor: 'rgba(255,94,0,0.15)', border: '1px solid rgba(255,94,0,0.3)', color: '#FF5E00' }}>
+                  <div className="px-3 py-2 rounded-lg text-xs text-center" style={{ background: 'linear-gradient(180deg, #dff0ff 0%, #d5ebff 100%)', border: '1.5px solid #0a4e97', color: '#0a356d', fontWeight: 600 }}>
                     {language === 'zh'
                       ? '💡 圈选T型五官区域（眼睛→鼻子→嘴巴）效果更好'
                       : '💡 Crop T-zone (eyes→nose→mouth) for best results'}
                   </div>
                 </div>
                 <div className="min-h-[20px]">
-                  <p className="text-[10px] sm:text-xs" style={{ color: '#aaa' }}>
+                  <p className="text-[10px] sm:text-xs" style={{ color: '#456' }}>
                     {isDrawingLasso ? t.lassoDraw
                       : mode === 'eraser' ? (language === 'zh' ? '在右侧预览图使用橡皮擦' : 'Use eraser on preview')
                       : tool === 'lasso' ? t.lassoHint
                       : t.cropHint}
                   </p>
                 </div>
-                <div className="relative overflow-hidden rounded-lg select-none" style={{ backgroundColor: '#000', maxHeight: '40vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+                <div className="relative overflow-hidden rounded-lg select-none" style={{ background: '#fff', border: '2px solid #0a4e97', maxHeight: '40vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
                   onPointerMove={(e) => { if (tool === 'lasso') onLassoMove(e); }}
                   onPointerUp={() => { if (tool === 'lasso') onLassoUp(); }}
                 >
@@ -658,12 +682,12 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
               {/* Preview & Controls */}
               <div className="flex-1 flex flex-col gap-2 sm:gap-3 min-w-0">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold" style={{ color: '#fff' }}>{t.preview}</p>
-                  {mode === 'eraser' && <p className="text-[10px]" style={{ color: '#EF4444' }}>{language === 'zh' ? '橡皮擦模式' : 'Eraser Mode'}</p>}
+                  <p className="text-xs font-semibold" style={{ color: '#0a356d' }}>{t.preview}</p>
+                  {mode === 'eraser' && <p className="text-[10px] font-bold" style={{ color: '#a74040' }}>{language === 'zh' ? '橡皮擦模式' : 'Eraser Mode'}</p>}
                 </div>
 
                 {/* Preview with panda head bottom */}
-                <div className="relative rounded-lg overflow-hidden flex items-center justify-center self-center" style={{ backgroundColor: '#FFFFFF', border: '1px solid #555', width: 280, height: 280 }}>
+                <div className="relative rounded-lg overflow-hidden flex items-center justify-center self-center" style={{ backgroundColor: '#FFFFFF', border: '2px solid #0a4e97', width: 280, height: 280 }}>
                   {/* Panda head background */}
                   <img
                     src={PANDA_HEADS[0].src}
@@ -691,24 +715,28 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
                 {/* Controls */}
                 {mode === 'eraser' ? (
                   <div>
-                    <div className="flex justify-between mb-1"><label className="text-xs" style={{ color: '#EF4444' }}>{t.eraserSize}</label><span className="text-xs font-mono" style={{ color: '#EF4444' }}>{eraserSize}px</span></div>
-                    <input type="range" min={5} max={80} step={1} value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} className="w-full" style={{ accentColor: '#EF4444' }} />
+                    <div className="flex justify-between mb-1"><label className="text-xs font-bold" style={{ color: '#a74040' }}>{t.eraserSize}</label><span className="text-xs font-mono font-bold" style={{ color: '#a74040' }}>{eraserSize}px</span></div>
+                    <input type="range" min={5} max={80} step={1} value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} className="w-full" style={{ accentColor: '#a74040' }} />
                   </div>
                 ) : (
                   <>
                     <div className="flex items-center gap-2 flex-wrap mt-1">
-                      <button onClick={() => setFlipH(!flipH)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all" style={{ backgroundColor: flipH ? '#FF5E00' : '#2a2a2a', color: '#fff', border: flipH ? 'none' : '1px solid #444' }}>
+                      <button onClick={() => setFlipH(!flipH)}
+                        className="about-arcade-btn"
+                        style={flipH
+                          ? { padding: '6px 10px', fontSize: 11 }
+                          : { padding: '6px 10px', fontSize: 11, background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', borderColor: '#0a4e97', color: '#0a356d' }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20V4m0 0L6 10m6-6l6 6"/></svg>{t.flip}
                       </button>
                     </div>
                     <div>
-                      <div className="flex justify-between mb-1"><label className="text-xs" style={{ color: '#ccc' }}>{t.contrast}</label><span className="text-xs font-mono" style={{ color: '#ccc' }}>{contrast}</span></div>
-                      <input type="range" min={-100} max={100} step={1} value={contrast} onChange={e => setContrast(Number(e.target.value))} className="w-full" style={{ accentColor: '#FF5E00' }} />
+                      <div className="flex justify-between mb-1"><label className="text-xs font-bold" style={{ color: '#0a356d' }}>{t.contrast}</label><span className="text-xs font-mono font-bold" style={{ color: '#0a356d' }}>{contrast}</span></div>
+                      <input type="range" min={-100} max={100} step={1} value={contrast} onChange={e => setContrast(Number(e.target.value))} className="w-full" style={{ accentColor: '#0a4e97' }} />
                     </div>
                     <div>
-                      <div className="flex justify-between mb-1"><label className="text-xs" style={{ color: '#FF5E00' }}>{t.strength}</label><span className="text-xs font-mono" style={{ color: '#FF5E00' }}>{strength}</span></div>
-                      <input type="range" min={0} max={150} step={1} value={strength} onChange={e => setStrength(Number(e.target.value))} className="w-full" style={{ accentColor: '#FF5E00' }} />
-                      <p className="text-[10px] mt-0.5" style={{ color: '#888' }}>{t.strengthHint}</p>
+                      <div className="flex justify-between mb-1"><label className="text-xs font-bold" style={{ color: '#1767c7' }}>{t.strength}</label><span className="text-xs font-mono font-bold" style={{ color: '#1767c7' }}>{strength}</span></div>
+                      <input type="range" min={0} max={150} step={1} value={strength} onChange={e => setStrength(Number(e.target.value))} className="w-full" style={{ accentColor: '#1767c7' }} />
+                      <p className="text-[10px] mt-0.5" style={{ color: '#456' }}>{t.strengthHint}</p>
                     </div>
                   </>
                 )}
@@ -719,10 +747,22 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
             <canvas ref={maskCanvasRef} style={{ display: 'none' }} />
 
             {/* Actions */}
-            <div className="flex items-center gap-2 sm:gap-3 justify-end pt-2" style={{ borderTop: '1px solid #333' }}>
-              <button onClick={() => { setSourceUrl(''); fileInputRef.current?.click(); }} className="flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#2a2a2a', color: '#ccc', border: '1px solid #444' }}><RotateCcw size={14} />{t.reset}</button>
-              <button onClick={handleClose} className="flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg text-xs font-medium" style={{ backgroundColor: '#2a2a2a', color: '#ccc', border: '1px solid #444' }}><X size={14} />{t.cancel}</button>
-              <button onClick={handleConfirm} className="flex items-center gap-1 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#00CC66' }}><Check size={16} />{t.confirm}</button>
+            <div className="flex items-center gap-2 sm:gap-3 justify-end pt-2" style={{ borderTop: '1px dashed rgba(10, 78, 151, 0.3)' }}>
+              <button onClick={() => { setSourceUrl(''); fileInputRef.current?.click(); }}
+                className="about-arcade-btn"
+                style={{ padding: '8px 14px', fontSize: 12, background: 'linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d' }}>
+                <RotateCcw size={14} />{t.reset}
+              </button>
+              <button onClick={handleClose}
+                className="about-arcade-btn"
+                style={{ padding: '8px 14px', fontSize: 12, background: 'linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d' }}>
+                <X size={14} />{t.cancel}
+              </button>
+              <button onClick={handleConfirm}
+                className="about-arcade-btn"
+                style={{ padding: '10px 18px', fontSize: 14, background: 'linear-gradient(180deg, #34d4a1 0%, #10a87a 100%)', borderColor: '#0a6e50', color: '#fff' }}>
+                <Check size={16} />{t.confirm}
+              </button>
             </div>
           </>
         )}
