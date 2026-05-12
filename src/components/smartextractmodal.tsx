@@ -267,21 +267,6 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     if (data[i + 3] < cutThr) data[i + 3] = 0;
   }
 
-  // === [L2-1] Edge feather (alpha falloff) — purify 派生, 0 时短路 ===
-  // 直接读写 data (imgData.data 别名), 后续 saturation/levels/etc 共享同一份
-  const eff = deriveEffective(params.purify);
-  if (eff.feather > 0) {
-    const w = out, h = out;
-    const alphaIn = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) alphaIn[i] = data[i * 4 + 3];
-    const blurred = boxBlur1D(alphaIn, w, h, eff.feather);
-    for (let i = 0; i < w * h; i++) {
-      const t = blurred[i] / 255;
-      const smooth = t * t * (3 - 2 * t); // smoothstep
-      data[i * 4 + 3] = Math.round(data[i * 4 + 3] * smooth);
-    }
-  }
-
   // 饱和度
   if (params.saturation < 100) {
     const amount = params.saturation / 100;
