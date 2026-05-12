@@ -287,6 +287,66 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   ctx.drawImage(image, offX, offY, iw * scale, ih * scale);
   ctx.restore();
 
+  // === [L2-4] Edge-aware blur (低 std 区模糊 / 高 std 区保留 — 抹平胡须皱纹, 保眼鼻嘴) ===
+  // eff 在此声明, 后续 L2-1/2/3 均消费同一个 eff (SSOT 派生自 params.purify)
+  const eff = deriveEffective(params.purify);
+  if (eff.detailSuppress > 0) {
+    const w = out, h = out;
+    const cur = ctx.getImageData(0, 0, w, h);
+    const d = cur.data;
+    // 1) luma map
+    const G = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
+    }
+    // 2) local mean(G) 与 mean(G²/255) via 5×5 box blur (r=2)
+    const meanG = boxBlur1D(G, w, h, 2);
+    const G2 = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) G2[i] = ((G[i] * G[i]) / 255) | 0;
+    const meanG2 = boxBlur1D(G2, w, h, 2);
+    // 3) std map: σ² = E[X²] - E[X]²; 还原 E[X²] = meanG2 * 255
+    const stdMap = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const v = meanG2[i] * 255 - meanG[i] * meanG[i];
+      stdMap[i] = Math.min(255, Math.sqrt(Math.max(0, v))) | 0;
+    }
+    // 4) RGB 3-pass box blur r=2 ≈ gaussian σ≈2.5 (3 次叠加, O(N))
+    const Rs = new Uint8ClampedArray(w * h);
+    const Gs = new Uint8ClampedArray(w * h);
+    const Bs = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      Rs[i] = d[di]; Gs[i] = d[di + 1]; Bs[i] = d[di + 2];
+    }
+    let Rb = boxBlur1D(Rs, w, h, 2);
+    let Gb = boxBlur1D(Gs, w, h, 2);
+    let Bb = boxBlur1D(Bs, w, h, 2);
+    Rb = boxBlur1D(Rb, w, h, 2);
+    Gb = boxBlur1D(Gb, w, h, 2);
+    Bb = boxBlur1D(Bb, w, h, 2);
+    Rb = boxBlur1D(Rb, w, h, 2);
+    Gb = boxBlur1D(Gb, w, h, 2);
+    Bb = boxBlur1D(Bb, w, h, 2);
+    // 5) blend: keep = smoothstep(8, 25, std) — 高 std 保留 / 低 std 用 blur
+    const strength = eff.detailSuppress / 100;
+    const stdLow = 8, stdHigh = 25;
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      if (d[di + 3] < 200) continue;
+      let keep = (stdMap[i] - stdLow) / (stdHigh - stdLow);
+      keep = Math.max(0, Math.min(1, keep));
+      keep = keep * keep * (3 - 2 * keep);
+      const blendR = keep * d[di]     + (1 - keep) * Rb[i];
+      const blendG = keep * d[di + 1] + (1 - keep) * Gb[i];
+      const blendB = keep * d[di + 2] + (1 - keep) * Bb[i];
+      d[di]     = Math.round(strength * blendR + (1 - strength) * d[di]);
+      d[di + 1] = Math.round(strength * blendG + (1 - strength) * d[di + 1]);
+      d[di + 2] = Math.round(strength * blendB + (1 - strength) * d[di + 2]);
+    }
+    ctx.putImageData(cur, 0, 0);
+  }
+
   // alpha 硬阈值
   let imgData = ctx.getImageData(0, 0, out, out);
   let data = imgData.data;
@@ -297,7 +357,7 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
 
   // === [L2-1] Edge feather (alpha falloff) — purify 派生, 0 时短路 ===
   // 直接读写 data (imgData.data 别名), 后续 saturation/levels/etc 共享同一份
-  const eff = deriveEffective(params.purify);
+  // eff 在 [L2-4] edge-aware blur 块 (clip 之后) 已声明, 此处复用 SSOT
   if (eff.feather > 0) {
     const w = out, h = out;
     const alphaIn = new Uint8ClampedArray(w * h);
