@@ -111,7 +111,7 @@ function deriveEffective(purify: number | undefined): EffectiveParams {
   };
 }
 
-function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, tension = 0.5) {
+function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
   const n = points.length;
   if (n < 3) {
     points.forEach((p, i) => {
@@ -122,12 +122,29 @@ function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale 
   }
   const pts = points.map(p => ({ x: p.x * scale + offX, y: p.y * scale + offY }));
   ctx.moveTo(pts[0].x, pts[0].y);
+  // Centripetal Catmull-Rom (α=0.5) → cubic Bezier 控制点
+  // 切向量按 √段长 缩放, 远段切向量不会爆炸 → 数学上避免 loop/尖刺
+  // 参考: Yuksel et al., "On the Parameterization of Catmull-Rom Curves" (2011)
   for (let i = 0; i < n; i++) {
     const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
-    const cp1x = p1.x + (p2.x - p0.x) * tension / 6;
-    const cp1y = p1.y + (p2.y - p0.y) * tension / 6;
-    const cp2x = p2.x - (p3.x - p1.x) * tension / 6;
-    const cp2y = p2.y - (p3.y - p1.y) * tension / 6;
+    const d01 = Math.max(1e-6, Math.hypot(p1.x - p0.x, p1.y - p0.y));
+    const d12 = Math.max(1e-6, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+    const d23 = Math.max(1e-6, Math.hypot(p3.x - p2.x, p3.y - p2.y));
+    const t01 = Math.sqrt(d01);
+    const t12 = Math.sqrt(d12);
+    const t23 = Math.sqrt(d23);
+
+    // tangent at p1 (centripetal scaled)
+    const m1x = ((p1.x - p0.x) / t01 - (p2.x - p0.x) / (t01 + t12) + (p2.x - p1.x) / t12) * t12;
+    const m1y = ((p1.y - p0.y) / t01 - (p2.y - p0.y) / (t01 + t12) + (p2.y - p1.y) / t12) * t12;
+    // tangent at p2 (centripetal scaled)
+    const m2x = ((p2.x - p1.x) / t12 - (p3.x - p1.x) / (t12 + t23) + (p3.x - p2.x) / t23) * t12;
+    const m2y = ((p2.y - p1.y) / t12 - (p3.y - p1.y) / (t12 + t23) + (p3.y - p2.y) / t23) * t12;
+
+    const cp1x = p1.x + m1x / 3;
+    const cp1y = p1.y + m1y / 3;
+    const cp2x = p2.x - m2x / 3;
+    const cp2y = p2.y - m2y / 3;
     ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
   }
 }
