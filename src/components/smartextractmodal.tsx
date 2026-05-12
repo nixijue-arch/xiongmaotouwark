@@ -81,7 +81,7 @@ const PRESETS: Record<string, Params> = {
   'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
   // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 75, trimThr: 72, autoNorm: true, blackPoint: 88, whitePoint: 178, gamma: 0.80, contrast: 55, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
   // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
   'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024, purify: 0 },
   // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
