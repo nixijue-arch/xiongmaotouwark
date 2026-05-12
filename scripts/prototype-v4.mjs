@@ -201,7 +201,8 @@ function applyL2(rgba, w, h, eff) {
   for (let i = 0; i < N; i++) W[i] = rgba[i * 4 + 3] >= 200 ? 255 : 0;
   const edgeDist = chamferDT(W, w, h);
   const eraseDistance = eff.eraseBand;
-  const fadeDist = 40;
+  const fadeDist = 80;
+  const alphaFeatherR = 5;
   const eraseLum = 50;
 
   // 4. sigmoid LUT
@@ -221,23 +222,26 @@ function applyL2(rgba, w, h, eff) {
     if (dist < eraseDistance + fadeDist && lum < eraseLum) {
       rgba[di + 3] = 0; continue;
     }
-    let lumThr;
-    if (dist < eraseDistance) lumThr = 256;
-    else if (dist < eraseDistance + fadeDist) {
-      const t = (dist - eraseDistance) / fadeDist;
-      lumThr = 256 * (1 - t);
-    } else lumThr = 0;
-    if (lum < lumThr) {
-      rgba[di] = 255; rgba[di + 1] = 255; rgba[di + 2] = 255; rgba[di + 3] = 255;
-      continue;
-    }
     const mean = meanG[i];
     let diff = mean - lum;
     if (diff < -128) diff = -128;
     else if (diff > 127) diff = 127;
     const target = sigLut[(diff + 128) | 0];
-    const newL = (blend * target + (1 - blend) * lum) | 0;
-    rgba[di] = newL; rgba[di + 1] = newL; rgba[di + 2] = newL;
+    const adaptiveLum = (blend * target + (1 - blend) * lum) | 0;
+    let eraseW;
+    if (dist < eraseDistance) eraseW = 1;
+    else if (dist < eraseDistance + fadeDist) {
+      const t = (dist - eraseDistance) / fadeDist;
+      eraseW = 1 - t * t * (3 - 2 * t);
+    } else eraseW = 0;
+    const finalLum = (eraseW * 255 + (1 - eraseW) * adaptiveLum) | 0;
+    let finalAlpha;
+    if (dist < alphaFeatherR) {
+      const t = dist / alphaFeatherR;
+      finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
+    } else finalAlpha = 255;
+    rgba[di] = finalLum; rgba[di + 1] = finalLum; rgba[di + 2] = finalLum;
+    rgba[di + 3] = finalAlpha;
   }
 }
 

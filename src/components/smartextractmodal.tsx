@@ -499,13 +499,14 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     const W = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] >= 200 ? 255 : 0;
     const edgeDist = chamferDT(W, w, h);
-    // graded fade erase zone (替代旧 inner+outer hard 双阶):
-    //   dist < eraseDistance: lumThr=256 (任何非头发 lum 都涂白)
-    //   dist ∈ [eraseDistance, eraseDistance+fadeDist]: lumThr 线性从 256 渐变到 0
-    //   dist > eraseDistance+fadeDist: 完全走 adaptive threshold
-    // 渐变 zone 让浅/深 lum 在不同距离都被涂白, 没有 hard 阈值跨越的"黑线伪影"
+    // v4f: erase 跟 adaptive 整段 smoothstep blend, 不再 lumThr 阈值跨越
+    //   dist<eraseDistance: 100% erase (lum=255)
+    //   dist∈[eraseDistance, +fadeDist]: smoothstep blend (1-t)*255 + t*adaptive
+    //   dist>+fadeDist: 100% adaptive
+    // alpha 5px feather (drawImage 缩放 anti-alias 不再产生 dark mix)
     const eraseDistance = eff.eraseBand;
-    const fadeDist = 40;
+    const fadeDist = 80;
+    const alphaFeatherR = 5;
     const eraseLum = 50;
 
     // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
@@ -528,41 +529,40 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       const lum = G[i];
       const dist = edgeDist[i];
 
-      // 头发 / 阴影渗入 → 完全透明 (适用于任何 polygon edge 附近)
+      // 头发渗入 → alpha=0 透明 (任何接近 polygon edge 的极暗 lum)
       if (dist < eraseDistance + fadeDist && lum < eraseLum) {
         d[di + 3] = 0;
         continue;
       }
 
-      // graded erase zone — lum 阈值随 dist 渐变下降
-      let lumThr;
-      if (dist < eraseDistance) {
-        lumThr = 256; // inner zone: 任何非头发 lum 都涂白
-      } else if (dist < eraseDistance + fadeDist) {
-        const t = (dist - eraseDistance) / fadeDist;
-        lumThr = 256 * (1 - t); // 渐变: 256 → 0
-      } else {
-        lumThr = 0;
-      }
-
-      if (lum < lumThr) {
-        // 涂白 + alpha=255 (消除 anti-alias dark mix + 边缘阴影逐渐 lum 越深越远)
-        d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
-        continue;
-      }
-
-      // 内部 — sigmoid adaptive threshold + blend
+      // Adaptive threshold output (始终计算)
       const mean = meanG[i];
       let diff = mean - lum;
       if (diff < -128) diff = -128;
       else if (diff > 127) diff = 127;
       const target = sigmoidLut[(diff + 128) | 0];
+      const adaptiveLum = (blend * target + (1 - blend) * lum) | 0;
 
-      // blend with original lum (master 控制): blend=1 纯 binary, blend=0 完全原图
-      const newL = (blend * target + (1 - blend) * lum) | 0;
-      d[di] = newL;
-      d[di + 1] = newL;
-      d[di + 2] = newL;
+      // erase output: 强制 255 (纯白)
+      // Fade factor: erase 权重, smoothstep blend
+      let eraseW;
+      if (dist < eraseDistance) eraseW = 1;
+      else if (dist < eraseDistance + fadeDist) {
+        const t = (dist - eraseDistance) / fadeDist;
+        eraseW = 1 - t * t * (3 - 2 * t);
+      } else eraseW = 0;
+
+      const finalLum = (eraseW * 255 + (1 - eraseW) * adaptiveLum) | 0;
+
+      // alpha feather (sub-5px alpha 渐变, 解决 drawImage 缩放 anti-alias dark mix)
+      let finalAlpha;
+      if (dist < alphaFeatherR) {
+        const t = dist / alphaFeatherR;
+        finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
+      } else finalAlpha = 255;
+
+      d[di] = finalLum; d[di + 1] = finalLum; d[di + 2] = finalLum;
+      d[di + 3] = finalAlpha;
     }
     ctx.putImageData(cur, 0, 0);
 
