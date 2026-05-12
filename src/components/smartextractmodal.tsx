@@ -156,7 +156,21 @@ function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
 }
 
 function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
-  const n = points.length;
+  let n = points.length;
+  // 入口 3-tap smoothing pass (display-time only, 不修改 caller 传入 points)
+  // 用户拖锚点到极端位置时, dragged 周围曲线局部尖锐 → 入口预平滑让 display + clip 都更圆滑
+  // 5-tap pointer-up smoothing 是 commit (actual handles 改); 这里 3-tap 是 draw-only (handles 不变)
+  if (n >= 4) {
+    const smoothed: Point[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const prev = points[(i - 1 + n) % n];
+      const cur = points[i];
+      const next = points[(i + 1) % n];
+      smoothed[i] = { x: cur.x * 0.6 + (prev.x + next.x) * 0.2, y: cur.y * 0.6 + (prev.y + next.y) * 0.2 };
+    }
+    points = smoothed;
+  }
+  n = points.length;
   if (n < 3) {
     points.forEach((p, i) => {
       const x = p.x * scale + offX, y = p.y * scale + offY;
@@ -692,9 +706,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
   const [faceDataUrl, setFaceDataUrl] = useState<string>('');
   // polygon 拖拽
   const [draggingHandle, setDraggingHandle] = useState(-1);
-  // hover handle: 用 ref + rAF redraw 避免 React state 触发频繁重渲染
-  const hoverHandleRef = useRef(-1);
-  const hoverRedrawRafRef = useRef<number | null>(null);
 
   const outputPreviewRef = useRef<HTMLCanvasElement>(null);
   const originalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -812,7 +823,11 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
       }
       setRecommendReason(recommended.reason);
     }
-    pushHistory(true);
+    // ⚠️ 修 undo bug: pushHistory(true) 必须等 React state flush 完才 read snapshot,
+    // 否则 snapshot() 读 stale state (items=[], activeId=null) → 第一个 snap 是空状态
+    // → 用户后续点 undo 回到空状态 → activeItem=undefined → modal 中部渲染空 (image #26)
+    // setTimeout(0) 跑 next macrotask, React commit phase 已结束, state 已 update.
+    setTimeout(() => pushHistory(true), 0);
   }, [autoMode, currentPreset, pushHistory]);
 
   // active item / params 变化时重渲染输出 + 同步生成 face dataURL 给 PandaCanvas 用
@@ -854,37 +869,24 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(img, 0, 0, cw, ch);
-
-    // 圆滑 face polygon outline
-    ctx.strokeStyle = 'rgba(245, 197, 106, 0.95)';
+    // 圆滑 face polygon (橙色, tracePolygonPath 内部 3-tap smoothing 让曲线更柔)
+    ctx.strokeStyle = 'rgba(245, 197, 106, 0.9)';
     ctx.lineWidth = Math.max(2, cw / 400);
     ctx.beginPath();
     tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })));
     ctx.closePath();
     ctx.stroke();
-
-    // === Quality-of-life: 永久画所有 anchor dots ===
-    // idle: 5px 浅蓝 dot + 白色 1px ring
-    // hover: 9px 深蓝 + 白色 2px ring
-    // dragging: 12px 橙红 + 白色 2px ring
-    const baseR = Math.max(4, cw / 130);
-    const hoverR = baseR * 1.7;
-    const dragR = baseR * 2.2;
-    item.maskHandles.forEach((h, i) => {
+    // 拖动中的 handle hint (单个红点)
+    if (draggingHandle >= 0 && item.maskHandles[draggingHandle]) {
+      const h = item.maskHandles[draggingHandle];
       const x = h.x * cw, y = h.y * ch;
-      const isDragging = i === draggingHandle;
-      const isHover = i === hoverHandleRef.current && !isDragging;
-      const r = isDragging ? dragR : isHover ? hoverR : baseR;
-      const fill = isDragging ? '#E97B7B' : isHover ? '#1767c7' : 'rgba(31, 146, 248, 0.85)';
-      // white halo for contrast against image
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.lineWidth = isDragging || isHover ? 2 : 1.4;
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
+      const r = Math.max(6, cw / 80);
+      ctx.fillStyle = '#E97B7B';
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
   }
 
   // 原图 cell pointer events (polygon 拖拽)
@@ -939,7 +941,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     }
   };
   const onOriginalPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!activeItem) return;
+    if (draggingHandle < 0 || !activeItem) return;
     const cell = e.currentTarget;
     const canvas = originalCanvasRef.current;
     if (!canvas) return;
@@ -953,38 +955,12 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     const mx = e.clientX - r.left - offX, my = e.clientY - r.top - offY;
     const nx = Math.max(0, Math.min(1, mx / dispW));
     const ny = Math.max(0, Math.min(1, my / dispH));
-
-    if (draggingHandle >= 0) {
-      // Dragging — 更新 handle 位置
-      setItems(prev => prev.map(it => {
-        if (it.id !== activeItem.id) return it;
-        const nh = [...it.maskHandles];
-        nh[draggingHandle] = { x: nx, y: ny };
-        return { ...it, maskHandles: nh };
-      }));
-      return;
-    }
-
-    // Not dragging — 检测 hover 让 anchor 高亮 + cursor 反馈
-    let nearestI = -1, nearestD = Infinity;
-    activeItem.maskHandles.forEach((h, i) => {
-      const d = Math.hypot(h.x - nx, h.y - ny);
-      if (d < 0.05 && d < nearestD) { nearestI = i; nearestD = d; }
-    });
-    if (nearestI !== hoverHandleRef.current) {
-      hoverHandleRef.current = nearestI;
-      if (hoverRedrawRafRef.current) cancelAnimationFrame(hoverRedrawRafRef.current);
-      hoverRedrawRafRef.current = requestAnimationFrame(() => {
-        if (activeItem) drawOriginalWithOverlay(activeItem);
-      });
-    }
-  };
-
-  const onOriginalPointerLeave = () => {
-    if (hoverHandleRef.current !== -1) {
-      hoverHandleRef.current = -1;
-      if (activeItem) drawOriginalWithOverlay(activeItem);
-    }
+    setItems(prev => prev.map(it => {
+      if (it.id !== activeItem.id) return it;
+      const nh = [...it.maskHandles];
+      nh[draggingHandle] = { x: nx, y: ny };
+      return { ...it, maskHandles: nh };
+    }));
   };
   const onOriginalPointerUp = () => {
     if (draggingHandle < 0) return;
@@ -1103,6 +1079,15 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     onClose();
   };
 
+  // 重新选图: 清当前 items 状态 + 触发文件选择
+  const reuploadInputRef = useRef<HTMLInputElement>(null);
+  const handleReupload = () => {
+    setItems([]); setActiveId(null); setError(''); setRecommendReason('');
+    setFaceDataUrl('');
+    historyRef.current = { stack: [], idx: -1 };
+    setTimeout(() => reuploadInputRef.current?.click(), 0);
+  };
+
   if (!isOpen) return null;
 
   const canUndo = historyRef.current.idx > 0;
@@ -1122,6 +1107,13 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             <span className="text-xs hidden sm:inline" style={{ color: '#456' }}>· {t('smartExtractHint')}</span>
           </div>
           <div className="flex items-center gap-1">
+            {items.length > 0 && (
+              <button onClick={handleReupload} title="重新选图"
+                className="p-1.5 rounded hover:bg-blue-100"
+                style={{ color: '#0a356d' }}>
+                <Upload size={16} />
+              </button>
+            )}
             <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"
               className="p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ color: '#0a356d' }}>
@@ -1137,6 +1129,20 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             </button>
           </div>
         </div>
+
+        {/* Hidden input for reupload */}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/jpg,image/webp"
+          multiple
+          ref={reuploadInputRef}
+          className="hidden"
+          onChange={e => {
+            const fs = Array.from(e.target.files || []);
+            if (fs.length) handleFiles(fs);
+            (e.target as HTMLInputElement).value = '';
+          }}
+        />
 
         {loadingModel && (
           <div className="mb-3 p-2 rounded text-xs" style={{ background: 'linear-gradient(180deg, #ddf5e8 0%, #c6ecd9 100%)', border: '1.5px solid #0a8552', color: '#0a5c39', fontWeight: 600 }}>
@@ -1200,14 +1206,13 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                   style={{
                     background: '#fff',
                     border: '2px solid #0a4e97',
-                    cursor: draggingHandle >= 0 ? 'grabbing' : (hoverHandleRef.current >= 0 ? 'grab' : 'crosshair'),
+                    cursor: draggingHandle >= 0 ? 'grabbing' : 'grab',
                     touchAction: 'none',
                   }}
                   onPointerDown={onOriginalPointerDown}
                   onPointerMove={onOriginalPointerMove}
                   onPointerUp={onOriginalPointerUp}
                   onPointerCancel={onOriginalPointerUp}
-                  onPointerLeave={onOriginalPointerLeave}
                   onDoubleClick={onOriginalDblClick}
                 >
                   <canvas ref={originalCanvasRef} className="max-w-full max-h-full" />
