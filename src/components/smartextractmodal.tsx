@@ -99,8 +99,7 @@ interface EffectiveParams {
   meanRadius: number;
   sharpness: number;
   blend: number;
-  eraseBand: number;
-  preBlurR: number;        // v4g: master 控 pre-blur 半径, 抹 wrinkles 保 contour
+  eraseBand: number;       // 用作 Chamfer DT distance 阈值 (= meanRadius + 12)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
@@ -113,8 +112,6 @@ function deriveEffective(purify: number | undefined): EffectiveParams {
     sharpness: Math.max(0.5, 4 - m * 3.5),
     blend: m,
     eraseBand: meanRadius + 12,
-    // master<40 不 blur (保细五官), master 50 → 1px (mild), master 100 → 5px (强 blur 抹 wrinkles)
-    preBlurR: Math.max(0, Math.round((m - 0.4) * 8)),
   };
 }
 
@@ -481,47 +478,6 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
 
-    // 0) v4g: master-controlled pre-blur (抹 wrinkles / skin texture noise)
-    // 3-pass boxBlur1D ≈ Gaussian. 只 blur RGB (不动 alpha), 用 polygon 内全局均值 padding 防 edge leak
-    if (eff.preBlurR > 0) {
-      const N2 = w * h;
-      let sR = 0, sG = 0, sB = 0, cP = 0;
-      for (let i = 0; i < N2; i++) {
-        if (d[i * 4 + 3] > 200) {
-          sR += d[i * 4]; sG += d[i * 4 + 1]; sB += d[i * 4 + 2]; cP++;
-        }
-      }
-      if (cP > 0) {
-        const aR = Math.round(sR / cP);
-        const aG = Math.round(sG / cP);
-        const aB = Math.round(sB / cP);
-        const Rs = new Uint8ClampedArray(N2);
-        const Gs0 = new Uint8ClampedArray(N2);
-        const Bs = new Uint8ClampedArray(N2);
-        for (let i = 0; i < N2; i++) {
-          if (d[i * 4 + 3] > 200) {
-            Rs[i] = d[i * 4]; Gs0[i] = d[i * 4 + 1]; Bs[i] = d[i * 4 + 2];
-          } else {
-            Rs[i] = aR; Gs0[i] = aG; Bs[i] = aB;
-          }
-        }
-        let Rb = boxBlur1D(Rs, w, h, eff.preBlurR);
-        let Gb = boxBlur1D(Gs0, w, h, eff.preBlurR);
-        let Bb = boxBlur1D(Bs, w, h, eff.preBlurR);
-        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
-        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
-        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
-        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
-        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
-        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
-        for (let i = 0; i < N2; i++) {
-          if (d[i * 4 + 3] > 200) {
-            d[i * 4] = Rb[i]; d[i * 4 + 1] = Gb[i]; d[i * 4 + 2] = Bb[i];
-          }
-        }
-      }
-    }
-
     // 1) luma map G + polygon 内全局平均 lum (padding 用)
     const G = new Uint8ClampedArray(w * h);
     let sumLum = 0, cnt = 0;
@@ -577,15 +533,13 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       const lum = G[i];
       const dist = edgeDist[i];
 
-      // v4g 修1: 头发渗入透明仅限 polygon 最外圈 12px
-      // (之前 125px 误杀内部五官 → image #24/#25 右眼/右眉透明化)
-      const hairEraseR = 12;
-      if (dist < hairEraseR && lum < eraseLum) {
+      // 头发渗入 → alpha=0 透明 (任何接近 polygon edge 的极暗 lum)
+      if (dist < eraseDistance + fadeDist && lum < eraseLum) {
         d[di + 3] = 0;
         continue;
       }
 
-      // Adaptive output (always compute)
+      // Adaptive threshold output (始终计算)
       const mean = meanG[i];
       let diff = mean - lum;
       if (diff < -128) diff = -128;
@@ -593,29 +547,24 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       const target = sigmoidLut[(diff + 128) | 0];
       const adaptiveLum = (blend * target + (1 - blend) * lum) | 0;
 
-      // alpha 5px feather
-      let finalAlpha;
-      if (dist < alphaFeatherR) {
-        const t = dist / alphaFeatherR;
-        finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
-      } else finalAlpha = 255;
-
-      // v4g 修2: 深色五官像素 (lum<60) 永远走纯 adaptive, 不被 erase blend lighten 成 mid-gray
-      // adaptive 对深色像素 + 周围亮肤色 → 输出接近 0 (纯黑) → 五官保留纯黑
-      if (lum < 60) {
-        d[di] = adaptiveLum; d[di + 1] = adaptiveLum; d[di + 2] = adaptiveLum;
-        d[di + 3] = finalAlpha;
-        continue;
-      }
-
-      // 其他像素 (skin / shadow / texture): erase ↔ adaptive smoothstep blend
+      // erase output: 强制 255 (纯白)
+      // Fade factor: erase 权重, smoothstep blend
       let eraseW;
       if (dist < eraseDistance) eraseW = 1;
       else if (dist < eraseDistance + fadeDist) {
         const t = (dist - eraseDistance) / fadeDist;
         eraseW = 1 - t * t * (3 - 2 * t);
       } else eraseW = 0;
+
       const finalLum = (eraseW * 255 + (1 - eraseW) * adaptiveLum) | 0;
+
+      // alpha feather (sub-5px alpha 渐变, 解决 drawImage 缩放 anti-alias dark mix)
+      let finalAlpha;
+      if (dist < alphaFeatherR) {
+        const t = dist / alphaFeatherR;
+        finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
+      } else finalAlpha = 255;
+
       d[di] = finalLum; d[di + 1] = finalLum; d[di + 2] = finalLum;
       d[di + 3] = finalAlpha;
     }
