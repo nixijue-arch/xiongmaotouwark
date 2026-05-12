@@ -80,7 +80,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     setMode((cur) => {
       const next = nextMode(cur);
       // 切 mode 同时 reroll 文字 (imperative, 比 useEffect 可靠)
-      setText((curText) => pickRandomText(textLang, next === 'all' ? 'all' : next as Mode, curText));
+      setTextSynced((curText) => pickRandomText(textLang, next === 'all' ? 'all' : next as Mode, curText));
       return next;
     });
     setCycleKey((k) => k + 1);
@@ -88,7 +88,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // 切 textLang 时 reroll 文字 (imperative, 跟按钮 onClick 同步)
   const handleSetTextLang = useCallback((nextLang: 'zh' | 'en') => {
     setTextLang(nextLang);
-    setText((curText) => pickRandomText(nextLang, mode, curText));
+    setTextSynced((curText) => pickRandomText(nextLang, mode, curText));
   }, [mode]);
 
   // 顶栏 UI 语言切换 (state.language) → textLang 跟着切 + 文字 reroll 成对应语言
@@ -100,7 +100,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       return;
     }
     setTextLang(state.language);
-    setText((cur) => pickRandomText(state.language, mode, cur));
+    setTextSynced((cur) => pickRandomText(state.language, mode, cur));
   }, [state.language]);
   const [faceRotation, setFaceRotation] = useState(0);
   const [faceFlipX, setFaceFlipX] = useState(false);
@@ -178,15 +178,29 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // -------- actions --------
 
   const onRandomText = useCallback(() => {
-    setText((cur) => pickRandomText(textLang, mode, cur));
+    setTextSynced((cur) => pickRandomText(textLang, mode, cur));
   }, [textLang, mode]);
 
-  // 视觉同步 v2: 旧图全保持显示 (位置/caption/transform), 等新图 composeMeme 完后一起切.
-  // displayedText 跟 displayCaptionOffset 是 'lagging state', 只在 PandaCanvas onRendered 时更新.
-  // 这样不会 '旧 panda 先动位置 → 然后新图刷出' 的两步顿感, 完全是 '旧版整体保持 → 一帧切到新版'.
+  // 视觉同步 v3: 只有 onRandomize (一键随机, panda+face+text 一起换) 走 lagging,
+  // 其他场景 (打字 / Reroll / 切语言 / 切模式 / 切 panda picker / 切 face picker) 都走 immediate.
+  // → displayedText 跟 displayCaptionOffset 平时同步 text/panda, onRandomize 触发后等 onRendered 一起切.
   const [imgReady, setImgReady] = useState(true);
   const [displayedText, setDisplayedText] = useState(text);
   const [displayCaptionOffset, setDisplayCaptionOffset] = useState(() => getLiveCaptionOffset(panda));
+
+  // 文字 immediate setter — 给所有"只动文字不动图"的场景用 (打字 / Reroll / 切语言 / 切模式)
+  const setTextSynced = useCallback((v: string | ((cur: string) => string)) => {
+    if (typeof v === 'function') {
+      setText((cur) => {
+        const next = v(cur);
+        setDisplayedText(next);
+        return next;
+      });
+    } else {
+      setText(v);
+      setDisplayedText(v);
+    }
+  }, []);
 
   const onRandomize = useCallback(() => {
     const otherPandas = PANDA_HEADS.filter((p) => p.id !== pandaId);
@@ -631,7 +645,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               {/* v4: textarea 支持多行 — 回车换行, 预览/导出走 white-space: pre-line */}
               <textarea
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => setTextSynced(e.target.value)}
                 placeholder={t('quickTextPlaceholder')}
                 rows={2}
                 style={{
