@@ -1735,10 +1735,166 @@
 }
 
 /* ================================================================
- * Phase 2.8 — 细节修
- *   1) 0° 度数 badge 用 inline-flex 强制双向居中 (replace inline span text-align)
- *   2) pick-row-4 button label 给"自制熊猫脸"(5字) 适当空间 — 减小 emoji + font 12, line tight
+ * Phase 2.9 — EditorBottomBar (编辑器持续可见底栏 — 桌面 + mobile 通用)
+ *   现代设计参考 (Figma/Canva/Photoroom mobile): 把核心 actions 下沉到 thumb-reach
+ *   底部 toolbar, canvas 顶端对齐让操作区集中下半屏
  * ================================================================ */
+
+.editor-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-bottom: calc(10px + var(--mobile-safe-bottom));
+  background:
+    linear-gradient(180deg, rgba(234, 244, 252, 0.96) 0%, rgba(214, 233, 251, 0.96) 100%);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-top: 2px solid #2d71ab;
+  box-shadow: 0 -6px 18px rgba(15, 72, 131, 0.16);
+  flex-shrink: 0;
+  z-index: 50;
+  flex-wrap: wrap;
+}
+
+.editor-bb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-bb-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(45, 113, 171, 0.32);
+  flex-shrink: 0;
+}
+
+.editor-bb-btn {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--win7-button, linear-gradient(180deg, #ffffff 0%, #edf5ff 52%, #d5e8fb 100%));
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border, #7e9fbe),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(52, 97, 146, 0.18);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-bb-btn:hover {
+  background: var(--win7-button-hover, linear-gradient(180deg, #fffdf5 0%, #ffe7a8 48%, #ffc949 100%));
+  color: #5e3d00;
+}
+
+.editor-bb-btn:active {
+  transform: scale(0.97);
+}
+
+.editor-bb-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.editor-bb-btn-primary {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 3px 10px rgba(210, 148, 24, 0.32);
+}
+
+.editor-bb-btn-primary:hover {
+  background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%);
+}
+
+.editor-bb-btn-danger {
+  background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%);
+  color: #354f6d;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #889db3,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.editor-bb-btn-danger:hover {
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+  color: #fff;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #8a3408,
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* hover-stuck reset for editor-bb-btn */
+@media (hover: none) {
+  .editor-bb-btn:hover,
+  .editor-bb-btn-primary:hover,
+  .editor-bb-btn-danger:hover {
+    transform: none !important;
+    filter: none !important;
+    background: var(--win7-button) !important;
+    color: #173452 !important;
+  }
+  .editor-bb-btn-primary:hover {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%) !important;
+    color: #4c3000 !important;
+  }
+  .editor-bb-btn-danger:hover {
+    background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%) !important;
+    color: #354f6d !important;
+  }
+}
+
+/* Mobile: 紧凑 — 按钮 icon-only (隐藏 label), 单行不 wrap, padding 缩小 */
+@media (max-width: 768px) {
+  .editor-bottom-bar {
+    gap: 6px;
+    padding: 8px 8px;
+    padding-bottom: calc(8px + var(--mobile-safe-bottom));
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    justify-content: space-around;
+  }
+
+  .editor-bb-group {
+    gap: 4px;
+  }
+
+  .editor-bb-btn {
+    min-height: 44px;
+    padding: 0 8px;
+    font-size: 11px;
+    gap: 3px;
+    border-radius: 9px;
+  }
+
+  .editor-bb-btn span {
+    /* 极窄屏: 缩字号 + nowrap 防换行 */
+    white-space: nowrap;
+    font-size: 10px;
+  }
+
+  .editor-bb-divider {
+    height: 22px;
+  }
+}
+
+/* === Phase 2.8 细节修 (原 0° 居中 + pick-row-4 label) === */
 
 /* 度数 badge: 强制双向居中 — inline span text-align 在 inline-formatting context 内有时
    跟 sibling 不完美对齐, 用 inline-flex 直接 vertical+horizontal center */

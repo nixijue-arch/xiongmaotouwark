@@ -845,8 +845,8 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   return (
     <div
       ref={stageRef}
-      className="flex flex-col items-center justify-center flex-1 overflow-y-auto p-3 md:p-4 gap-3"
-      style={isMobile ? { paddingBottom: '60px' } : {}}>
+      className="flex flex-col items-center justify-start flex-1 overflow-y-auto p-3 md:p-4 gap-3"
+      style={isMobile ? { paddingBottom: '12px', paddingTop: '12px' } : { paddingTop: '12px' }}>
       <div
         ref={canvasWrapperRef}
         className="canvas-outer"

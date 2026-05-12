@@ -4,6 +4,7 @@ import { Header } from '@/sections/header';
 import { LeftSidebar } from '@/sections/leftsidebar';
 import { RightSidebar } from '@/sections/rightsidebar';
 import { CanvasArea } from '@/sections/canvasarea';
+import { EditorBottomBar } from '@/components/editorbottombar';
 import { Museum } from '@/sections/museum';
 import { AboutPanda } from '@/sections/aboutpanda';
 import { QuickMode } from '@/sections/quickmode';
@@ -56,11 +57,14 @@ function App() {
         ) : page === 'collection' ? (
           <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
         ) : page === 'editor' ? (
-          <div className="editor-layout flex-1 flex overflow-hidden main-content">
-            <LeftSidebar />
-            <CanvasArea canvasRef={canvasRef} />
-            <RightSidebar canvasRef={canvasRef} />
-          </div>
+          <>
+            <div className="editor-layout flex-1 flex overflow-hidden main-content">
+              <LeftSidebar />
+              <CanvasArea canvasRef={canvasRef} />
+              <RightSidebar canvasRef={canvasRef} />
+            </div>
+            <EditorBottomBar canvasRef={canvasRef} setPage={setPage} />
+          </>
         ) : page === 'museum' ? (
           <Museum onBack={() => setPage('editor')} setPage={setPage} />
         ) : page === 'calibrate' && CalibrateAnchorLazy ? (
