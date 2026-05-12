@@ -9,3 +9,9 @@ Dockerfile
 .shell-backup-pre-cutout/
 devlog.txt
 
+# Claude Code local files (个人 metadata, 不入库)
+CLAUDE.md
+CLAUDE.local.md
+.commit-msg.tmp
+.pr-body*.tmp
+
