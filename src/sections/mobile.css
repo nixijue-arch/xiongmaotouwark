@@ -1511,29 +1511,40 @@
     order: 6;
   }
 
-  /* Preview tighten — 给其他元素让空间 (max 38vh, min 220) */
+  /* Preview tighten — 真机 iPhone 17 PM Chrome iOS visible ~750, 减 header + sticky bar = ~597 content area.
+     preview 撑死 30vh (= 225 on 750), 主要让 pick row 进 viewport 不被 sticky bar 遮 */
   .quickmode-three-col .quickmode-preview {
-    padding: 10px 12px 14px !important;
-    min-height: 220px;
+    padding: 8px 10px 10px !important;
+    min-height: 180px;
   }
   .quickmode-preview .qm-panda-frame {
-    max-height: 38vh !important;
+    max-height: 30vh !important;
   }
   .quickmode-preview .qm-panda-img {
-    max-height: 38vh !important;
+    max-height: 30vh !important;
   }
   .quickmode-preview .qm-caption {
-    margin-top: 6px !important;
-    font-size: clamp(17px, 4.6vw, 22px) !important;
+    margin-top: 4px !important;
+    font-size: clamp(16px, 4.4vw, 20px) !important;
   }
 
-  /* Caption card 紧凑: controls 改 3-col 单行 (reroll + textlang + font), textarea rows=1 */
+  /* main column gap 紧凑 — 6 个 row 之间总 gap 省 24px */
+  .quickmode-three-col > main {
+    gap: 6px !important;
+  }
+  .quickmode-three-col {
+    padding-top: 6px !important;
+    padding-bottom: calc(8px + var(--mobile-bottom-h) + var(--mobile-safe-bottom)) !important;
+  }
+
+  /* Caption card 紧凑: controls 单行, textarea 单行 */
   .qmm-caption-card {
-    padding: 10px !important;
-    gap: 8px !important;
+    padding: 8px !important;
+    gap: 6px !important;
   }
   .qmm-caption-textarea {
-    min-height: 44px !important;
+    min-height: 40px !important;
+    padding: 8px 10px !important;
   }
   .qmm-caption-controls {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
@@ -1543,11 +1554,11 @@
   .qmm-caption-controls .qmm-reroll-btn,
   .qmm-caption-controls .qmm-textlang-group,
   .qmm-caption-controls .qmm-font-select-m {
-    min-height: 40px !important;
-    height: 40px !important;
+    min-height: 36px !important;
+    height: 36px !important;
   }
   .qmm-caption-controls .qmm-font-select-m {
-    grid-column: auto !important; /* 单 col, 不再独占一行 */
+    grid-column: auto !important;
     font-size: 13px !important;
     padding: 0 28px 0 10px !important;
   }
@@ -1560,31 +1571,46 @@
     font-size: 12px !important;
   }
 
-  /* Transform card mobile compact (跟 Phase 2.2 横向 fix 配合) */
-  .about-banner-card.quickmode-transform-card {
-    padding: 8px 12px !important;
-    border-radius: 14px !important;
-    gap: 8px !important;
-  }
-  .quickmode-transform-card .qm-rotation-track {
-    height: 32px !important;
-  }
-  .quickmode-transform-card .qm-icon-btn {
-    width: 38px !important;
-    height: 38px !important;
-    min-height: 38px !important;
-    border-radius: 9px !important;
-  }
-  .quickmode-transform-card .qm-rotation-display {
-    min-width: 42px !important;
-    height: 30px !important;
-    font-size: 11px !important;
-    padding: 2px 6px !important;
+  /* Action row 紧凑 (模式 + 随机生图) */
+  .qmm-action-row .qmm-mode-chip,
+  .qmm-action-row .qmm-random-btn {
+    min-height: 46px !important;
+    padding: 4px 10px !important;
   }
 
-  /* main column gap 紧凑些 — 12 → 10 */
-  .quickmode-three-col > main {
-    gap: 10px !important;
+  /* Pick row 4-col 紧凑 */
+  .qmm-pick-row-4 .qmm-pick-btn {
+    min-height: 50px !important;
+    padding: 4px 4px !important;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn-emoji {
+    font-size: 20px;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Transform card mobile 极紧凑 — 一行 high 46 (vs 之前 60) */
+  .about-banner-card.quickmode-transform-card {
+    padding: 6px 10px !important;
+    border-radius: 12px !important;
+    gap: 6px !important;
+  }
+  .quickmode-transform-card .qm-rotation-track {
+    height: 28px !important;
+  }
+  .quickmode-transform-card .qm-icon-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    border-radius: 8px !important;
+  }
+  .quickmode-transform-card .qm-rotation-display {
+    min-width: 38px !important;
+    height: 26px !important;
+    font-size: 10px !important;
+    padding: 2px 5px !important;
   }
 }
 
