@@ -709,27 +709,80 @@
     flex-wrap: nowrap;
   }
 
-  /* === Editor mobile: 全部 tight stack from top (user 要求"全都向上移动") ===
-     Strategy: 不再 flex-grow 任何 child. 让 header / editor-layout / emp-root / bottombar
-     各自 auto height, 自然按 source order 顶部对齐排列. 任何 blank 自动落到 viewport 最底
-     (Chrome iOS native tab bar 覆盖那 ~80px, user 看不见, 不会感觉留空) */
+  /* ============================================================
+   * Editor mobile: refined density (frontend-design 原则)
+   *   1) breathing room — gaps + internal padding, 不再 tight stack 挤压
+   *   2) 一屏到底 — strict overflow hidden + overscroll-behavior none, 禁止 bounce
+   *   3) 删 scrollbar — webkit/firefox native scrollbar 全 hide
+   * Math (visualVh 750): header 60 + gap 10 + editor-layout 430 + gap 10
+   *   + emp-root 119 (padding 24 + hint 24 + gap 10 + chunky 60) + gap 10
+   *   + bottombar 98 (padding 20 + btn 44 + safe 34) = 727 ≈ 750 ✓ 自然 fit
+   * ============================================================ */
+
+  .app-shell:not(.app-shell-page-scroll) {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    gap: 10px;
+  }
+
   .editor-layout {
     flex: 0 0 auto !important;
-    /* editor-layout = canvas 大小 (square = viewport width). 让 canvas 占整宽. */
     height: 100vw !important;
-    max-height: 60vh !important; /* 防 tall narrow 手机过大 */
+    max-height: 55vh !important;
     overflow: hidden !important;
   }
 
-  /* EditorMobilePanel = content 自然 height, 不 grow, 不 space-around */
+  /* CanvasArea 内 stage div — 删 overflow-y: auto, canvas auto-scale 永远 fit, 不需要 scroll */
+  .editor-layout > div {
+    overflow: hidden !important;
+  }
+
+  /* Emp panel — airy 内部 padding + gap, 视觉舒服 */
   .emp-root {
     flex: 0 0 auto !important;
+    padding: 12px 14px !important;
+    gap: 10px !important;
     justify-content: flex-start !important;
   }
 
-  /* EditorBottomBar = 自然 height, 紧跟 emp-root */
+  /* Bottombar — comfortable padding */
   .editor-bottom-bar {
     flex: 0 0 auto !important;
+    padding: 10px 12px !important;
+    padding-bottom: calc(10px + var(--mobile-safe-bottom)) !important;
+    gap: 8px !important;
+  }
+}
+
+/* ============================================================
+ * Mobile global: hide native scrollbars + 防 overscroll bounce
+ * 用户反馈"滚动时还会有系统滚轮", 一并删干净
+ * ============================================================ */
+
+@media (max-width: 768px) {
+  /* Webkit (iOS Safari/Chrome) */
+  ::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+    background: transparent !important;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-corner {
+    background: transparent !important;
+    display: none !important;
+  }
+
+  /* Firefox + IE/Edge */
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  /* iOS rubber-band bounce 防止 (page-scroll quick 页保留 scroll 但不要 bounce) */
+  html, body {
+    overscroll-behavior: none !important;
   }
 }
 
