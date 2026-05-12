@@ -688,7 +688,28 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     }));
   };
   const onOriginalPointerUp = () => {
-    if (draggingHandle >= 0) { setDraggingHandle(-1); pushHistory(true); }
+    if (draggingHandle < 0) return;
+    const dragged = draggingHandle;
+    setDraggingHandle(-1);
+    // 对 dragged 前后 2 个邻居做 5-tap 加权平均 (轻度 0.2), dragged 本身不动
+    // 目的: dragged 周围曲率顺一下, 不破坏用户拖到指定位置的意图; 多次拖也不累积漂移
+    setItems(prev => prev.map(it => {
+      if (it.id !== activeItem?.id) return it;
+      const n = it.maskHandles.length;
+      if (n < 5) return it;
+      const orig = it.maskHandles;
+      const nh = orig.map(h => ({ ...h }));
+      for (const d of [-2, -1, 1, 2]) {
+        const i = ((dragged + d) % n + n) % n;
+        const prevI = (i - 1 + n) % n;
+        const nextI = (i + 1) % n;
+        const avgX = (orig[prevI].x + orig[nextI].x) / 2;
+        const avgY = (orig[prevI].y + orig[nextI].y) / 2;
+        nh[i] = { x: orig[i].x * 0.8 + avgX * 0.2, y: orig[i].y * 0.8 + avgY * 0.2 };
+      }
+      return { ...it, maskHandles: nh };
+    }));
+    pushHistory(true);
   };
   const onOriginalDblClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeItem || activeItem.maskHandles.length <= 8) return;
