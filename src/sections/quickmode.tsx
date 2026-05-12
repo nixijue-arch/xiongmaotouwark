@@ -126,10 +126,14 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     try { localStorage.setItem('pmw-quick-mode', mode); } catch { /* ignore */ }
   }, [mode]);
 
-  // 性能 v2: requestIdleCallback 分批 fetch + decode 预热. 真 decode 后下次 compose 用 cached image,
-  // 避免生产端首次 random 时 decode 占 80-150ms.
-  // ⚠️ 不要在 onload 里跑 getContentBbox — 那会让 202 张图 onload 时同步主线程跑 bbox 扫像素 → 10+s 卡顿.
+  // 性能 v3: requestIdleCallback 分批 HTTP fetch 预热 (不主动 decode).
+  // 之前主动 img.decode() 在 mobile 上把 202 张 PNG 同时 GPU decode → RGBA 累计 ~400 MB →
+  // iPhone Chrome iOS / Safari WebView 内存预算 (~500 MB-1.5 GB) 被打爆 → 渲染进程 crash →
+  // "无法打开此网页" 错误页. mobile 完全跳过预热, desktop 保留但只 HTTP cache 不强制 decode.
+  // 这跟 "修改前可以正常进入" 完全 match — Phase 2 默认 'editor' 不挂 QuickMode → 不跑预热,
+  // Phase 2.5 默认改 'quick' 后预热立刻跑 → OOM.
   useEffect(() => {
+    if (isMobile) return; // mobile 完全跳过预热 — random 按需 load 单张 50-150ms 可接受
     const queue: Array<{ src: string }> = [...PANDA_HEADS, ...FACES];
     let cancelled = false;
     const processChunk = (deadline: IdleDeadline) => {
@@ -138,7 +142,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         const img = new Image();
         img.decoding = 'async';
         img.src = item.src;
-        // 真预 decode → 下次 composeMeme 用 cached HTMLImageElement, 无 decode 开销
+        // desktop 仍主动 decode — 16GB RAM 不 OOM, 保 random 冷路径 ~10ms
         img.decode().catch(() => { /* 失败不阻断 */ });
       }
       if (!cancelled && queue.length > 0) {
@@ -155,7 +159,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       cancelled = true;
       if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(handle);
     };
-  }, []);
+  }, [isMobile]);
 
   const previewRef = useRef<HTMLDivElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
