@@ -723,10 +723,11 @@
     overflow: hidden !important;
   }
 
-  /* EditorMobilePanel flex-grow 1 让它顺势填补 editor-layout 后剩余空间 */
+  /* EditorMobilePanel flex-grow 1 让它顺势填补 editor-layout 后剩余空间
+     space-around 让 hint / chunky row 在 panel 内均匀分布, 消化 panel 内部 blank */
   .emp-root {
     flex: 1 1 auto !important;
-    justify-content: flex-start !important;
+    justify-content: space-around !important;
   }
 }
 
