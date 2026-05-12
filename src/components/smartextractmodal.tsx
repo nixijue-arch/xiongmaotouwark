@@ -89,25 +89,20 @@ const PRESETS: Record<string, Params> = {
 };
 
 // ============================================================
-// Master "净化" mapping — purify (0-100) → 4 个 L2 effective 参数 (SSOT)
-// 各 effective 值=0 时, 对应的 L2 pixel pass 整体短路 (processFace 内 gate)
+// Master "净化" mapping v2 — purify (0-100) → 2 个 effective 参数 (SSOT)
+// v1 用 alpha 半透明 → 用户反馈产生橙色 ring + 眼睛被淡化, 弃用
+// v2 改用 "边缘暗色硬切透明 + 边缘/低对比区涂白" — 不再用半透明
 // ============================================================
 interface EffectiveParams {
-  feather: number;             // 0-24 px, edge alpha falloff radius
-  midToneFade: number;         // 0-65, gaussian-weighted alpha fade for lum∈[~90,200]
-  detailSuppress: number;      // 0-80, edge-aware blur strength
-  darkenAlphaStrength: number; // 0-80, dark→transparent strength
-  darkenLumThr: number;        // luma threshold below which alpha fades (固定)
+  edgeBand: number;            // 0-28 px, 距 polygon edge 的环带宽度 (erase + whiten 影响范围)
+  whitenStrength: number;      // 0..1, 内部低对比中灰区涂白强度
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
   const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
   return {
-    feather: Math.round(m * 24),
-    midToneFade: Math.round(m * 65),
-    detailSuppress: Math.round(m * 80),
-    darkenAlphaStrength: Math.round(m * 80),
-    darkenLumThr: 75,
+    edgeBand: Math.round(m * 28),
+    whitenStrength: m * 0.85,
   };
 }
 
@@ -300,65 +295,11 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   ctx.drawImage(image, offX, offY, iw * scale, ih * scale);
   ctx.restore();
 
-  // === [L2-4] Edge-aware blur (低 std 区模糊 / 高 std 区保留 — 抹平胡须皱纹, 保眼鼻嘴) ===
-  // eff 在此声明, 后续 L2-1/2/3 均消费同一个 eff (SSOT 派生自 params.purify)
+  // eff 在此声明 (SSOT, 派生自 params.purify), 在 L2-v2 块消费
+  // v2 算法核心: 不用 alpha 半透明 (会产生橙色 ring / 眼睛被淡化), 改用:
+  //   - 边缘 N 像素环内: 暗像素 → alpha=0 硬切; 中灰像素 → 涂白融入 panda 白脸
+  //   - 内部: 低对比 (小 std) 中灰区 → 涂白 (抹平肤纹/皱纹根部); 五官 contour 保留
   const eff = deriveEffective(params.purify);
-  if (eff.detailSuppress > 0) {
-    const w = out, h = out;
-    const cur = ctx.getImageData(0, 0, w, h);
-    const d = cur.data;
-    // 1) luma map
-    const G = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const di = i * 4;
-      G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
-    }
-    // 2) local mean(G) 与 mean(G²/255) via 5×5 box blur (r=2)
-    const meanG = boxBlur1D(G, w, h, 2);
-    const G2 = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) G2[i] = ((G[i] * G[i]) / 255) | 0;
-    const meanG2 = boxBlur1D(G2, w, h, 2);
-    // 3) std map: σ² = E[X²] - E[X]²; 还原 E[X²] = meanG2 * 255
-    const stdMap = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const v = meanG2[i] * 255 - meanG[i] * meanG[i];
-      stdMap[i] = Math.min(255, Math.sqrt(Math.max(0, v))) | 0;
-    }
-    // 4) RGB 3-pass box blur r=2 ≈ gaussian σ≈2.5 (3 次叠加, O(N))
-    const Rs = new Uint8ClampedArray(w * h);
-    const Gs = new Uint8ClampedArray(w * h);
-    const Bs = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const di = i * 4;
-      Rs[i] = d[di]; Gs[i] = d[di + 1]; Bs[i] = d[di + 2];
-    }
-    let Rb = boxBlur1D(Rs, w, h, 2);
-    let Gb = boxBlur1D(Gs, w, h, 2);
-    let Bb = boxBlur1D(Bs, w, h, 2);
-    Rb = boxBlur1D(Rb, w, h, 2);
-    Gb = boxBlur1D(Gb, w, h, 2);
-    Bb = boxBlur1D(Bb, w, h, 2);
-    Rb = boxBlur1D(Rb, w, h, 2);
-    Gb = boxBlur1D(Gb, w, h, 2);
-    Bb = boxBlur1D(Bb, w, h, 2);
-    // 5) blend: keep = smoothstep(8, 25, std) — 高 std 保留 / 低 std 用 blur
-    const strength = eff.detailSuppress / 100;
-    const stdLow = 8, stdHigh = 25;
-    for (let i = 0; i < w * h; i++) {
-      const di = i * 4;
-      if (d[di + 3] < 200) continue;
-      let keep = (stdMap[i] - stdLow) / (stdHigh - stdLow);
-      keep = Math.max(0, Math.min(1, keep));
-      keep = keep * keep * (3 - 2 * keep);
-      const blendR = keep * d[di]     + (1 - keep) * Rb[i];
-      const blendG = keep * d[di + 1] + (1 - keep) * Gb[i];
-      const blendB = keep * d[di + 2] + (1 - keep) * Bb[i];
-      d[di]     = Math.round(strength * blendR + (1 - strength) * d[di]);
-      d[di + 1] = Math.round(strength * blendG + (1 - strength) * d[di + 1]);
-      d[di + 2] = Math.round(strength * blendB + (1 - strength) * d[di + 2]);
-    }
-    ctx.putImageData(cur, 0, 0);
-  }
 
   // alpha 硬阈值
   let imgData = ctx.getImageData(0, 0, out, out);
@@ -366,21 +307,6 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   const cutThr = params.alphaCut;
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] < cutThr) data[i + 3] = 0;
-  }
-
-  // === [L2-1] Edge feather (alpha falloff) — purify 派生, 0 时短路 ===
-  // 直接读写 data (imgData.data 别名), 后续 saturation/levels/etc 共享同一份
-  // eff 在 [L2-4] edge-aware blur 块 (clip 之后) 已声明, 此处复用 SSOT
-  if (eff.feather > 0) {
-    const w = out, h = out;
-    const alphaIn = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) alphaIn[i] = data[i * 4 + 3];
-    const blurred = boxBlur1D(alphaIn, w, h, eff.feather);
-    for (let i = 0; i < w * h; i++) {
-      const t = blurred[i] / 255;
-      const smooth = t * t * (3 - 2 * t); // smoothstep
-      data[i * 4 + 3] = Math.round(data[i * 4 + 3] * smooth);
-    }
   }
 
   // 饱和度
@@ -491,44 +417,75 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     ctx.putImageData(orig, 0, 0);
   }
 
-  // === [L2-2 + L2-3] Luma-driven alpha (暗→透) + midtone fade (中灰→半透) ===
-  // 含 polygon 中心保护区: canvas 短边 × 0.264 半径内不应用 (保眼/眉/瞳孔/嘴)
-  // (polygon 在 :233 处 scale 到 canvas 88%, 短边 ≈ canvas * 0.88, 30% 半径 ≈ canvas * 0.264)
-  if (eff.darkenAlphaStrength > 0 || eff.midToneFade > 0) {
+  // === [L2-v2] Edge erase + Whiten (取代旧 alpha 半透明方案) ===
+  // 用户反馈: 透明度不是好解法 → 橙色 ring / 眼睛被淡化
+  // 新设计: 距 polygon edge < edgeBand 像素的环带:
+  //   - 暗像素 (lum<100) → alpha=0 硬切 (脸的轮廓不出现黑线)
+  //   - 中灰平坦像素 (lum<210, std<18) → RGB 涂白 (融入 panda 白脸, "看不出轮廓")
+  // 内部 (距 edge >= edgeBand): 低对比中灰 (std<12, lum∈[80,220]) → RGB 涂白 (抹平肤纹/皱纹根)
+  // 高 std (五官 contour) 永远保留. 不动 alpha 半透明 → 不会有 ring / 灰眼睛.
+  if (eff.edgeBand > 0 || eff.whitenStrength > 0) {
     const w = out, h = out;
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
-    const cxC = w / 2, cyC = h / 2;
-    const protectR = w * 0.264;
-    const featherR = 8; // smoothstep 边界过渡 px
-    const sDark = eff.darkenAlphaStrength / 100;
-    const sMid = eff.midToneFade / 100;
-    const darkThr = eff.darkenLumThr;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const di = (y * w + x) * 4;
-        if (d[di + 3] < 200) continue;
-        const dx = x - cxC, dy = y - cyC;
-        const dist = Math.hypot(dx, dy);
-        let protect: number;
-        if (dist < protectR) protect = 0;
-        else if (dist < protectR + featherR) {
-          const t = (dist - protectR) / featherR;
-          protect = t * t * (3 - 2 * t);
-        } else protect = 1;
-        if (protect <= 0) continue;
-        const lum = 0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2];
-        let alphaFactor = 1;
-        // L2-2 暗→透: lum<darkThr 时按比例淡化
-        if (sDark > 0 && lum < darkThr) {
-          alphaFactor *= 1 - sDark * (1 - lum / darkThr) * protect;
+
+    // 1) 距 polygon edge 距离场: 用 alpha map (0/255) 算大半径 boxBlur,
+    //    blurred 值越小 = 越靠 edge (因为模糊后边缘内侧 alpha < 255)
+    const alphaIn = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) alphaIn[i] = d[i * 4 + 3] > 200 ? 255 : 0;
+    const distR = Math.max(1, eff.edgeBand);
+    const distBlur = boxBlur1D(alphaIn, w, h, distR);
+
+    // 2) luma + local std (5×5) — 用现有 boxBlur1D 复用
+    const G = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
+    }
+    const meanG = boxBlur1D(G, w, h, 2);
+    const G2 = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) G2[i] = ((G[i] * G[i]) / 255) | 0;
+    const meanG2 = boxBlur1D(G2, w, h, 2);
+    const stdMap = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const v = meanG2[i] * 255 - meanG[i] * meanG[i];
+      stdMap[i] = Math.min(255, Math.sqrt(Math.max(0, v))) | 0;
+    }
+
+    // 3) 像素处理
+    const whitenS = eff.whitenStrength; // 0..1
+    const inEdgeThr = 245; // distBlur < 245 表示在边缘环带内 (255-10≈245 留 10 弹性)
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      if (d[di + 3] < 200) continue;
+      const lum = G[i];
+      const std = stdMap[i];
+      const edgeNear = distBlur[i] < inEdgeThr;
+
+      if (edgeNear) {
+        // 边缘环带
+        if (lum < 100) {
+          // 暗 → 硬切透明 (头发/阴影渗入 face 边缘 → 完全擦除)
+          d[di + 3] = 0;
+          continue;
         }
-        // L2-3 中灰 gaussian fade (center=145, sigma=35)
-        if (sMid > 0) {
-          const wg = Math.exp(-Math.pow((lum - 145) / 35, 2));
-          alphaFactor *= 1 - sMid * wg * protect;
+        if (lum < 210 && std < 18) {
+          // 中灰 + 平坦 → 涂白 (融入 panda 白脸; whitenS 控制强度)
+          d[di]     = Math.round(d[di]     * (1 - whitenS) + 255 * whitenS);
+          d[di + 1] = Math.round(d[di + 1] * (1 - whitenS) + 255 * whitenS);
+          d[di + 2] = Math.round(d[di + 2] * (1 - whitenS) + 255 * whitenS);
         }
-        d[di + 3] = Math.round(d[di + 3] * alphaFactor);
+        continue;
+      }
+
+      // 内部 — 低 std 中灰平坦区 → 涂白 (抹平肤纹/皱纹根, 保五官 contour)
+      if (whitenS > 0 && std < 12 && lum > 80 && lum < 220) {
+        // smooth fade 0→1 over std∈[12, 4]
+        const sFade = Math.max(0, Math.min(1, (12 - std) / 8));
+        const s = whitenS * sFade;
+        d[di]     = Math.round(d[di]     * (1 - s) + 255 * s);
+        d[di + 1] = Math.round(d[di + 1] * (1 - s) + 255 * s);
+        d[di + 2] = Math.round(d[di + 2] * (1 - s) + 255 * s);
       }
     }
     ctx.putImageData(cur, 0, 0);
