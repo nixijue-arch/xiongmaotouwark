@@ -342,28 +342,66 @@ export async function calcEditorFaceLayout(args: {
   faceSrc: string;
   faceOffset350: { x: number; y: number; w: number; h: number };
   faceFill?: number;
-  panda350OffsetX?: number; // panda 在编辑器 canvas 里的左上角 X (default 75，跟现有 panda x:75 一致)
+  panda350OffsetX?: number; // panda 在编辑器 canvas 里的左上角 X (default 75)
   panda350OffsetY?: number; // default 50
+  /** panda 实际宽度 (default 350). 当 panda 元素 bbox-cropped 后 aspect 非 1:1 时需要传, 让 face anchor 按真实 panda box 缩放 */
+  panda350W?: number;
+  panda350H?: number;
 }): Promise<{ x: number; y: number; width: number; height: number }> {
-  const { pandaSrc, faceSrc, faceOffset350, faceFill = 0.95, panda350OffsetX = 75, panda350OffsetY = 50 } = args;
+  const {
+    pandaSrc, faceSrc, faceOffset350, faceFill = 0.95,
+    panda350OffsetX = 75, panda350OffsetY = 50,
+    panda350W = 350, panda350H = 350,
+  } = args;
   const [, face] = await Promise.all([loadImage(pandaSrc), loadImage(faceSrc)]);
   const fbb = getContentBbox(face);
   const fcw = Math.max(1, fbb[2] - fbb[0]);
   const fch = Math.max(1, fbb[3] - fbb[1]);
-  const fScale = Math.min(faceOffset350.w / fcw, faceOffset350.h / fch) * faceFill;
+  // 350-coord 的 faceOffset 在 panda 实际 box 里的 scale (panda 可能 letterbox 或非 1:1)
+  const scaleX = panda350W / 350;
+  const scaleY = panda350H / 350;
+  const fowActual = faceOffset350.w * scaleX;
+  const fohActual = faceOffset350.h * scaleY;
+  const fScale = Math.min(fowActual / fcw, fohActual / fch) * faceFill;
   const dispW = face.naturalWidth * fScale;
   const dispH = face.naturalHeight * fScale;
   const ccX = ((fbb[0] + fbb[2]) / 2) * fScale;
   const ccY = ((fbb[1] + fbb[3]) / 2) * fScale;
-  // anchor 在编辑器画布坐标系 (350-coord + panda offset)
-  const anchorCx = panda350OffsetX + faceOffset350.x + faceOffset350.w / 2;
-  const anchorCy = panda350OffsetY + faceOffset350.y + faceOffset350.h / 2;
+  // anchor center 在编辑器画布坐标系 — panda 实际左上 + faceOffset 按 panda box 缩放后的中心
+  const anchorCx = panda350OffsetX + (faceOffset350.x + faceOffset350.w / 2) * scaleX;
+  const anchorCy = panda350OffsetY + (faceOffset350.y + faceOffset350.h / 2) * scaleY;
   return {
     x: Math.round(anchorCx - ccX),
     y: Math.round(anchorCy - ccY),
     width: Math.round(dispW),
     height: Math.round(dispH),
   };
+}
+
+/**
+ * 算编辑器里 panda 元素的实际 box: bbox-crop 后 contain-fit 到 350×350 区域
+ * 用 cropped dataUrl 作为 element.src 让 panda 显示跟 QuickMode (PandaCanvas) 一致.
+ *
+ * @returns { croppedSrc, x, y, w, h } — panda 元素位置 + 尺寸 + 已 bbox-crop 的 src
+ */
+export async function getEditorPandaBox(src: string): Promise<{
+  croppedSrc: string;
+  x: number; y: number;
+  w: number; h: number;
+}> {
+  const cropped = await bboxCropImage(src);
+  const aspect = cropped.w / Math.max(1, cropped.h);
+  const FRAME = 350;
+  let w = FRAME, h = FRAME;
+  if (aspect > 1) {
+    h = Math.round(FRAME / aspect);
+  } else if (aspect < 1) {
+    w = Math.round(FRAME * aspect);
+  }
+  // panda 在 (75, 50) 起始的 350×350 box 中居中
+  const x = 75 + Math.round((FRAME - w) / 2);
+  const y = 50 + Math.round((FRAME - h) / 2);
+  return { croppedSrc: cropped.dataUrl, x, y, w, h };
 }
 
 export async function composeMemeBlob(args: ComposeMemeArgs): Promise<Blob> {

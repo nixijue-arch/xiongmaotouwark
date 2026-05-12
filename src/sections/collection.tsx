@@ -81,7 +81,7 @@ function extractSlotInfo(slot: DraftSlot): SlotInfo {
 }
 
 export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
-  const { state, draftSlots, loadDraft, clearDraft, renameDraft } = useMeme();
+  const { state, draftSlots, loadDraft, clearDraft, clearDrafts, renameDraft } = useMeme();
   const lang = state.language;
   // DEV: 校准工具改 anchor 时触发 re-render
   useLiveAnchor();
@@ -111,10 +111,12 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
 
   const onBatchDelete = useCallback(() => {
     const count = selected.size;
-    Array.from(selected).forEach((id) => clearDraft(id));
+    if (count === 0) return;
+    // 用 clearDrafts 单次 setState + 单次 localStorage 写, 避免 forEach 多次 setState 触发的 batching/race
+    clearDrafts(Array.from(selected));
     setSelected(new Set());
     toast.success(lang === 'zh' ? `已删除 ${count} 张` : `Deleted ${count}`);
-  }, [selected, clearDraft, lang]);
+  }, [selected, clearDrafts, lang]);
 
   // 批量 ZIP — 用 composeMeme 渲染 panda+face → 临时 DOM 加 caption → captureNode → 加进 zip
   const onBatchZip = useCallback(async () => {

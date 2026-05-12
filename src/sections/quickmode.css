@@ -86,6 +86,8 @@
   padding: 0 16px;
   line-height: 1.2;
   word-break: break-word;
+  /* v4: 多行支持 — textarea 里 \n 直接渲染成断行 */
+  white-space: pre-line;
   /* 强制最高图层 — panda translateY 大正数时仍能覆盖在 panda 上 */
   position: relative;
   z-index: 10;
@@ -523,3 +525,38 @@
 }
 .qm-name-ok:hover { color: #00CC66; border-color: #00CC66; }
 .qm-name-cancel:hover { color: #E97B7B; border-color: #E97B7B; }
+
+/* v4: 模式按钮跟随机生图同款 (about-arcade-btn 蓝色 gradient), 不另起样式 */
+
+/* v7: 模式按钮 cycle 角标 — 静态橙色徽章 + 点击转一圈
+   - 24px 橙黄圆形徽章固定显示在右上角
+   - 点击 button = 角标 span 通过 key 重挂载触发 animation, 转一圈 (450ms)
+   - hover: 仅 box-shadow 微亮, 不旋转 (旋转留给点击, 区分两个交互) */
+.qm-mode-cycle-icon {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #FFD54A 0%, #FF9F1C 100%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #5a3500;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  z-index: 2;
+  transition: box-shadow 200ms ease;
+  animation: qm-cycle-spin 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes qm-cycle-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(180deg); }
+}
+.qm-mode-cycle:hover .qm-mode-cycle-icon {
+  box-shadow:
+    0 4px 12px rgba(255, 159, 28, 0.55),
+    0 0 0 3px rgba(255, 213, 74, 0.3);
+}

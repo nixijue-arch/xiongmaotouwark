@@ -443,7 +443,7 @@ function DraggableText({ element, isSelected, onSelect }: {
             }}
           />
         ) : (
-          <div className="whitespace-nowrap px-2 py-1" style={textStyle}>
+          <div className="px-2 py-1" style={{ ...textStyle, whiteSpace: 'pre-line' }}>
             {element.text}
           </div>
         )}

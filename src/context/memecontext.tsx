@@ -347,6 +347,7 @@ interface MemeContextType {
   ) => Promise<void>;
   loadDraft: (slotId: string) => void;
   clearDraft: (slotId: string) => void;
+  clearDrafts: (slotIds: string[]) => void;
   renameDraft: (slotId: string, name: string) => void;
 }
 
@@ -486,10 +487,27 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [draftSlots]);
 
   const clearDraft = useCallback((slotId: string) => {
-    // Dynamic schema：直接移除 slot（不再保留 state=null 的占位）
-    const nextDraftSlots = draftSlots.filter(slot => slot.id !== slotId);
-    persistDraftSlots(nextDraftSlots);
-  }, [draftSlots, persistDraftSlots]);
+    setDraftSlots(prev => {
+      const next = prev.filter(slot => slot.id !== slotId);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
+
+  // 批量删除: 单次 setState + 单次 localStorage 写入, 避免 forEach 多次 setState 的 batching 边缘 case
+  const clearDrafts = useCallback((slotIds: string[]) => {
+    if (slotIds.length === 0) return;
+    const idSet = new Set(slotIds);
+    setDraftSlots(prev => {
+      const next = prev.filter(slot => !idSet.has(slot.id));
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
 
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();
@@ -543,7 +561,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [state.elements, state.selectedId, state.language]);
 
   return (
-    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, renameDraft }}>
+    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, clearDrafts, renameDraft }}>
       {children}
     </MemeContext.Provider>
   );
