@@ -149,6 +149,19 @@ function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale 
   }
 }
 
+// crypto.randomUUID 在 iOS Safari + HTTP (非 secure context) 不可用
+// 局域网 dev (http://192.168.50.2:8766/) 上 iPhone 会爆 "crypto.randomUUID is not a function"
+// fallback: Math.random RFC4122 v4 (足够生成 client-side item id, 非密码用途)
+function safeRandomUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try { return crypto.randomUUID(); } catch { /* secure context 例外, 走 fallback */ }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return ((c === 'x' ? r : (r & 0x3) | 0x8)).toString(16);
+  });
+}
+
 function boxBlur1D(src: Uint8ClampedArray, w: number, h: number, r: number): Uint8ClampedArray {
   const tmp = new Uint8ClampedArray(w * h);
   const out = new Uint8ClampedArray(w * h);
@@ -658,7 +671,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
       const features = analyzeFace(img, handles);
       const recommended = autoRoute(features);
 
-      const id = crypto.randomUUID();
+      const id = safeRandomUUID();
       const item: Item = {
         id, name: file.name, image: img, landmarks,
         maskHandles: handles, features, recommended,
