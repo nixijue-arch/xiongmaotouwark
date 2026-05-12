@@ -1043,6 +1043,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                 onChange={v => setParam('trimDark', v)} />
               <SliderRow label={t('smartExtractContrast')} value={params.contrast} min={0} max={100}
                 onChange={v => setParam('contrast', v)} fmt={v => '+' + v} />
+              <SliderRow label={t('smartExtractPurify')} value={params.purify ?? 0} min={0} max={100}
+                onChange={v => setParam('purify', v)} />
             </div>
 
             {/* ===== 预设 (always visible, above advanced) — about-arcade-btn 风格 ===== */}
