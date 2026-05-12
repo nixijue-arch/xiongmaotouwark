@@ -418,6 +418,49 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     ctx.putImageData(orig, 0, 0);
   }
 
+  // === [L2-2 + L2-3] Luma-driven alpha (暗→透) + midtone fade (中灰→半透) ===
+  // 含 polygon 中心保护区: canvas 短边 × 0.264 半径内不应用 (保眼/眉/瞳孔/嘴)
+  // (polygon 在 :233 处 scale 到 canvas 88%, 短边 ≈ canvas * 0.88, 30% 半径 ≈ canvas * 0.264)
+  if (eff.darkenAlphaStrength > 0 || eff.midToneFade > 0) {
+    const w = out, h = out;
+    const cur = ctx.getImageData(0, 0, w, h);
+    const d = cur.data;
+    const cxC = w / 2, cyC = h / 2;
+    const protectR = w * 0.264;
+    const featherR = 8; // smoothstep 边界过渡 px
+    const sDark = eff.darkenAlphaStrength / 100;
+    const sMid = eff.midToneFade / 100;
+    const darkThr = eff.darkenLumThr;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const di = (y * w + x) * 4;
+        if (d[di + 3] < 200) continue;
+        const dx = x - cxC, dy = y - cyC;
+        const dist = Math.hypot(dx, dy);
+        let protect: number;
+        if (dist < protectR) protect = 0;
+        else if (dist < protectR + featherR) {
+          const t = (dist - protectR) / featherR;
+          protect = t * t * (3 - 2 * t);
+        } else protect = 1;
+        if (protect <= 0) continue;
+        const lum = 0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2];
+        let alphaFactor = 1;
+        // L2-2 暗→透: lum<darkThr 时按比例淡化
+        if (sDark > 0 && lum < darkThr) {
+          alphaFactor *= 1 - sDark * (1 - lum / darkThr) * protect;
+        }
+        // L2-3 中灰 gaussian fade (center=145, sigma=35)
+        if (sMid > 0) {
+          const wg = Math.exp(-Math.pow((lum - 145) / 35, 2));
+          alphaFactor *= 1 - sMid * wg * protect;
+        }
+        d[di + 3] = Math.round(d[di + 3] * alphaFactor);
+      }
+    }
+    ctx.putImageData(cur, 0, 0);
+  }
+
   // 不再 fillUnderneath 白底 — 输出透明 PNG（face 椭圆外保持 alpha=0）
   // 之前 fillUnderneath 把 polygon 外强制填白 → 套到 panda 头出现白色矩形
   // 用户希望 face 周围全透明，让 panda 黑廓自然显示
