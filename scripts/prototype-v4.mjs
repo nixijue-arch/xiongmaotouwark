@@ -79,7 +79,7 @@ function buildEllipseMask(w, h) {
 }
 
 // Levels + contrast (matches high-key preset, restored to pre-upgrade values):
-//   blackPoint 72, whitePoint 182, gamma 0.80, contrast 40
+//   blackPoint 72, whitePoint 182, gamma 0.80, contrast 40, trimDark 65, trimThr 72
 function applyLevelsContrast(rgba, w, h) {
   const bp = 72, wp = 182, gamma = 0.80, contrast = 40;
   const range = wp - bp;
@@ -102,6 +102,32 @@ function applyLevelsContrast(rgba, w, h) {
   for (let i = 0; i < rgba.length; i += 4) {
     if (rgba[i + 3] < 250) continue;
     rgba[i] = lut2[rgba[i]]; rgba[i + 1] = lut2[rgba[i + 1]]; rgba[i + 2] = lut2[rgba[i + 2]];
+  }
+}
+
+// trimDark: emulates the same step from processFace before L2-v4 runs.
+// This is the SUSPECTED culprit of the residual contour line — it reduces alpha
+// on polygon-interior lum<trimThr pixels (esp. near the edge), leaving them
+// at alpha < 200 which v4 main loop later SKIPS. Their RGB stays at the
+// pre-trimDark dark value → renders as a semi-transparent dark ring.
+function applyTrimDark(rgba, w, h, trimDark = 65, trimThr = 72) {
+  if (trimDark <= 0) return;
+  const N = w * h;
+  const alphaIn = new Uint8ClampedArray(N);
+  for (let i = 0; i < N; i++) alphaIn[i] = rgba[i * 4 + 3] > 200 ? 255 : 0;
+  const blurred = boxBlur1D(alphaIn, w, h, 25);
+  const strength = trimDark / 100;
+  for (let i = 0; i < N; i++) {
+    const di = i * 4;
+    if (rgba[di + 3] < 200) continue;
+    const lum = 0.299 * rgba[di] + 0.587 * rgba[di + 1] + 0.114 * rgba[di + 2];
+    if (lum >= trimThr) continue;
+    const edgeProx = blurred[i] / 255;
+    if (edgeProx > 0.92) continue;
+    const proxFactor = Math.max(0, 1 - edgeProx / 0.92);
+    const darkFactor = 1 - lum / trimThr;
+    const fade = strength * proxFactor * darkFactor;
+    rgba[di + 3] = Math.round(rgba[di + 3] * (1 - fade));
   }
 }
 
@@ -276,9 +302,17 @@ for (let i = 0; i < rgba.length; i += 4) {
 // Levels + contrast
 applyLevelsContrast(rgba, w, h);
 
+// SUSPECT HYPOTHESIS: trimDark before L2 leaves polygon-interior edge pixels
+// at alpha 50-200 (mid range), which L2 main loop SKIPS due to `alpha < 200`
+// guard → those pixels render as semi-transparent dark ring.
+// To verify: set env DISABLE_TRIMDARK=1 to skip this step.
+if (process.env.DISABLE_TRIMDARK !== '1') {
+  applyTrimDark(rgba, w, h, 65, 72);
+}
+
 // L2-v4 main
 const eff = deriveEffective(PURIFY);
-console.log('eff =', eff, 'PURIFY =', PURIFY);
+console.log('eff =', eff, 'PURIFY =', PURIFY, 'trimDark =', process.env.DISABLE_TRIMDARK === '1' ? 'OFF' : 'ON');
 applyL2(rgba, w, h, eff);
 erodeThinBlackLines(rgba, w, h);
 

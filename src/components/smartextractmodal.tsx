@@ -440,7 +440,11 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   ctx.putImageData(imgData, 0, 0);
 
   // 暗边修剪
-  if (params.trimDark > 0) {
+  // ⚠️ ROOT CAUSE (找了 N 版): trimDark 把 polygon 内边缘 lum<trimThr 的暗像素 alpha 降到 50-200,
+  // v4 main loop `if (alpha < 200) continue;` 会 skip 这些 mid-alpha 像素 → 它们 RGB 仍是 dark color
+  // → PNG 渲染显示为 "半透明 dark ring" = 用户看到的细黑线 (不管啥图都有, 因为 trimDark 永远 apply).
+  // 修法: v4 启用 (purify>0) 时 SKIP trimDark, 让 v4 graded erase 接管 (它已完全 cover 暗边清理功能).
+  if (params.trimDark > 0 && (params.purify ?? 0) === 0) {
     const w = out, h = out;
     const orig = ctx.getImageData(0, 0, w, h);
     const d2 = orig.data;
