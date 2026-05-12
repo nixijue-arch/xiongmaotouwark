@@ -73,19 +73,43 @@ interface Params {
   contrast: number; edgeStrength: number; saturation: number;
   quantize: boolean; jpegLofi: boolean; jpegQ: number; blur: number;
   size: number;
+  purify?: number;            // 0-100, master "净化" slider, SSOT for L2 effective values
 }
 
 const PRESETS: Record<string, Params> = {
   // 经典温和：保留较多细节，适合中等亮度暗调照片
-  'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
   // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
-  'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024 },
+  'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024, purify: 0 },
   // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
-  'hi-contrast':  { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 70, whitePoint: 190, gamma: 0.7,  contrast: 60, edgeStrength: 60, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'hi-contrast':  { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 70, whitePoint: 190, gamma: 0.7,  contrast: 60, edgeStrength: 60, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
 };
+
+// ============================================================
+// Master "净化" mapping — purify (0-100) → 4 个 L2 effective 参数 (SSOT)
+// 各 effective 值=0 时, 对应的 L2 pixel pass 整体短路 (processFace 内 gate)
+// ============================================================
+interface EffectiveParams {
+  feather: number;             // 0-24 px, edge alpha falloff radius
+  midToneFade: number;         // 0-65, gaussian-weighted alpha fade for lum∈[~90,200]
+  detailSuppress: number;      // 0-80, edge-aware blur strength
+  darkenAlphaStrength: number; // 0-80, dark→transparent strength
+  darkenLumThr: number;        // luma threshold below which alpha fades (固定)
+}
+
+function deriveEffective(purify: number | undefined): EffectiveParams {
+  const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
+  return {
+    feather: Math.round(m * 24),
+    midToneFade: Math.round(m * 65),
+    detailSuppress: Math.round(m * 80),
+    darkenAlphaStrength: Math.round(m * 80),
+    darkenLumThr: 75,
+  };
+}
 
 function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, tension = 0.5) {
   const n = points.length;
