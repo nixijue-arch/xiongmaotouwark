@@ -311,14 +311,43 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [smartModalOpen, setSmartModalOpen] = useState(false);
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+
+  // RPC for EditorMobilePanel + EditorBottomBar — 通过 window event 调用本组件内部 handler
+  // 用 ref 模式避免 useEffect 反复 attach/remove listener (handler 每渲染都重新创建)
+  const editorRpcRef = useRef<{
+    switchImage?: () => void;
+    recommendText?: () => void;
+    openSheet?: () => void;
+    saveDraft?: () => void;
+  }>({});
+
+  useEffect(() => {
+    const onSwitchImg = () => editorRpcRef.current.switchImage?.();
+    const onRecText = () => editorRpcRef.current.recommendText?.();
+    const onOpen = () => editorRpcRef.current.openSheet?.();
+    const onSaveDraft = () => editorRpcRef.current.saveDraft?.();
+    window.addEventListener('xmw-editor-switch-image', onSwitchImg);
+    window.addEventListener('xmw-editor-recommend-text', onRecText);
+    window.addEventListener('xmw-editor-open-right-sheet', onOpen);
+    window.addEventListener('xmw-editor-save-draft', onSaveDraft);
+    return () => {
+      window.removeEventListener('xmw-editor-switch-image', onSwitchImg);
+      window.removeEventListener('xmw-editor-recommend-text', onRecText);
+      window.removeEventListener('xmw-editor-open-right-sheet', onOpen);
+      window.removeEventListener('xmw-editor-save-draft', onSaveDraft);
+    };
+  }, []);
   const previewRequestIdRef = useRef(0);
   const previewCropActionRef = useRef<{
     handle: CropHandle;
     startX: number;
     startY: number;
     startRect: CropRect;
+    frame: HTMLDivElement | null;
   } | null>(null);
   const previewCropFrameRef = useRef<HTMLDivElement | null>(null);
+  // mobile sheet 单独 ref — 跟 desktop 同时挂在 DOM, 互不冲突
+  const previewCropFrameMobileRef = useRef<HTMLDivElement | null>(null);
 
   const handleExport = async () => {
     if (state.elements.length === 0) {
@@ -357,10 +386,14 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       toast.error(state.language === 'zh' ? '需要至少有 panda 和 face 才能存草图' : 'Need at least panda + face to save');
       return;
     }
-    const slotId = `draft-${Date.now()}-${draftSlots.length + 1}`;
+    // slotId 加随机后缀 — Date.now() ms-level 已唯一, 但 Math.random 兜底连点 (同 ms 多次)
+    const slotId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     void saveDraft(slotId);
-    toast.success(state.language === 'zh' ? '已存到草图（左上角本地草稿 + 草图 tab 同步）' : 'Saved to drafts');
-  }, [state.elements, state.language, saveDraft, draftSlots.length]);
+    toast.success(state.language === 'zh' ? '已存到草图（草图本可见, 也可重新载入）' : 'Saved to drafts');
+  }, [state.elements, state.language, saveDraft]);
+
+  // expose saveDraft handler 给 EditorBottomBar 通过 window event 调用
+  editorRpcRef.current.saveDraft = handleSaveDraft;
 
   // 预览自动刷新 — elements 变化后 debounce 600ms 重生成（user 反馈手动按钮繁琐）
   const elementsKey = state.elements.map(e => e.id + ':' + ((e as ImageElement).src ?? '') + ':' + (e.type === 'text' ? (e as TextElement).text : '')).join('|');
@@ -453,6 +486,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (isMobile) setSheetOpen(false);
   };
 
+  // expose handlers for window event RPC
+  editorRpcRef.current.switchImage = handleSwitchImage;
+  editorRpcRef.current.openSheet = () => setSheetOpen(true);
+
   const handleRecommendText = () => {
     const texts = state.language === 'zh' ? ZH_TEXTS : EN_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
@@ -464,6 +501,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element: textEl });
     }
   };
+
+  // bind recommendText after definition
+  editorRpcRef.current.recommendText = handleRecommendText;
 
   const handleAddText = () => {
     const promptText = state.language === 'zh' ? '输入文字内容' : 'Enter text content';
@@ -626,9 +666,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   }, [elementsKey]);
 
   useEffect(() => {
-    const onMove = (event: MouseEvent) => {
+    // PointerEvent 统一 mouse + touch — 让 mobile preview cropper 也能用同一逻辑
+    const onMove = (event: PointerEvent) => {
       const action = previewCropActionRef.current;
-      const frame = previewCropFrameRef.current;
+      const frame = action?.frame ?? previewCropFrameRef.current;
       if (!action || !frame) return;
 
       const rect = frame.getBoundingClientRect();
@@ -688,24 +729,31 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       previewCropActionRef.current = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
   }, []);
 
-  const startPreviewCropAction = useCallback((handle: CropHandle, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    previewCropActionRef.current = {
-      handle,
-      startX: event.clientX,
-      startY: event.clientY,
-      startRect: previewCrop,
-    };
-  }, [previewCrop]);
+  // 接 frameEl 参数 — 让 mobile sheet 传自己的 frame ref (不共用 desktop 的)
+  const startPreviewCropAction = useCallback(
+    (handle: CropHandle, event: React.PointerEvent, frameEl?: HTMLDivElement | null) => {
+      event.preventDefault();
+      event.stopPropagation();
+      previewCropActionRef.current = {
+        handle,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRect: previewCrop,
+        frame: frameEl ?? previewCropFrameRef.current,
+      };
+    },
+    [previewCrop]
+  );
 
   const resetPreviewCrop = useCallback(async () => {
     if (state.elements.length === 0) return;
@@ -770,137 +818,170 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             <button className="bottom-sheet-close" onClick={() => setSheetOpen(false)}><X size={18} /></button>
           </div>
           <div className="bottom-sheet-body">
-            {/* Preview */}
-            <div className="mb-4">
-              <div
-                className="rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
-                style={{ backgroundColor: '#FFFFFF', border: '1px solid #ddd', aspectRatio: '1' }}
-              >
+            {/* === Preview — 跟 desktop 同样 export bbox 拖动 + 4 角 handle + 重置范围 === */}
+            <div className="rs-mobile-preview-wrap">
+              <div ref={previewCropFrameMobileRef} className="rs-mobile-preview-frame">
                 {previewUrl ? (
-                  <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
+                  <>
+                    <img src={previewUrl} alt="preview" />
+                    <div
+                      className="rs-mobile-preview-bbox"
+                      onPointerDown={(event) => startPreviewCropAction('move', event, previewCropFrameMobileRef.current)}
+                      style={{
+                        left: `${(previewCrop.x / CAPTURE_SIZE) * 100}%`,
+                        top: `${(previewCrop.y / CAPTURE_SIZE) * 100}%`,
+                        width: `${(previewCrop.width / CAPTURE_SIZE) * 100}%`,
+                        height: `${(previewCrop.height / CAPTURE_SIZE) * 100}%`,
+                      }}
+                    >
+                      {(['nw', 'ne', 'sw', 'se'] as const).map(handle => {
+                        const pos =
+                          handle === 'nw' ? { left: -8, top: -8 } :
+                          handle === 'ne' ? { right: -8, top: -8 } :
+                          handle === 'sw' ? { left: -8, bottom: -8 } :
+                                            { right: -8, bottom: -8 };
+                        return (
+                          <div
+                            key={handle}
+                            className="rs-mobile-preview-handle"
+                            onPointerDown={(event) => startPreviewCropAction(handle, event, previewCropFrameMobileRef.current)}
+                            style={pos}
+                          />
+                        );
+                      })}
+                    </div>
+                  </>
                 ) : (
-                  <div className="flex flex-col items-center gap-1 py-6">
-                    <Image size={24} color="#999" />
-                    <span className="text-[10px]" style={{ color: '#888' }}>{state.language === 'zh' ? '点击生成预览' : 'Click for preview'}</span>
+                  <div className="rs-mobile-preview-empty">
+                    <Image size={28} strokeWidth={1.8} color="#6886b0" />
+                    <span>{state.language === 'zh' ? '下面操作后会自动生成预览' : 'Preview appears after edits'}</span>
                   </div>
                 )}
               </div>
+              {previewUrl && (
+                <div className="rs-mobile-preview-meta">
+                  <span>{state.language === 'zh' ? '默认自动贴边，可拖动或拉角调整复制范围' : 'Auto-trim. Drag or resize to adjust.'}</span>
+                  <button
+                    onClick={() => void resetPreviewCrop()}
+                    className="rs-mobile-preview-reset"
+                    type="button"
+                  >
+                    {state.language === 'zh' ? '重置范围' : 'Reset'}
+                  </button>
+                </div>
+              )}
               <button
                 onClick={handleCopyPreview}
                 disabled={state.elements.length === 0}
-                className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
-                style={{ backgroundColor: '#1a1a1a', color: '#ccc', border: '1px solid #2a2a2a' }}
+                className="rs-mobile-btn"
+                type="button"
               >
                 <Copy size={14} />
                 {t('copyPreview')}
               </button>
             </div>
 
-            {/* Transform (if image selected) */}
+            {/* === Transform section (image element selected) === */}
             {state.selectedId && state.elements.find(e => e.id === state.selectedId)?.type === 'image' && (
-              <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
-                <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="rs-mobile-section">
+                <h4 className="rs-mobile-section-title">{state.language === 'zh' ? '变换 (选中图片)' : 'Transform (image)'}</h4>
+                <div className="rs-mobile-btn-grid-2">
                   <button
                     onClick={() => { const el = state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined; if (el) dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { flipX: !el.flipX } }); }}
-                    className="py-2.5 rounded-lg text-xs font-medium text-white"
-                    style={{ backgroundColor: '#2a2a2a' }}
-                  >{state.language === 'zh' ? '左右翻转' : 'Flip'}</button>
+                    className="rs-mobile-btn"
+                    type="button"
+                  >
+                    {state.language === 'zh' ? '左右翻转' : 'Flip'}
+                  </button>
                   <button
                     onClick={() => { const el = state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined; if (el) dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: (el.rotation + 90) % 360 } }); }}
-                    className="py-2.5 rounded-lg text-xs font-medium text-white"
-                    style={{ backgroundColor: '#2a2a2a' }}
-                  >{state.language === 'zh' ? '旋转90°' : 'Rotate 90°'}</button>
+                    className="rs-mobile-btn"
+                    type="button"
+                  >
+                    {state.language === 'zh' ? '旋转 90°' : 'Rotate 90°'}
+                  </button>
                 </div>
                 <button
                   onClick={() => { const el = state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined; if (el) dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: 0 } }); }}
-                  className="w-full mb-2 py-2 rounded-lg text-xs font-medium text-white"
-                  style={{ backgroundColor: '#2a2a2a' }}
-                >{state.language === 'zh' ? '复原角度' : 'Reset Rotation'}</button>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px]" style={{ color: '#888' }}>{state.language === 'zh' ? '旋转' : 'Rotate'}</span>
-                  <input type="range" min={-180} max={180} step={1}
+                  className="rs-mobile-btn"
+                  type="button"
+                >
+                  {state.language === 'zh' ? '复原角度' : 'Reset rotation'}
+                </button>
+                <div className="rs-mobile-range-row">
+                  <label>{state.language === 'zh' ? '旋转' : 'Rotate'}</label>
+                  <input
+                    type="range" min={-180} max={180} step={1}
                     value={(state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined)?.rotation ?? 0}
                     onChange={e => { const el = state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined; if (el) dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { rotation: Number(e.target.value) } }); }}
-                    className="flex-1" style={{ accentColor: '#FF5E00' }} />
-                  <span className="text-[10px] font-mono" style={{ color: '#ccc' }}>{(state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined)?.rotation ?? 0}°</span>
+                  />
+                  <span>{(state.elements.find(e => e.id === state.selectedId) as ImageElement | undefined)?.rotation ?? 0}°</span>
                 </div>
                 <button
                   onClick={() => dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId! })}
-                  className="w-full mt-2 py-2 rounded-lg text-xs font-semibold text-white"
-                  style={{ backgroundColor: '#EF4444' }}
+                  className="rs-mobile-btn rs-mobile-btn-danger"
+                  type="button"
                 >
-                  {state.language === 'zh' ? '删除图片' : 'Delete Image'}
+                  {state.language === 'zh' ? '删除图片' : 'Delete image'}
                 </button>
               </div>
             )}
 
-            {/* Text Edit (if text selected) */}
+            {/* === Text edit section (text element selected) === */}
             {state.selectedId && state.elements.find(e => e.id === state.selectedId)?.type === 'text' && (
-              <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}>
-                <div className="space-y-2">
+              <div className="rs-mobile-section">
+                <h4 className="rs-mobile-section-title">{state.language === 'zh' ? '文字编辑' : 'Edit text'}</h4>
+                <input
+                  type="text"
+                  value={(state.elements.find(e => e.id === state.selectedId) as TextElement).text}
+                  onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { text: e.target.value } })}
+                  className="rs-mobile-input"
+                />
+                <div className="rs-mobile-range-row">
+                  <label>{state.language === 'zh' ? '字号' : 'Size'}</label>
                   <input
-                    type="text"
-                    value={(state.elements.find(e => e.id === state.selectedId) as TextElement).text}
-                    onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { text: e.target.value } })}
-                    className="w-full px-2 py-1.5 rounded text-xs"
-                    style={{ backgroundColor: '#2a2a2a', color: '#fff', border: '1px solid #444' }}
+                    type="range" min={8} max={80} step={1}
+                    value={(state.elements.find(e => e.id === state.selectedId) as TextElement).fontSize}
+                    onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fontSize: Number(e.target.value) } })}
                   />
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px]" style={{ color: '#888' }}>{state.language === 'zh' ? '字号' : 'Size'}</span>
-                    <input type="range" min={8} max={80} step={1}
-                      value={(state.elements.find(e => e.id === state.selectedId) as TextElement).fontSize}
-                      onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fontSize: Number(e.target.value) } })}
-                      className="flex-1" style={{ accentColor: '#FF5E00' }} />
-                    <span className="text-[9px] font-mono" style={{ color: '#ccc' }}>{(state.elements.find(e => e.id === state.selectedId) as TextElement).fontSize}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="color" value={(state.elements.find(e => e.id === state.selectedId) as TextElement).fillColor}
-                      onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fillColor: e.target.value } })}
-                      className="w-6 h-6 rounded cursor-pointer"
-                      style={{ padding: 0, border: 'none', background: 'none' }} />
-                    <input type="color" value={(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeColor}
-                      onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { strokeColor: e.target.value } })}
-                      className="w-6 h-6 rounded cursor-pointer"
-                      style={{ padding: 0, border: 'none', background: 'none' }} />
-                    <span className="text-[9px]" style={{ color: '#888' }}>{state.language === 'zh' ? '描边' : 'Stroke'}</span>
-                    <input type="range" min={0} max={8} step={0.5}
+                  <span>{(state.elements.find(e => e.id === state.selectedId) as TextElement).fontSize}</span>
+                </div>
+                <div className="rs-mobile-color-row">
+                  <input type="color"
+                    value={(state.elements.find(e => e.id === state.selectedId) as TextElement).fillColor}
+                    onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fillColor: e.target.value } })}
+                    aria-label={state.language === 'zh' ? '字色' : 'Text color'} />
+                  <input type="color"
+                    value={(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeColor}
+                    onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { strokeColor: e.target.value } })}
+                    aria-label={state.language === 'zh' ? '描边色' : 'Stroke color'} />
+                  <div className="rs-mobile-range-row" style={{ flex: 1, minWidth: 0 }}>
+                    <label>{state.language === 'zh' ? '描边' : 'Stroke'}</label>
+                    <input
+                      type="range" min={0} max={8} step={0.5}
                       value={(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeWidth}
                       onChange={e => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { strokeWidth: Number(e.target.value) } })}
-                      className="flex-1" style={{ accentColor: '#FF5E00' }} />
-                    <span className="text-[9px] font-mono" style={{ color: '#ccc' }}>{(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeWidth}</span>
+                    />
+                    <span>{(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeWidth}</span>
                   </div>
-                  <div className="flex gap-1">
-                    {(['left', 'center', 'right'] as const).map(align => (
-                      <button key={align}
-                        onClick={() => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { textAlign: align } })}
-                        className="flex-1 py-1.5 rounded text-[10px] font-medium"
-                        style={{
-                          backgroundColor: (state.elements.find(e => e.id === state.selectedId) as TextElement).textAlign === align ? '#FF5E00' : '#2a2a2a',
-                          color: '#fff',
-                        }}>
-                        {state.language === 'zh'
-                          ? (align === 'left' ? '左' : align === 'center' ? '中' : '右')
-                          : (align === 'left' ? 'L' : align === 'center' ? 'C' : 'R')}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => {
-                        const el = state.elements.find(e => e.id === state.selectedId) as TextElement;
-                        dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' } });
-                      }}
-                      className="flex-1 py-1.5 rounded text-[10px] font-medium"
-                      style={{
-                        backgroundColor: (state.elements.find(e => e.id === state.selectedId) as TextElement).fontWeight === 'bold' ? '#FF5E00' : '#2a2a2a',
-                        color: '#fff',
-                      }}
-                    >
-                      {state.language === 'zh' ? '粗' : 'B'}
-                    </button>
-                  </div>
+                </div>
+                {/* 粗体 + 删除文字 一行 — 左中右对齐已删 (mobile 文字 caption 一般居中, 用户极少改对齐) */}
+                <div className="rs-mobile-text-action-row">
+                  <button
+                    onClick={() => {
+                      const el = state.elements.find(e => e.id === state.selectedId) as TextElement;
+                      dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' } });
+                    }}
+                    className={`rs-mobile-align-btn ${(state.elements.find(e => e.id === state.selectedId) as TextElement).fontWeight === 'bold' ? 'rs-mobile-align-btn-on' : ''}`}
+                    type="button"
+                  >
+                    {state.language === 'zh' ? '粗体' : 'Bold'}
+                  </button>
                   <button
                     onClick={() => dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId! })}
-                    className="w-full py-1.5 rounded text-[10px] font-semibold text-white"
-                    style={{ backgroundColor: '#EF4444' }}
+                    className="rs-mobile-btn rs-mobile-btn-danger"
+                    type="button"
+                    style={{ flex: 1 }}
                   >
                     {state.language === 'zh' ? '删除文字' : 'Delete'}
                   </button>
@@ -908,52 +989,65 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="grid grid-cols-2 gap-2 mb-4">
+            {/* === 8 action grid - Win7 light + semantic colors === */}
+            <div className="rs-mobile-action-grid">
               {!state.museumEditMode && (
-                <button onClick={handleSwitchImage} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#0080FF' }}>{t('switchImage')}</button>
+                <button onClick={handleSwitchImage} className="rs-mobile-action rs-mobile-action-primary" type="button">
+                  <Shuffle size={16} strokeWidth={2.2} /> {t('switchImage')}
+                </button>
               )}
-              <button onClick={handleRecommendText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#00CC66' }}>{t('recommendText')}</button>
-              <button onClick={handleAddText} className="py-3 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: '#9333EA' }}>{t('addText')}</button>
+              <button onClick={handleRecommendText} className="rs-mobile-action" type="button">
+                <MessageCircle size={16} strokeWidth={2.2} /> {t('recommendText')}
+              </button>
+              <button onClick={handleAddText} className="rs-mobile-action" type="button">
+                <Type size={16} strokeWidth={2.2} /> {t('addText')}
+              </button>
               {!state.museumEditMode && (
                 <>
-                  <label className="py-3 rounded-lg text-sm font-semibold text-white cursor-pointer flex items-center justify-center gap-1" style={{ backgroundColor: '#8B5CF6' }}>
-                    <Upload size={14} />{t('uploadAsset')}
-                    <input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} className="hidden" />
+                  <label className="rs-mobile-action" style={{ cursor: 'pointer' }}>
+                    <Upload size={16} strokeWidth={2.2} /> {t('uploadAsset')}
+                    <input type="file" accept="image/png,image/jpeg,image/jpg,image/gif" onChange={handleUploadAsset} style={{ display: 'none' }} />
                   </label>
-                  <button onClick={() => setModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#F59E0B' }}>
-                    <Camera size={14} />{t('customFace')}
+                  <button onClick={() => setModalOpen(true)} className="rs-mobile-action rs-mobile-action-photo" type="button">
+                    <Camera size={16} strokeWidth={2.2} /> {t('customFace')}
                   </button>
-                  <button onClick={() => setSmartModalOpen(true)} className="py-3 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1" style={{ backgroundColor: '#10B981' }}>
-                    <Sparkles size={14} />{state.language === 'zh' ? '智能提取' : 'Smart Extract'}
+                  <button onClick={() => setSmartModalOpen(true)} className="rs-mobile-action rs-mobile-action-emerald" type="button">
+                    <Sparkles size={16} strokeWidth={2.2} /> {state.language === 'zh' ? '智能提取' : 'Smart Extract'}
                   </button>
                 </>
               )}
-              <button onClick={handleSaveDraft} disabled={state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: '#FF5E00' }}>
-                <Heart size={14} />{state.language === 'zh' ? '存草图' : 'Save'}
+              <button
+                onClick={handleSaveDraft}
+                disabled={state.elements.length === 0}
+                className="rs-mobile-action rs-mobile-action-fav"
+                type="button"
+              >
+                <Heart size={16} strokeWidth={2.2} /> {state.language === 'zh' ? '存草图' : 'Save'}
               </button>
-              <button onClick={handleExport} disabled={isExporting || state.elements.length === 0} className="py-3 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ backgroundColor: '#00CC66' }}>
-                {isExporting ? '...' : t('download')}
+              <button
+                onClick={handleExport}
+                disabled={isExporting || state.elements.length === 0}
+                className="rs-mobile-action rs-mobile-action-primary"
+                type="button"
+              >
+                <Download size={16} strokeWidth={2.2} /> {isExporting ? '...' : t('download')}
               </button>
             </div>
 
-            {/* Mobile Share - icon only */}
-            <div className="flex items-center justify-center gap-4 mb-4">
-              <button onClick={() => handleShare('x')} disabled={state.elements.length === 0}
-                title={t('shareX')}
-                className="share-icon-btn share-x"
-              >
+            {/* === Share row — X 单按钮 (Facebook 实际无人用, 已隐藏) === */}
+            <div className="rs-mobile-share-row">
+              <button onClick={() => handleShare('x')} disabled={state.elements.length === 0} title={t('shareX')} className="share-icon-btn share-x" type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
               </button>
-              <button onClick={() => handleShare('facebook')} disabled={state.elements.length === 0}
-                title={t('shareFB')}
-                className="share-icon-btn share-fb"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-              </button>
             </div>
 
-            <button onClick={handleClearCanvas} disabled={state.elements.length === 0} className="w-full py-2.5 rounded-lg text-sm font-medium disabled:opacity-30" style={{ backgroundColor: '#1a1a1a', color: '#888', border: '1px solid #2a2a2a' }}>
+            {/* === Clear canvas (subtle danger) === */}
+            <button
+              onClick={handleClearCanvas}
+              disabled={state.elements.length === 0}
+              className="rs-mobile-btn rs-mobile-btn-subtle"
+              type="button"
+            >
               {t('clearCanvas')}
             </button>
           </div>
@@ -1005,7 +1099,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
               <div
                 className="absolute border-2"
-                onMouseDown={(event) => startPreviewCropAction('move', event)}
+                onPointerDown={(event) => startPreviewCropAction('move', event)}
                 style={{
                   left: `${(previewCrop.x / CAPTURE_SIZE) * 100}%`,
                   top: `${(previewCrop.y / CAPTURE_SIZE) * 100}%`,
@@ -1015,6 +1109,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   background: 'rgba(255,94,0,0.08)',
                   cursor: 'move',
                   boxShadow: '0 0 0 9999px rgba(255,255,255,0.42)',
+                  touchAction: 'none',
                 }}
               >
                 {(['nw', 'ne', 'sw', 'se'] as const).map(handle => {
@@ -1027,7 +1122,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   return (
                     <div
                       key={handle}
-                      onMouseDown={(event) => startPreviewCropAction(handle, event)}
+                      onPointerDown={(event) => startPreviewCropAction(handle, event)}
                       style={{
                         position: 'absolute',
                         width: 12,
@@ -1035,6 +1130,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                         borderRadius: '50%',
                         backgroundColor: '#FF5E00',
                         border: '2px solid #fff',
+                        touchAction: 'none',
                         ...positionStyle,
                       }}
                     />
@@ -1327,14 +1423,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
           </button>
-          <button
-            onClick={() => handleShare('facebook')}
-            disabled={state.elements.length === 0}
-            title={t('shareFB')}
-            className="share-icon-btn share-fb"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-          </button>
+          {/* Facebook 已隐藏 — 实际无人用, 中文用户主要走 X / 微信 */}
         </div>
       </div>
 

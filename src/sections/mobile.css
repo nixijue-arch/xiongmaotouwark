@@ -1,0 +1,2389 @@
+/* ================================================================
+ * xmw mobile layout system (≤ 768px)
+ * 目标设备 iPhone 17 Pro Max (430×932 dp, iOS Safari 17+)
+ * 美学延续 Win7 retro (跟 app.css 同色系 — 蓝色渐变 / 金色 CTA / 玻璃质感)
+ * ================================================================ */
+
+:root {
+  --mobile-header-h: 56px;
+  --mobile-bottom-h: 64px;
+  --mobile-tap-min: 48px;
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* === 全局 mobile rules (≤768px) ============================ */
+@media (max-width: 768px) {
+  html, body {
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  /* 防 iOS Safari 自动 zoom — font-size 必须 >= 16px */
+  input:not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* 干净 tap 反馈 + 关掉双击缩放干扰 */
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* tap target 最小 48px — 比 iOS 推荐的 44 大一点，单手好戳 */
+  .header-link,
+  .lang-toggle,
+  .mobile-hamburger,
+  .about-arcade-btn,
+  .qm-btn,
+  .qm-icon-btn,
+  .qm-textlang-btn,
+  .draft-card-btn,
+  .draft-save-current-btn,
+  .material-search-clear,
+  .win7-toolbar-btn,
+  .mobile-action-btn,
+  .mobile-nav-item {
+    min-height: var(--mobile-tap-min) !important;
+  }
+
+  /* hover transform 在触屏会"挂着" — 关掉 */
+  .header-link:hover,
+  .lang-toggle:hover,
+  .about-arcade-btn:hover,
+  .material-card:hover,
+  .draft-slot-card:hover,
+  .qm-btn:hover,
+  .qm-rail-item:hover {
+    transform: none !important;
+  }
+}
+
+/* === Mobile Header (3-col grid: 汉堡 left / brand center 2-line / lang right) === */
+@media (max-width: 768px) {
+  .header-bar {
+    display: grid !important;
+    /* col 3 用 auto 让 lang-toggle 按内容自适应宽度, 永不换行 ("中/En" + icon ≈ 64-72px) */
+    grid-template-columns: 48px minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 10px !important;
+    height: auto !important;
+    min-height: var(--mobile-header-h);
+    padding: 6px 12px !important;
+    padding-top: calc(6px + var(--mobile-safe-top)) !important;
+    border-radius: 0 0 14px 14px !important;
+  }
+
+  .header-bar::after {
+    height: 22px !important;
+    inset: 3px 3px auto !important;
+  }
+
+  /* 让 header-left / header-right 的 children 直接进 .header-bar 的 grid */
+  .header-bar .header-left,
+  .header-bar .header-right {
+    display: contents !important;
+  }
+
+  /* 隐藏 logo / brand-bubble / 桌面 nav / 外链 / CA badge — 不进 grid layout */
+  .header-bar .brand-icon,
+  .header-bar .brand-bubble,
+  .header-bar .header-link,
+  .header-bar .header-link-external,
+  .header-bar .ca-badge {
+    display: none !important;
+  }
+
+  /* 汉堡占 col 1 (左) */
+  .header-bar .mobile-hamburger {
+    grid-column: 1 !important;
+    justify-self: start;
+    width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* brand-text 占 col 2 (中, 居中 2 行) */
+  .header-bar .brand-text {
+    grid-column: 2 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-self: stretch !important;
+    text-align: center !important;
+    gap: 1px !important;
+    min-width: 0 !important;
+    flex: initial !important;
+  }
+
+  .header-bar .brand-name {
+    font-size: 17px !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    letter-spacing: 0.02em !important;
+    color: #061f39 !important;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+
+  /* brand-tag = t('subtitle') = '表情包工坊' / 'Meme Generator' — mobile 显示在第 2 行 */
+  .header-bar .brand-tag {
+    display: block !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    color: #11385f !important;
+    line-height: 1.1 !important;
+    margin-top: 1px !important;
+  }
+
+  /* lang-toggle 占 col 3 (右), 显示 t('switchLang') 的 "中/En" 字样 — nowrap 防 button 内换行 */
+  .header-bar .lang-toggle {
+    grid-column: 3 !important;
+    justify-self: end !important;
+    padding: 0 10px !important;
+    min-width: 0 !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    gap: 4px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  .header-bar .lang-toggle .lang-label {
+    display: inline !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.02em !important;
+    white-space: nowrap !important;
+  }
+}
+
+/* === Hamburger Button (默认隐藏，mobile 才显示) =============== */
+.mobile-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: var(--win7-button);
+  color: #122d4a;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(52, 97, 146, 0.18);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-hamburger:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.96);
+}
+
+@media (max-width: 768px) {
+  .mobile-hamburger {
+    display: inline-flex;
+  }
+}
+
+/* === Mobile Nav Drawer (从顶部滑下) ========================== */
+.mobile-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 36, 70, 0.42);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.mobile-nav-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobile-nav-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 210;
+  max-height: min(92vh, 92dvh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: linear-gradient(180deg, #eaf4fc 0%, #d6e9fb 100%);
+  border-bottom: 2px solid #2d71ab;
+  border-radius: 0 0 18px 18px;
+  box-shadow: 0 14px 36px rgba(15, 72, 131, 0.32);
+  transform: translateY(-105%);
+  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: max(16px, var(--mobile-safe-bottom));
+}
+
+.mobile-nav-drawer.open {
+  transform: translateY(0);
+}
+
+.mobile-nav-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: calc(var(--mobile-safe-top) + 4px) 14px 6px;
+  background: var(--win7-titlebar);
+  color: #fff;
+  box-shadow: var(--win7-titlebar-light);
+}
+
+.mobile-nav-titlebar-text {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-nav-close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 100%);
+  color: #fff;
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px #b83a11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+
+.mobile-nav-close:active {
+  transform: scale(0.94);
+}
+
+.mobile-nav-banner {
+  padding: 14px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(180deg, #fffef9 0%, #fff0b9 100%);
+  border-bottom: 1px solid #e6c75a;
+}
+
+.mobile-nav-banner-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: #fff;
+  object-fit: contain;
+  box-shadow:
+    inset 0 0 0 1px #d4b042,
+    0 2px 6px rgba(192, 134, 20, 0.18);
+}
+
+.mobile-nav-banner-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mobile-nav-banner-name {
+  font-size: 16px;
+  font-weight: 900;
+  color: #5c3a00;
+  letter-spacing: 0.02em;
+}
+
+.mobile-nav-banner-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8a5f10;
+}
+
+.mobile-nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-nav-section-label {
+  margin: 10px 14px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4c6c91;
+}
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  background: var(--win7-button);
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px #8daccc,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(74, 112, 159, 0.12);
+  color: #173452;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.98);
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+}
+
+.mobile-nav-item-active {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 2px 8px rgba(210, 148, 24, 0.24);
+}
+
+.mobile-nav-item-label {
+  flex: 1;
+}
+
+.mobile-nav-item-meta {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.55;
+}
+
+.mobile-nav-dev-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 0 8px 12px;
+}
+
+.mobile-nav-dev-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 60px;
+  padding: 8px 4px;
+  background: rgba(255, 94, 0, 0.08);
+  border: 1.5px dashed #ff5e00;
+  border-radius: 10px;
+  color: #ff5e00;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mobile-nav-dev-btn-active {
+  background: rgba(255, 94, 0, 0.22);
+}
+
+.mobile-nav-dev-btn:active {
+  transform: scale(0.96);
+}
+
+.mobile-nav-ca-row {
+  margin: 6px 12px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #182536 0%, #243347 100%);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px #ffcf55,
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  color: #ffe36c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mobile-nav-ca-star {
+  color: #ffcf55;
+  font-size: 13px;
+}
+
+.mobile-nav-ca-text {
+  flex: 1;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-ca-copy {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  color: #ffe36c;
+  border: 1px solid rgba(255, 207, 85, 0.45);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-nav-ca-copy:active {
+  background: rgba(255, 207, 85, 0.15);
+}
+
+/* === QuickMode mobile shell (≤768) ========================== */
+/* 替换 .quickmode-three-col 在 mobile 上的桌面三栏布局 */
+@media (max-width: 768px) {
+  .quickmode-root.about-arcade-shell {
+    padding: 0 !important;
+  }
+
+  .quickmode-three-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    padding: 10px 12px calc(20px + var(--mobile-bottom-h) + var(--mobile-safe-bottom)) !important;
+    min-height: 0 !important;
+  }
+
+  /* 桌面左/右栏（aside）在 mobile 全部隐藏 — 选 panda/face 走 sheet */
+  .quickmode-three-col > aside {
+    display: none !important;
+  }
+
+  /* 中间 main 充满 */
+  .quickmode-three-col > main {
+    width: 100% !important;
+    max-width: 100% !important;
+    gap: 12px !important;
+  }
+
+  /* preview 卡 — 占视口宽度，sticky 在顶部下方一点 */
+  .quickmode-preview {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    padding: 14px 14px 18px !important;
+    border-radius: 18px !important;
+    border-width: 2px !important;
+  }
+
+  .quickmode-preview .qm-panda-frame {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 1 / 1;
+    max-height: 56vh;
+  }
+
+  .quickmode-preview .qm-panda-img {
+    max-height: 56vh !important;
+  }
+
+  .quickmode-preview .qm-caption {
+    margin-top: 10px !important;
+    font-size: clamp(20px, 5.6vw, 26px) !important;
+    padding: 0 8px !important;
+  }
+
+  /* 操作按钮组 — 两行 wrap, 大 tap target */
+  .quickmode-three-col > main > div:nth-of-type(2) {
+    width: 100%;
+    gap: 8px !important;
+  }
+
+  .quickmode-three-col .about-arcade-btn {
+    flex: 1 1 calc(50% - 6px) !important;
+    min-height: 48px !important;
+    padding: 10px 12px !important;
+    font-size: 14px !important;
+    justify-content: center;
+  }
+
+  /* transform row 全宽，缩 rotation track */
+  .quickmode-three-col .quickmode-transform-card {
+    max-width: 100% !important;
+  }
+
+  .quickmode-three-col .qm-rotation-track {
+    width: auto !important;
+    flex: 1 1 auto !important;
+    min-width: 120px;
+  }
+}
+
+/* === QuickMode mobile action bar (sticky bottom) ============ */
+.quickmode-mobile-bottom {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .quickmode-mobile-bottom {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    padding-bottom: calc(10px + var(--mobile-safe-bottom));
+    background: linear-gradient(180deg, rgba(234, 244, 252, 0.96) 0%, rgba(214, 233, 251, 0.96) 100%);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border-top: 2px solid #2d71ab;
+    box-shadow: 0 -8px 24px rgba(15, 72, 131, 0.18);
+  }
+
+  .quickmode-mobile-bottom-btn {
+    flex: 1 1 0;
+    min-height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 6px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 12px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 2px 6px rgba(52, 97, 146, 0.18);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .quickmode-mobile-bottom-btn-primary {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+    color: #4c3000;
+    box-shadow:
+      inset 0 0 0 1px #bb7e11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      0 2px 8px rgba(210, 148, 24, 0.32);
+  }
+
+  .quickmode-mobile-bottom-btn-active {
+    background: linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%);
+    color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #8a3408,
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+
+  .quickmode-mobile-bottom-btn:active {
+    transform: scale(0.96);
+  }
+
+  /* 用 padding bottom 给 sticky 底栏让位 — 已加到 .quickmode-three-col 上 */
+}
+
+/* === Mobile picker bottom-sheet — 覆盖 dark theme primitives === */
+@media (max-width: 768px) {
+  .bottom-sheet {
+    background: linear-gradient(180deg, #eaf4fc 0%, #d6e9fb 100%) !important;
+    border-top: 2px solid #2d71ab !important;
+    border-radius: 18px 18px 0 0 !important;
+    max-height: 78vh !important;
+    padding-bottom: var(--mobile-safe-bottom);
+  }
+
+  .bottom-sheet-header {
+    background: var(--win7-titlebar) !important;
+    color: #fff !important;
+    border-bottom: 1px solid #2b6ba5 !important;
+    box-shadow: var(--win7-titlebar-light) !important;
+    padding: 10px 14px !important;
+  }
+
+  .bottom-sheet-title {
+    color: #fff !important;
+    font-weight: 800 !important;
+    font-size: 14px !important;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  }
+
+  .bottom-sheet-close {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 6px !important;
+    background: linear-gradient(180deg, #ffb28d 0%, #ff7840 100%) !important;
+    color: #fff !important;
+    box-shadow:
+      inset 0 0 0 1px #b83a11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+  }
+
+  .bottom-sheet-body {
+    padding: 12px 14px calc(20px + var(--mobile-safe-bottom)) !important;
+    background: transparent !important;
+  }
+
+  .bottom-sheet-overlay {
+    background: rgba(8, 36, 70, 0.42) !important;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+}
+
+/* === Mobile FAB — 删除常驻 (EditorMobilePanel 的 chunky row 4 个按钮代替入口) === */
+@media (max-width: 768px) {
+  .mobile-fab-left,
+  .mobile-fab-right {
+    display: none !important;
+  }
+}
+
+/* === 防顶栏挡住 page content === */
+@media (max-width: 768px) {
+  .app-shell {
+    /* 真机适配三 fallback (按优先级):
+         1) --visual-vh: main.tsx 用 visualViewport.height 实时算的可视高度
+            (标准解法, 适配 iOS Chrome native tab bar 等 chrome 占据空间不被 dvh 覆盖的 case)
+         2) 100dvh: 现代浏览器 dynamic viewport
+         3) 100vh: 老浏览器 fallback
+       重要: 不能让 height 计算成 0, 否则 overflow:hidden 把所有内容剪没看见 = "黑屏" */
+    height: 100vh !important;
+    height: 100dvh !important;
+    height: var(--visual-vh, 100dvh) !important;
+    min-height: 100vh;
+  }
+
+  /* 自然滚动页 (quick/collection/museum/about): 用 body-level scroll 让 iOS Safari 滚动时 URL bar
+     自动收起释放视觉空间, 不再 inner-scroll 锁死. Editor / DEV 工具页保持 fixed-height + inner-scroll
+     (canvas 算 stage 尺寸依赖父高度). */
+  .app-shell.app-shell-page-scroll {
+    height: auto !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+    overflow-x: hidden !important;
+  }
+
+  .app-shell-page-scroll .quickmode-root,
+  .app-shell-page-scroll .about-container,
+  .app-shell-page-scroll .collection-root,
+  .app-shell-page-scroll .museum-root {
+    flex: initial !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+  }
+
+  /* body 自身 scroll 时启用 iOS momentum scroll */
+  html, body {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .editor-layout {
+    /* mobile 编辑器三栏先不动 (Phase 3 重做) — 但留个最小可读宽度 */
+    flex-wrap: nowrap;
+  }
+
+  /* ============================================================
+   * Editor mobile: refined density (frontend-design 原则)
+   *   1) breathing room — gaps + internal padding, 不再 tight stack 挤压
+   *   2) 一屏到底 — strict overflow hidden + overscroll-behavior none, 禁止 bounce
+   *   3) 删 scrollbar — webkit/firefox native scrollbar 全 hide
+   * Math (visualVh 750): header 60 + gap 10 + editor-layout 430 + gap 10
+   *   + emp-root 119 (padding 24 + hint 24 + gap 10 + chunky 60) + gap 10
+   *   + bottombar 98 (padding 20 + btn 44 + safe 34) = 727 ≈ 750 ✓ 自然 fit
+   * ============================================================ */
+
+  .app-shell:not(.app-shell-page-scroll) {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    gap: 10px;
+  }
+
+  .editor-layout {
+    flex: 0 0 auto !important;
+    height: 100vw !important;
+    max-height: 55vh !important;
+    overflow: hidden !important;
+  }
+
+  /* CanvasArea 内 stage div — 删 overflow-y: auto, canvas auto-scale 永远 fit, 不需要 scroll */
+  .editor-layout > div {
+    overflow: hidden !important;
+  }
+
+  /* Emp panel — airy 内部 padding + gap, 视觉舒服 */
+  .emp-root {
+    flex: 0 0 auto !important;
+    padding: 12px 14px !important;
+    gap: 10px !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Bottombar — comfortable padding */
+  .editor-bottom-bar {
+    flex: 0 0 auto !important;
+    padding: 10px 12px !important;
+    padding-bottom: calc(10px + var(--mobile-safe-bottom)) !important;
+    gap: 8px !important;
+  }
+}
+
+/* ============================================================
+ * Mobile global: hide native scrollbars + 防 overscroll bounce
+ * 用户反馈"滚动时还会有系统滚轮", 一并删干净
+ * ============================================================ */
+
+@media (max-width: 768px) {
+  /* Webkit (iOS Safari/Chrome) */
+  ::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+    background: transparent !important;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-corner {
+    background: transparent !important;
+    display: none !important;
+  }
+
+  /* Firefox + IE/Edge */
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  /* iOS rubber-band bounce 防止 (page-scroll quick 页保留 scroll 但不要 bounce) */
+  html, body {
+    overscroll-behavior: none !important;
+  }
+}
+
+/* ================================================================
+ * QuickMode mobile JSX block (Phase 2)
+ * 这些 class 只在 quickmode.tsx 的 isMobile 分支用到,
+ * 桌面看不见 — 但 CSS 不需要 @media gate 因为 class 本身桌面不会被加.
+ * ================================================================ */
+
+.qmm-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: center;
+  min-height: 38px;
+  padding: 4px 18px 4px 10px;
+  background: linear-gradient(180deg, #1f92f8 0%, #116bcc 100%);
+  color: #fff;
+  border: 2px solid #09498f;
+  border-radius: 999px;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.28),
+    0 4px 12px rgba(7, 48, 95, 0.3);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.qmm-mode-chip:active {
+  transform: scale(0.96);
+}
+
+.qmm-mode-chip-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffd54a 0%, #ff9f1c 100%);
+  color: #5a3500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+  animation: qm-cycle-spin 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Caption card */
+.qmm-caption-card {
+  width: 100%;
+  padding: 12px;
+  background: #fff;
+  border: 2px solid #0a4e97;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 4px 12px rgba(7, 48, 95, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qmm-caption-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid #b9d4ee;
+  background: #f7fbff;
+  color: #0a356d;
+  font-size: 16px; /* 防 iOS Safari 自动 zoom */
+  font-family: inherit;
+  line-height: 1.4;
+  min-height: 56px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.qmm-caption-textarea:focus {
+  border-color: #1f92f8;
+  background: #fff;
+}
+
+.qmm-caption-textarea::placeholder {
+  color: #8aa3c2;
+}
+
+.qmm-caption-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.qmm-reroll-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px #8daccc,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(74, 112, 159, 0.12);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qmm-reroll-btn:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.98);
+}
+
+.qmm-textlang-group {
+  display: inline-flex;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid #0a4e97;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.qmm-textlang-btn-m {
+  padding: 0 14px;
+  min-width: 44px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: #0a356d;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.qmm-textlang-btn-m-on {
+  background: linear-gradient(180deg, #1f92f8 0%, #116bcc 100%);
+  color: #fff;
+}
+
+.qmm-font-select-m {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 2px solid #0a4e97;
+  background: #fff;
+  color: #0a356d;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%230a356d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+/* Pick row — 3 chunky buttons */
+.qmm-pick-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.qmm-pick-btn {
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 3px 10px rgba(52, 97, 146, 0.18);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.qmm-pick-btn:active {
+  transform: scale(0.96);
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+}
+
+.qmm-pick-btn-emoji {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.qmm-pick-btn-primary {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 4px 14px rgba(210, 148, 24, 0.32);
+}
+
+.qmm-pick-btn-primary:active {
+  background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%);
+}
+
+/* Upload row — 2 buttons */
+.qmm-upload-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.qmm-upload-btn {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  border: 2px solid;
+  font-family: inherit;
+}
+
+.qmm-upload-btn:active {
+  transform: scale(0.97);
+}
+
+.qmm-upload-btn-photo {
+  background: linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%);
+  border-color: #7a5a1a;
+  color: #4c3000;
+}
+
+.qmm-upload-btn-smart {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+  border-color: #0a6e50;
+  color: #fff;
+}
+
+/* Picker bottom-sheet grid (PandaHead/face) */
+.qmm-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.qmm-picker-item {
+  aspect-ratio: 1;
+  padding: 6px;
+  background: #fff;
+  border: 2px solid rgba(10, 78, 151, 0.18);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(7, 48, 95, 0.08);
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.qmm-picker-item:active {
+  transform: scale(0.95);
+}
+
+.qmm-picker-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.qmm-picker-item-active {
+  border: 3px solid #1f92f8;
+  box-shadow:
+    0 0 0 2px rgba(31, 146, 248, 0.25),
+    0 2px 8px rgba(7, 48, 95, 0.18);
+}
+
+/* ================================================================
+ * Phase 2.1 — QuickMode 黑屏/乱跳/卡 修复
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  /* PandaHead 遗留 dark theme — .quickmode-root { background: #1a1a1a } 是 "黑屏" 根源.
+     mobile 透明让 app-shell Win7 蓝渐变透下来; color 还给浏览器继承 */
+  .quickmode-root,
+  .quickmode-root.about-arcade-shell {
+    background: transparent !important;
+    color: inherit !important;
+  }
+
+  /* PandaCanvas 初次 url='' 时 opacity 0.4, 父 frame 无底色 → 透出后面深色背景.
+     给 frame 白底兜底, img 完成 load 后 opacity 1 完全覆盖 */
+  .qm-panda-frame {
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 14px;
+  }
+
+  /* preview 卡片 height: auto 时 caption load 完会 reflow → caption 跳.
+     min-height 给 panda area 预留空间, 避免新 panda load 时整卡高度抖 */
+  .quickmode-three-col .quickmode-preview {
+    min-height: 320px;
+  }
+}
+
+/* ================================================================
+ * Phase 2.2 — Transform card 强制横向一行
+ * (反推 app.css @860 .about-banner-card { flex-direction: column })
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  .about-banner-card.quickmode-transform-card {
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* RotationDot 占剩余空间, 其他 children 自然宽度 */
+  .quickmode-transform-card .qm-rotation-track {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    cursor: pointer;
+  }
+
+  .quickmode-transform-card .qm-rotation-display {
+    flex: 0 0 auto !important;
+    min-width: 44px !important;
+    padding: 4px 6px !important;
+  }
+
+  .quickmode-transform-card .qm-icon-btn {
+    flex: 0 0 auto !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.3 — iOS hover-stuck 修复
+ * 触屏设备 tap 后 :hover 会粘住, 把 hover 状态显式重置回 base
+ * ================================================================ */
+
+@media (hover: none) {
+  /* Header 链接 / 语言切换 */
+  .header-link:hover,
+  .header-bar .header-link:hover,
+  .lang-toggle:hover,
+  .header-bar .lang-toggle:hover {
+    background: var(--win7-button) !important;
+    color: #122d4a !important;
+    filter: none !important;
+    transform: none !important;
+  }
+
+  .header-link.header-link-active:hover,
+  .header-bar .header-link.header-link-active:hover {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%) !important;
+    color: #4c3000 !important;
+  }
+
+  /* About-arcade 蓝色 chunky 按钮 (主流量) */
+  .about-arcade-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* 分享 icon / 素材卡 / 草图卡 */
+  .share-icon-btn:hover,
+  .material-card:hover,
+  .draft-slot-card:hover {
+    transform: none !important;
+  }
+
+  /* QuickMode 老 dark theme 按钮 (qm-btn / qm-icon-btn / qm-rail-item) — 重置回 base */
+  .qm-btn:hover {
+    background: #2a2a2a !important;
+    border-color: #3a3a3a !important;
+    transform: none !important;
+  }
+
+  .qm-icon-btn:hover {
+    background: #fff !important;
+    transform: none !important;
+  }
+
+  .qm-rail-item:hover {
+    border-color: #3a3a3a !important;
+    transform: none !important;
+  }
+
+  /* Win7 工具栏 + 草图按钮 */
+  .win7-toolbar-btn:hover,
+  .win7-toolbar-pill:hover {
+    background: var(--win7-button) !important;
+    filter: none !important;
+  }
+
+  .draft-card-btn:hover,
+  .draft-save-current-btn:hover,
+  .material-search-clear:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* Museum / About 返回 / footer */
+  .museum-back-btn:hover,
+  .about-back-btn:hover,
+  .about-footer-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* QuickMode mobile 自家按钮 (.qmm-* / .quickmode-mobile-bottom-btn / .mobile-*) */
+  .qmm-reroll-btn:hover,
+  .qmm-pick-btn:hover,
+  .qmm-upload-btn:hover,
+  .qmm-mode-chip:hover,
+  .qmm-picker-item:hover,
+  .quickmode-mobile-bottom-btn:hover,
+  .mobile-hamburger:hover,
+  .mobile-nav-item:hover,
+  .mobile-nav-dev-btn:hover,
+  .mobile-nav-close:hover,
+  .mobile-nav-ca-copy:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* RightSidebar mobile sheet 新按钮 */
+  .rs-mobile-btn:hover,
+  .rs-mobile-action:hover,
+  .rs-mobile-align-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.4 — Editor Mobile Sheet content classes (RightSidebar 重做)
+ * 由 rightsidebar.tsx mobile 分支用 — Win7 light + 语义色 (危险/收藏/绿色 emerald)
+ * ================================================================ */
+
+.rs-mobile-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rs-mobile-preview-frame {
+  background: #ffffff;
+  border: 2px solid #0a4e97;
+  border-radius: 14px;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 4px 12px rgba(7, 48, 95, 0.14);
+}
+
+.rs-mobile-preview-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+/* Export crop bbox — 跟 desktop 同款橙色 dashed + 4 角 handle */
+.rs-mobile-preview-bbox {
+  position: absolute;
+  border: 2px solid #FF5E00;
+  background: rgba(255, 94, 0, 0.08);
+  cursor: move;
+  touch-action: none;
+  /* 让 bbox 外的"非选中"区微微泛白, 用户能秒看出 export 范围 */
+  box-shadow: 0 0 0 9999px rgba(255, 255, 255, 0.42);
+}
+
+.rs-mobile-preview-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #FF5E00;
+  border: 2px solid #fff;
+  touch-action: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.rs-mobile-preview-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #4a6486;
+  font-weight: 600;
+  padding: 0 2px;
+}
+
+.rs-mobile-preview-reset {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.rs-mobile-preview-reset:active { transform: scale(0.96); }
+
+.rs-mobile-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #6886b0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rs-mobile-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(10, 78, 151, 0.18);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.rs-mobile-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0a356d;
+  letter-spacing: 0.04em;
+}
+
+.rs-mobile-btn-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rs-mobile-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(74, 112, 159, 0.12);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+}
+
+.rs-mobile-btn:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.98);
+}
+
+.rs-mobile-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rs-mobile-btn-danger {
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+  color: #fff;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #8a3408,
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 2px 6px rgba(176, 76, 26, 0.32);
+}
+
+.rs-mobile-btn-danger:active {
+  background: linear-gradient(180deg, #ff7840 0%, #d8541a 100%);
+  color: #fff;
+}
+
+.rs-mobile-btn-subtle {
+  background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%);
+  color: #354f6d;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #889db3,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  margin-top: 14px;
+}
+
+.rs-mobile-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid #b9d4ee;
+  background: #f7fbff;
+  color: #0a356d;
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.rs-mobile-input:focus {
+  border-color: #1f92f8;
+  background: #fff;
+}
+
+.rs-mobile-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rs-mobile-range-row label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0a356d;
+  min-width: 36px;
+}
+
+.rs-mobile-range-row input[type='range'] {
+  flex: 1;
+  accent-color: #ff9d00;
+  height: 32px;
+}
+
+.rs-mobile-range-row span {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #0a356d;
+  min-width: 36px;
+  text-align: right;
+}
+
+.rs-mobile-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rs-mobile-color-row input[type='color'] {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid #0a4e97;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.rs-mobile-align-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 6px;
+}
+
+/* 文字编辑底部一行: 粗体 (固定窄) + 删除文字 (撑满) */
+.rs-mobile-text-action-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 8px;
+}
+.rs-mobile-text-action-row .rs-mobile-align-btn {
+  min-width: 80px;
+  flex: 0 0 auto;
+}
+
+.rs-mobile-align-btn {
+  min-height: 40px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.rs-mobile-align-btn:active {
+  transform: scale(0.96);
+}
+
+.rs-mobile-align-btn-on {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+}
+
+.rs-mobile-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.rs-mobile-action {
+  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 8px rgba(74, 112, 159, 0.16);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
+  width: 100%;
+}
+
+.rs-mobile-action:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.97);
+}
+
+.rs-mobile-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rs-mobile-action-primary {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 3px 10px rgba(210, 148, 24, 0.32);
+}
+
+.rs-mobile-action-photo {
+  background: linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%);
+  border-color: #7a5a1a;
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #6a4d12,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.rs-mobile-action-emerald {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+  border-color: #0a6e50;
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #064c37,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.rs-mobile-action-fav {
+  background: linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%);
+  border-color: #8a3408;
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #6c2706,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.rs-mobile-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+/* ================================================================
+ * Phase 2.7 — QuickMode mobile 重排 + 紧凑 (一屏到底)
+ * 视觉顺序 (CSS order): preview → transform → action(模式+随机) → caption → pick(4-col) → customFace-clear
+ * (JSX 顺序: preview / action / caption / pick / clear-custom / [desktop only] / transform)
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  /* main flex children 排序 — 让 transform card (JSX 在末尾) 视觉跟到 preview 之后 */
+  .quickmode-three-col > main > * {
+    order: 100;
+  }
+  .quickmode-three-col > main > div:first-of-type {
+    order: 1;
+  }
+  .quickmode-three-col .quickmode-transform-card {
+    order: 2;
+  }
+  .qmm-action-row {
+    order: 3;
+  }
+  .qmm-caption-card {
+    order: 4;
+  }
+  .qmm-pick-row {
+    order: 5;
+  }
+  .qmm-clear-custom-btn {
+    order: 6;
+  }
+
+  /* Preview tighten — 真机 iPhone 17 PM Chrome iOS visible ~750, 减 header + sticky bar = ~597 content area.
+     preview 撑死 30vh (= 225 on 750), 主要让 pick row 进 viewport 不被 sticky bar 遮 */
+  .quickmode-three-col .quickmode-preview {
+    padding: 8px 10px 10px !important;
+    min-height: 180px;
+  }
+  .quickmode-preview .qm-panda-frame {
+    max-height: 30vh !important;
+  }
+  .quickmode-preview .qm-panda-img {
+    max-height: 30vh !important;
+  }
+  .quickmode-preview .qm-caption {
+    margin-top: 4px !important;
+    font-size: clamp(16px, 4.4vw, 20px) !important;
+  }
+
+  /* main column gap 紧凑 — 6 个 row 之间总 gap 省 24px */
+  .quickmode-three-col > main {
+    gap: 6px !important;
+  }
+  .quickmode-three-col {
+    padding-top: 6px !important;
+    padding-bottom: calc(8px + var(--mobile-bottom-h) + var(--mobile-safe-bottom)) !important;
+  }
+
+  /* Caption card 紧凑: controls 单行, textarea 单行 */
+  .qmm-caption-card {
+    padding: 8px !important;
+    gap: 6px !important;
+  }
+  .qmm-caption-textarea {
+    min-height: 40px !important;
+    padding: 8px 10px !important;
+  }
+  .qmm-caption-controls {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    gap: 6px !important;
+    align-items: stretch !important;
+  }
+  .qmm-caption-controls .qmm-reroll-btn,
+  .qmm-caption-controls .qmm-textlang-group,
+  .qmm-caption-controls .qmm-font-select-m {
+    min-height: 36px !important;
+    height: 36px !important;
+  }
+  .qmm-caption-controls .qmm-font-select-m {
+    grid-column: auto !important;
+    font-size: 13px !important;
+    padding: 0 28px 0 10px !important;
+  }
+  .qmm-caption-controls .qmm-textlang-btn-m {
+    padding: 0 10px !important;
+    font-size: 13px !important;
+  }
+  .qmm-caption-controls .qmm-reroll-btn {
+    padding: 0 8px !important;
+    font-size: 12px !important;
+  }
+
+  /* Action row 紧凑 (模式 + 随机生图) */
+  .qmm-action-row .qmm-mode-chip,
+  .qmm-action-row .qmm-random-btn {
+    min-height: 46px !important;
+    padding: 4px 10px !important;
+  }
+
+  /* Pick row 4-col 紧凑 */
+  .qmm-pick-row-4 .qmm-pick-btn {
+    min-height: 50px !important;
+    padding: 4px 4px !important;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn-emoji {
+    font-size: 20px;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Transform card mobile 极紧凑 — 一行 high 46 (vs 之前 60) */
+  .about-banner-card.quickmode-transform-card {
+    padding: 6px 10px !important;
+    border-radius: 12px !important;
+    gap: 6px !important;
+  }
+  .quickmode-transform-card .qm-rotation-track {
+    height: 28px !important;
+  }
+  .quickmode-transform-card .qm-icon-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    border-radius: 8px !important;
+  }
+  .quickmode-transform-card .qm-rotation-display {
+    min-width: 38px !important;
+    height: 26px !important;
+    font-size: 10px !important;
+    padding: 2px 5px !important;
+  }
+}
+
+/* Action row: 模式 + 🎲 随机 — 2-col grid */
+.qmm-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  align-items: stretch;
+}
+
+.qmm-action-row .qmm-mode-chip {
+  width: 100% !important;
+  justify-self: stretch;
+  align-self: stretch;
+  min-height: 52px !important;
+  border-radius: 14px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+}
+
+.qmm-random-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 14px;
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  border: 2px solid #fff;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 4px 12px rgba(210, 148, 24, 0.32);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.qmm-random-btn:active {
+  background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%);
+  transform: scale(0.96);
+}
+
+.qmm-random-btn .qmm-pick-btn-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* Pick row 4-col modifier */
+.qmm-pick-row-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.qmm-pick-row-4 .qmm-pick-btn {
+  min-height: 56px !important;
+  padding: 6px 4px !important;
+  font-size: 12px !important;
+  gap: 3px;
+  border-radius: 12px;
+}
+
+.qmm-pick-row-4 .qmm-pick-btn-emoji {
+  font-size: 22px;
+}
+
+/* Semantic variants on pick-btn (photo 自制 / emerald 智能提取) */
+.qmm-pick-btn-photo {
+  background: linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%) !important;
+  border-color: #7a5a1a !important;
+  color: #4c3000 !important;
+  box-shadow:
+    inset 0 0 0 1px #6a4d12,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 3px 10px rgba(140, 90, 20, 0.22) !important;
+}
+
+.qmm-pick-btn-emerald {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%) !important;
+  border-color: #0a6e50 !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 0 0 1px #064c37,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 3px 10px rgba(8, 90, 60, 0.28) !important;
+}
+
+.qmm-pick-btn-photo:active,
+.qmm-pick-btn-emerald:active {
+  filter: brightness(1.06);
+  transform: scale(0.96);
+}
+
+/* Clear custom face — secondary subtle button */
+.qmm-clear-custom-btn {
+  width: 100%;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: #fff;
+  color: #0a356d;
+  border: 1.5px dashed #8a3408;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.qmm-clear-custom-btn:active {
+  background: #fff0e0;
+  transform: scale(0.97);
+}
+
+/* Append hover-stuck reset for new classes (.qmm-random-btn / .qmm-clear-custom-btn) */
+@media (hover: none) {
+  .qmm-random-btn:hover,
+  .qmm-clear-custom-btn:hover {
+    transform: none !important;
+    filter: none !important;
+    background-image: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  }
+  .qmm-clear-custom-btn:hover {
+    background-image: none !important;
+    background: #fff !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.9 — EditorBottomBar (编辑器持续可见底栏 — 桌面 + mobile 通用)
+ *   现代设计参考 (Figma/Canva/Photoroom mobile): 把核心 actions 下沉到 thumb-reach
+ *   底部 toolbar, canvas 顶端对齐让操作区集中下半屏
+ * ================================================================ */
+
+.editor-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-bottom: calc(10px + var(--mobile-safe-bottom));
+  background:
+    linear-gradient(180deg, rgba(234, 244, 252, 0.96) 0%, rgba(214, 233, 251, 0.96) 100%);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-top: 2px solid #2d71ab;
+  box-shadow: 0 -6px 18px rgba(15, 72, 131, 0.16);
+  flex-shrink: 0;
+  z-index: 50;
+  flex-wrap: wrap;
+}
+
+.editor-bb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-bb-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(45, 113, 171, 0.32);
+  flex-shrink: 0;
+}
+
+.editor-bb-btn {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--win7-button, linear-gradient(180deg, #ffffff 0%, #edf5ff 52%, #d5e8fb 100%));
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border, #7e9fbe),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(52, 97, 146, 0.18);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-bb-btn:hover {
+  background: var(--win7-button-hover, linear-gradient(180deg, #fffdf5 0%, #ffe7a8 48%, #ffc949 100%));
+  color: #5e3d00;
+}
+
+.editor-bb-btn:active {
+  transform: scale(0.97);
+}
+
+.editor-bb-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.editor-bb-btn-primary {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 3px 10px rgba(210, 148, 24, 0.32);
+}
+
+.editor-bb-btn-primary:hover {
+  background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%);
+}
+
+.editor-bb-btn-danger {
+  background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%);
+  color: #354f6d;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #889db3,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.editor-bb-btn-danger:hover {
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+  color: #fff;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #8a3408,
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* ============================================================
+ * EditorMobilePanel — 编辑器 mobile inline 工具区 (canvas 跟 BottomBar 之间)
+ * mini layer strip (横排 thumb + ↑↓ reorder) + 选中 quick edit
+ * 桌面 display: none, mobile @768 显示
+ * ============================================================ */
+
+.emp-root { display: none; }
+
+@media (max-width: 768px) {
+  .emp-root {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 10px;
+    background:
+      linear-gradient(180deg, rgba(245, 250, 255, 0.96) 0%, rgba(225, 240, 252, 0.96) 100%);
+    border-top: 1px solid rgba(45, 113, 171, 0.32);
+    flex-shrink: 0;
+    min-height: 56px;
+    z-index: 40;
+  }
+
+  .emp-empty-hint,
+  .emp-hint {
+    text-align: center;
+    color: #4c6c91;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 6px;
+  }
+
+  .emp-layers {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    /* 左右 padding 给 FAB 让位 (FAB 抬到 panel 之上, 但 panel scroll 也可能 visual overlap) */
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .emp-layer-thumb {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    background: #fff;
+    border: 2px solid rgba(10, 78, 151, 0.25);
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 2px;
+    color: #173452;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(7, 48, 95, 0.1);
+  }
+
+  .emp-layer-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+
+  .emp-layer-thumb-on {
+    border-color: #ff5e00;
+    border-width: 2.5px;
+    box-shadow:
+      0 0 0 2px rgba(255, 94, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  }
+
+  .emp-layer-thumb:active {
+    transform: scale(0.94);
+  }
+
+  .emp-divider-v {
+    width: 1px;
+    height: 32px;
+    background: rgba(45, 113, 171, 0.32);
+    flex-shrink: 0;
+  }
+
+  .emp-icon-btn {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 9px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    cursor: pointer;
+  }
+
+  .emp-icon-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .emp-icon-btn:active {
+    transform: scale(0.96);
+    background: var(--win7-button-hover);
+  }
+
+  /* Quick edit row for selected image — 4-col grid */
+  .emp-quick-edit {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-quick-btn {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 6px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 9px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .emp-quick-btn:active {
+    transform: scale(0.96);
+  }
+
+  .emp-quick-btn-danger {
+    background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+    color: #fff;
+    border-color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #8a3408,
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+
+  /* Text editing block (selected text) */
+  .emp-text-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-text-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 2px solid #b9d4ee;
+    background: #fff;
+    color: #0a356d;
+    font-size: 16px; /* 防 iOS zoom */
+    font-family: inherit;
+    outline: none;
+    min-height: 40px;
+  }
+
+  .emp-text-input:focus {
+    border-color: #1f92f8;
+  }
+
+  .emp-text-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .emp-text-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0a356d;
+    white-space: nowrap;
+  }
+
+  .emp-text-range {
+    width: 100%;
+    accent-color: #ff9d00;
+    height: 28px;
+  }
+
+  .emp-text-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0a356d;
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .emp-text-del {
+    min-height: 38px !important;
+    width: 38px;
+    padding: 0;
+  }
+
+  /* === Chunky 4-col row — 仿 QuickMode pick-row-4 大按钮模式 === */
+  .emp-chunky-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-chunky-btn {
+    min-height: 54px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 12px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 2px 8px rgba(74, 112, 159, 0.16);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .emp-chunky-btn:active {
+    transform: scale(0.96);
+    background: var(--win7-button-hover);
+    color: #5e3d00;
+  }
+
+  .emp-chunky-emoji {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .emp-chunky-btn-primary {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+    color: #4c3000;
+    box-shadow:
+      inset 0 0 0 1px #bb7e11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      0 3px 10px rgba(210, 148, 24, 0.32);
+  }
+
+  .emp-chunky-btn-emerald {
+    background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+    border-color: #0a6e50;
+    color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #064c37,
+      inset 0 1px 0 rgba(255, 255, 255, 0.32),
+      0 3px 10px rgba(8, 90, 60, 0.28);
+  }
+}
+
+@media (hover: none) {
+  .emp-layer-thumb:hover,
+  .emp-icon-btn:hover,
+  .emp-quick-btn:hover,
+  .emp-quick-btn-danger:hover {
+    transform: none !important;
+    filter: none !important;
+    background-color: unset !important;
+  }
+}
+
+/* hover-stuck reset for editor-bb-btn */
+@media (hover: none) {
+  .editor-bb-btn:hover,
+  .editor-bb-btn-primary:hover,
+  .editor-bb-btn-danger:hover {
+    transform: none !important;
+    filter: none !important;
+    background: var(--win7-button) !important;
+    color: #173452 !important;
+  }
+  .editor-bb-btn-primary:hover {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%) !important;
+    color: #4c3000 !important;
+  }
+  .editor-bb-btn-danger:hover {
+    background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%) !important;
+    color: #354f6d !important;
+  }
+}
+
+/* Mobile: 6 buttons (存稿/选稿/加字/清空/复制/下载) fit 430 viewport
+   FAB 已删 (display:none). hamburger 已提供 Quick/Drafts nav. dividers mobile 隐藏省空间 */
+@media (max-width: 768px) {
+  .editor-bottom-bar {
+    gap: 4px;
+    padding: 6px 6px;
+    padding-bottom: calc(6px + var(--mobile-safe-bottom));
+    flex-wrap: nowrap;
+    overflow: visible;
+    justify-content: space-between;
+  }
+
+  /* mobile 隐藏 Quick / Drafts nav 组 + dividers (空间不够给 6 个 button) */
+  .editor-bb-group-nav,
+  .editor-bb-divider-nav,
+  .editor-bb-divider {
+    display: none !important;
+  }
+
+  .editor-bb-group {
+    gap: 4px;
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .editor-bb-btn {
+    min-height: 42px;
+    padding: 0 6px;
+    font-size: 10px;
+    gap: 2px;
+    border-radius: 8px;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .editor-bb-btn span {
+    white-space: nowrap;
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .editor-bb-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+    flex-shrink: 0;
+  }
+}
+
+/* === Phase 2.8 细节修 (原 0° 居中 + pick-row-4 label) === */
+
+/* 度数 badge: 强制双向居中 — inline span text-align 在 inline-formatting context 内有时
+   跟 sibling 不完美对齐, 用 inline-flex 直接 vertical+horizontal center */
+.qm-rotation-display {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+}
+
+/* 4-col pick btn 在 iPhone 17 PM (430px - 24 padding - 18 gap)/4 ≈ 97px 列宽,
+   "自制熊猫脸" 5 中文 (font 12 ≈ 60px) + 内边距 + emoji 行高刚好 fit. 不允许 wrap,
+   超长 ellipsis 兜底 (实际 5 字 fit, EN "Custom face" 11 chars ≈ 77 fit, "Smart" fit). */
+@media (max-width: 768px) {
+  .qmm-pick-row-4 .qmm-pick-btn span:not(.qmm-pick-btn-emoji) {
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+    letter-spacing: -0.01em;
+  }
+
+  /* 缩小 emoji + lucide icon 给 label 更多空间 */
+  .qmm-pick-row-4 .qmm-pick-btn .qmm-pick-btn-emoji {
+    font-size: 20px;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+}

@@ -73,21 +73,90 @@ interface Params {
   contrast: number; edgeStrength: number; saturation: number;
   quantize: boolean; jpegLofi: boolean; jpegQ: number; blur: number;
   size: number;
+  purify?: number;            // 0-100, master "净化" slider, SSOT for L2 effective values
 }
 
 const PRESETS: Record<string, Params> = {
   // 经典温和：保留较多细节，适合中等亮度暗调照片
-  'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
   // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
   // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
-  'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024 },
+  'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024, purify: 0 },
   // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
-  'hi-contrast':  { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 70, whitePoint: 190, gamma: 0.7,  contrast: 60, edgeStrength: 60, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024 },
+  'hi-contrast':  { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 70, whitePoint: 190, gamma: 0.7,  contrast: 60, edgeStrength: 60, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
 };
 
-function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, tension = 0.5) {
+// ============================================================
+// Master "净化" mapping v4b — purify (0-100) → 5 个 effective 参数 (SSOT)
+// v1-v3 都不行, v4 引入 padding mean / sigmoid / blend 但 v4 第一版 eraseBand 太窄
+// 残留 polygon 边缘黑线. v4b 用 Chamfer Distance Transform 精确算边距, eraseBand 直接给 meanRadius+12 完全覆盖 boundary effect zone.
+// ============================================================
+interface EffectiveParams {
+  enabled: boolean;
+  adaptiveC: number;
+  meanRadius: number;
+  sharpness: number;
+  blend: number;
+  eraseBand: number;       // 用作 Chamfer DT distance 阈值 (= meanRadius + 12)
+  preBlurR: number;        // v4f-PLUS: pre-blur 抹 wrinkle 保五官 (不动 hair erase/adaptive/blend)
+}
+
+function deriveEffective(purify: number | undefined): EffectiveParams {
+  const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
+  const meanRadius = Math.max(15, Math.round(20 + m * 25));
+  return {
+    enabled: m > 0,
+    adaptiveC: 12 + Math.round(m * 12),
+    meanRadius,
+    sharpness: Math.max(0.5, 4 - m * 3.5),
+    blend: m,
+    eraseBand: meanRadius + 12,
+    // master<30 不 blur (保 image #25 干净); master 50→3px (实测够抹 wrinkle); master 100→7px (强)
+    // 之前 master 50→1px 实测太弱 (Trump image #35 wrinkle 几乎无改善)
+    preBlurR: Math.max(0, Math.round((m - 0.3) * 10)),
+  };
+}
+
+// Chamfer Distance Transform — 精确算 polygon 内每像素到 polygon 边的最短距离
+// 2-pass forward+backward, O(N), 比 boxBlur1D 边距估计准确得多
+function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
+  const dist = new Float32Array(w * h);
+  const INF = 1e9;
+  for (let i = 0; i < w * h; i++) dist[i] = W[i] > 0 ? INF : 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x > 0) d = Math.min(d, dist[i - 1] + 1);
+      if (y > 0) {
+        d = Math.min(d, dist[i - w] + 1);
+        if (x > 0) d = Math.min(d, dist[i - w - 1] + 1.41421356);
+        if (x < w - 1) d = Math.min(d, dist[i - w + 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x < w - 1) d = Math.min(d, dist[i + 1] + 1);
+      if (y < h - 1) {
+        d = Math.min(d, dist[i + w] + 1);
+        if (x < w - 1) d = Math.min(d, dist[i + w + 1] + 1.41421356);
+        if (x > 0) d = Math.min(d, dist[i + w - 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  return dist;
+}
+
+function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
   const n = points.length;
   if (n < 3) {
     points.forEach((p, i) => {
@@ -98,14 +167,44 @@ function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale 
   }
   const pts = points.map(p => ({ x: p.x * scale + offX, y: p.y * scale + offY }));
   ctx.moveTo(pts[0].x, pts[0].y);
+  // Centripetal Catmull-Rom (α=0.5) → cubic Bezier 控制点
+  // 切向量按 √段长 缩放, 远段切向量不会爆炸 → 数学上避免 loop/尖刺
+  // 参考: Yuksel et al., "On the Parameterization of Catmull-Rom Curves" (2011)
   for (let i = 0; i < n; i++) {
     const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
-    const cp1x = p1.x + (p2.x - p0.x) * tension / 6;
-    const cp1y = p1.y + (p2.y - p0.y) * tension / 6;
-    const cp2x = p2.x - (p3.x - p1.x) * tension / 6;
-    const cp2y = p2.y - (p3.y - p1.y) * tension / 6;
+    const d01 = Math.max(1e-6, Math.hypot(p1.x - p0.x, p1.y - p0.y));
+    const d12 = Math.max(1e-6, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+    const d23 = Math.max(1e-6, Math.hypot(p3.x - p2.x, p3.y - p2.y));
+    const t01 = Math.sqrt(d01);
+    const t12 = Math.sqrt(d12);
+    const t23 = Math.sqrt(d23);
+
+    // tangent at p1 (centripetal scaled)
+    const m1x = ((p1.x - p0.x) / t01 - (p2.x - p0.x) / (t01 + t12) + (p2.x - p1.x) / t12) * t12;
+    const m1y = ((p1.y - p0.y) / t01 - (p2.y - p0.y) / (t01 + t12) + (p2.y - p1.y) / t12) * t12;
+    // tangent at p2 (centripetal scaled)
+    const m2x = ((p2.x - p1.x) / t12 - (p3.x - p1.x) / (t12 + t23) + (p3.x - p2.x) / t23) * t12;
+    const m2y = ((p2.y - p1.y) / t12 - (p3.y - p1.y) / (t12 + t23) + (p3.y - p2.y) / t23) * t12;
+
+    const cp1x = p1.x + m1x / 3;
+    const cp1y = p1.y + m1y / 3;
+    const cp2x = p2.x - m2x / 3;
+    const cp2y = p2.y - m2y / 3;
     ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
   }
+}
+
+// crypto.randomUUID 在 iOS Safari + HTTP (非 secure context) 不可用
+// 局域网 dev (http://192.168.50.2:8766/) 上 iPhone 会爆 "crypto.randomUUID is not a function"
+// fallback: Math.random RFC4122 v4 (足够生成 client-side item id, 非密码用途)
+function safeRandomUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try { return crypto.randomUUID(); } catch { /* secure context 例外, 走 fallback */ }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return ((c === 'x' ? r : (r & 0x3) | 0x8)).toString(16);
+  });
 }
 
 function boxBlur1D(src: Uint8ClampedArray, w: number, h: number, r: number): Uint8ClampedArray {
@@ -246,6 +345,12 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   ctx.drawImage(image, offX, offY, iw * scale, ih * scale);
   ctx.restore();
 
+  // eff 在此声明 (SSOT, 派生自 params.purify), 在 L2-v2 块消费
+  // v2 算法核心: 不用 alpha 半透明 (会产生橙色 ring / 眼睛被淡化), 改用:
+  //   - 边缘 N 像素环内: 暗像素 → alpha=0 硬切; 中灰像素 → 涂白融入 panda 白脸
+  //   - 内部: 低对比 (小 std) 中灰区 → 涂白 (抹平肤纹/皱纹根部); 五官 contour 保留
+  const eff = deriveEffective(params.purify);
+
   // alpha 硬阈值
   let imgData = ctx.getImageData(0, 0, out, out);
   let data = imgData.data;
@@ -339,7 +444,11 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
   ctx.putImageData(imgData, 0, 0);
 
   // 暗边修剪
-  if (params.trimDark > 0) {
+  // ⚠️ ROOT CAUSE (找了 N 版): trimDark 把 polygon 内边缘 lum<trimThr 的暗像素 alpha 降到 50-200,
+  // v4 main loop `if (alpha < 200) continue;` 会 skip 这些 mid-alpha 像素 → 它们 RGB 仍是 dark color
+  // → PNG 渲染显示为 "半透明 dark ring" = 用户看到的细黑线 (不管啥图都有, 因为 trimDark 永远 apply).
+  // 修法: v4 启用 (purify>0) 时 SKIP trimDark, 让 v4 graded erase 接管 (它已完全 cover 暗边清理功能).
+  if (params.trimDark > 0 && (params.purify ?? 0) === 0) {
     const w = out, h = out;
     const orig = ctx.getImageData(0, 0, w, h);
     const d2 = orig.data;
@@ -360,6 +469,189 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       d2[di + 3] = Math.round(d2[di + 3] * (1 - fade));
     }
     ctx.putImageData(orig, 0, 0);
+  }
+
+  // === [L2-v4] Bradley adaptive threshold + padding mean + sigmoid + blend ===
+  // 3 个 fundamental 改进 (修 v3 的 face 黑环 / 酒窝 ring / 川普失真):
+  //   1. padding mean: polygon 外用 face 全局均值填充, 单次 boxBlur (无 weighted 除法 bias)
+  //   2. sigmoid soft transition: diff∈[C-12, C+12] 平滑过渡, 不再 hard 0/255 step
+  //   3. blend 跟原图: master 控制混合比, 保留原版细节精髓
+  // 边缘环带: 暗→透明 / 其他→涂白 (固定 full strength, 让 polygon outline 消失)
+  if (eff.enabled) {
+    const w = out, h = out;
+    const cur = ctx.getImageData(0, 0, w, h);
+    const d = cur.data;
+
+    // 0) v4f-PLUS: master-controlled pre-blur — 抹 wrinkle / skin texture / 颗粒 但保五官 contour
+    // 用 polygon mask weighted average padding 防 edge bleed (避免 polygon 外 0 像素拉低 edge 颜色)
+    // 3-pass boxBlur1D ≈ Gaussian. master 50 → r=1 (mild, 不破细五官), master 100 → r=5 (强, wrinkly 老脸)
+    if (eff.preBlurR > 0) {
+      const N0 = w * h;
+      let sR = 0, sG = 0, sB = 0, cP = 0;
+      for (let i = 0; i < N0; i++) {
+        if (d[i * 4 + 3] > 200) {
+          sR += d[i * 4]; sG += d[i * 4 + 1]; sB += d[i * 4 + 2]; cP++;
+        }
+      }
+      if (cP > 0) {
+        const aR = Math.round(sR / cP);
+        const aG = Math.round(sG / cP);
+        const aB = Math.round(sB / cP);
+        const Rs = new Uint8ClampedArray(N0);
+        const Gs0 = new Uint8ClampedArray(N0);
+        const Bs = new Uint8ClampedArray(N0);
+        for (let i = 0; i < N0; i++) {
+          if (d[i * 4 + 3] > 200) {
+            Rs[i] = d[i * 4]; Gs0[i] = d[i * 4 + 1]; Bs[i] = d[i * 4 + 2];
+          } else {
+            Rs[i] = aR; Gs0[i] = aG; Bs[i] = aB;
+          }
+        }
+        let Rb = boxBlur1D(Rs, w, h, eff.preBlurR);
+        let Gb = boxBlur1D(Gs0, w, h, eff.preBlurR);
+        let Bb = boxBlur1D(Bs, w, h, eff.preBlurR);
+        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+        for (let i = 0; i < N0; i++) {
+          if (d[i * 4 + 3] > 200) {
+            d[i * 4] = Rb[i]; d[i * 4 + 1] = Gb[i]; d[i * 4 + 2] = Bb[i];
+          }
+        }
+      }
+    }
+
+    // 1) luma map G + polygon 内全局平均 lum (padding 用)
+    const G = new Uint8ClampedArray(w * h);
+    let sumLum = 0, cnt = 0;
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
+      if (d[di + 3] > 200) { sumLum += G[i]; cnt++; }
+    }
+    if (cnt === 0) {
+      ctx.putImageData(cur, 0, 0);
+      return canvas;
+    }
+    const faceAvg = Math.round(sumLum / cnt);
+
+    // 2) padded luma: polygon 外用 faceAvg 填充 → boxBlur mean 边缘不 biased
+    const lumPad = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      lumPad[i] = d[i * 4 + 3] > 200 ? G[i] : faceAvg;
+    }
+    const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
+
+    // 3) 精确 edge distance via Chamfer DT
+    const W = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] >= 200 ? 255 : 0;
+    const edgeDist = chamferDT(W, w, h);
+    // v4f: erase 跟 adaptive 整段 smoothstep blend, 不再 lumThr 阈值跨越
+    //   dist<eraseDistance: 100% erase (lum=255)
+    //   dist∈[eraseDistance, +fadeDist]: smoothstep blend (1-t)*255 + t*adaptive
+    //   dist>+fadeDist: 100% adaptive
+    // alpha 5px feather (drawImage 缩放 anti-alias 不再产生 dark mix)
+    const eraseDistance = eff.eraseBand;
+    const fadeDist = 80;
+    const alphaFeatherR = 5;
+    const eraseLum = 50;
+
+    // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
+    const sigmoidLut = new Uint8ClampedArray(256);
+    const C = eff.adaptiveC;
+    const sharp = eff.sharpness;
+    for (let i = 0; i < 256; i++) {
+      const diff = i - 128;
+      const t = 1 / (1 + Math.exp(-(diff - C) / sharp)); // 0..1, 1 = full black
+      sigmoidLut[i] = Math.round((1 - t) * 255); // 255 = white, 0 = black
+    }
+
+    const blend = eff.blend;
+
+    // 5) 像素 apply
+    for (let i = 0; i < w * h; i++) {
+      const di = i * 4;
+      if (d[di + 3] < 200) continue; // polygon 外不动
+
+      const lum = G[i];
+      const dist = edgeDist[i];
+
+      // 头发渗入 → alpha=0 透明 (任何接近 polygon edge 的极暗 lum)
+      if (dist < eraseDistance + fadeDist && lum < eraseLum) {
+        d[di + 3] = 0;
+        continue;
+      }
+
+      // Adaptive threshold output (始终计算)
+      const mean = meanG[i];
+      let diff = mean - lum;
+      if (diff < -128) diff = -128;
+      else if (diff > 127) diff = 127;
+      const target = sigmoidLut[(diff + 128) | 0];
+      const adaptiveLum = (blend * target + (1 - blend) * lum) | 0;
+
+      // erase output: 强制 255 (纯白)
+      // Fade factor: erase 权重, smoothstep blend
+      let eraseW;
+      if (dist < eraseDistance) eraseW = 1;
+      else if (dist < eraseDistance + fadeDist) {
+        const t = (dist - eraseDistance) / fadeDist;
+        eraseW = 1 - t * t * (3 - 2 * t);
+      } else eraseW = 0;
+
+      const finalLum = (eraseW * 255 + (1 - eraseW) * adaptiveLum) | 0;
+
+      // alpha feather (sub-5px alpha 渐变, 解决 drawImage 缩放 anti-alias dark mix)
+      let finalAlpha;
+      if (dist < alphaFeatherR) {
+        const t = dist / alphaFeatherR;
+        finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
+      } else finalAlpha = 255;
+
+      d[di] = finalLum; d[di + 1] = finalLum; d[di + 2] = finalLum;
+      d[di + 3] = finalAlpha;
+    }
+    ctx.putImageData(cur, 0, 0);
+
+    // === 1px thin-black-line erosion (post-process) ===
+    // 任何 lum<25 黑像素, 3x3 邻域内有任何 lum>=180 → 变白
+    // 消除残留细线 (e.g. polygon outline residual / 孤立黑点 / 酒窝细 ring)
+    // 真五官 contour > 1px wide + 邻居都是黑色, 不受影响
+    if (eff.enabled) {
+      const cur2 = ctx.getImageData(0, 0, out, out);
+      const d2 = cur2.data;
+      const N = out * out;
+      const lumMap = new Uint8ClampedArray(N);
+      for (let i = 0; i < N; i++) {
+        if (d2[i * 4 + 3] < 200) { lumMap[i] = 255; continue; }
+        lumMap[i] = (0.299 * d2[i * 4] + 0.587 * d2[i * 4 + 1] + 0.114 * d2[i * 4 + 2]) | 0;
+      }
+      const toWhite = new Uint8Array(N);
+      for (let y = 1; y < out - 1; y++) {
+        for (let x = 1; x < out - 1; x++) {
+          const i = y * out + x;
+          if (lumMap[i] >= 25) continue;
+          let hasLight = false;
+          for (let dy = -1; dy <= 1 && !hasLight; dy++) {
+            for (let dx = -1; dx <= 1 && !hasLight; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              if (lumMap[(y + dy) * out + (x + dx)] >= 180) hasLight = true;
+            }
+          }
+          if (hasLight) toWhite[i] = 1;
+        }
+      }
+      for (let i = 0; i < N; i++) {
+        if (toWhite[i]) {
+          const di = i * 4;
+          d2[di] = 255; d2[di + 1] = 255; d2[di + 2] = 255;
+        }
+      }
+      ctx.putImageData(cur2, 0, 0);
+    }
   }
 
   // 不再 fillUnderneath 白底 — 输出透明 PNG（face 椭圆外保持 alpha=0）
@@ -499,7 +791,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
       const features = analyzeFace(img, handles);
       const recommended = autoRoute(features);
 
-      const id = crypto.randomUUID();
+      const id = safeRandomUUID();
       const item: Item = {
         id, name: file.name, image: img, landmarks,
         maskHandles: handles, features, recommended,
@@ -647,7 +939,28 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     }));
   };
   const onOriginalPointerUp = () => {
-    if (draggingHandle >= 0) { setDraggingHandle(-1); pushHistory(true); }
+    if (draggingHandle < 0) return;
+    const dragged = draggingHandle;
+    setDraggingHandle(-1);
+    // 对 dragged 前后 2 个邻居做 5-tap 加权平均 (轻度 0.2), dragged 本身不动
+    // 目的: dragged 周围曲率顺一下, 不破坏用户拖到指定位置的意图; 多次拖也不累积漂移
+    setItems(prev => prev.map(it => {
+      if (it.id !== activeItem?.id) return it;
+      const n = it.maskHandles.length;
+      if (n < 5) return it;
+      const orig = it.maskHandles;
+      const nh = orig.map(h => ({ ...h }));
+      for (const d of [-2, -1, 1, 2]) {
+        const i = ((dragged + d) % n + n) % n;
+        const prevI = (i - 1 + n) % n;
+        const nextI = (i + 1) % n;
+        const avgX = (orig[prevI].x + orig[nextI].x) / 2;
+        const avgY = (orig[prevI].y + orig[nextI].y) / 2;
+        nh[i] = { x: orig[i].x * 0.8 + avgX * 0.2, y: orig[i].y * 0.8 + avgY * 0.2 };
+      }
+      return { ...it, maskHandles: nh };
+    }));
+    pushHistory(true);
   };
   const onOriginalDblClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeItem || activeItem.maskHandles.length <= 8) return;
@@ -863,6 +1176,8 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
                 onChange={v => setParam('trimDark', v)} />
               <SliderRow label={t('smartExtractContrast')} value={params.contrast} min={0} max={100}
                 onChange={v => setParam('contrast', v)} fmt={v => '+' + v} />
+              <SliderRow label={t('smartExtractPurify')} value={params.purify ?? 0} min={0} max={100}
+                onChange={v => setParam('purify', v)} />
             </div>
 
             {/* ===== 预设 (always visible, above advanced) — about-arcade-btn 风格 ===== */}

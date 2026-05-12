@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeme } from '@/context/memecontext';
+import { useIsMobile } from '@/hooks/usemediaquery';
 import { ALL_PANDAS as PANDA_HEADS, ALL_FACES as FACES, getLivePandaFaceOffset, getLiveCaptionOffset, getShellLayering, type Material } from '@/data/materials';
 import { pickRandomText, RANDOM_TEXTS_ZH, RANDOM_TEXTS_EN, ALL_MODES, MODE_LABELS, nextMode, type Mode } from '@/data/quickModeTexts';
 import { makeFavKey } from '@/hooks/useQuickFavs';
@@ -48,6 +49,10 @@ interface QuickModeProps {
 export function QuickMode({ onOpenEditor }: QuickModeProps) {
   const { state, dispatch, t, generateId, draftSlots, saveDraftWithState, clearDraft, renameDraft } = useMeme();
   const lang = state.language;
+  const isMobile = useIsMobile();
+  // mobile-only: panda/face picker bottom sheets
+  const [pandaSheetOpen, setPandaSheetOpen] = useState(false);
+  const [faceSheetOpen, setFaceSheetOpen] = useState(false);
   // DEV: 校准工具改 anchor 时触发 re-render，让预览实时显示新值
   useLiveAnchor();
 
@@ -121,10 +126,14 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     try { localStorage.setItem('pmw-quick-mode', mode); } catch { /* ignore */ }
   }, [mode]);
 
-  // 性能 v2: requestIdleCallback 分批 fetch + decode 预热. 真 decode 后下次 compose 用 cached image,
-  // 避免生产端首次 random 时 decode 占 80-150ms.
-  // ⚠️ 不要在 onload 里跑 getContentBbox — 那会让 202 张图 onload 时同步主线程跑 bbox 扫像素 → 10+s 卡顿.
+  // 性能 v3: requestIdleCallback 分批 HTTP fetch 预热 (不主动 decode).
+  // 之前主动 img.decode() 在 mobile 上把 202 张 PNG 同时 GPU decode → RGBA 累计 ~400 MB →
+  // iPhone Chrome iOS / Safari WebView 内存预算 (~500 MB-1.5 GB) 被打爆 → 渲染进程 crash →
+  // "无法打开此网页" 错误页. mobile 完全跳过预热, desktop 保留但只 HTTP cache 不强制 decode.
+  // 这跟 "修改前可以正常进入" 完全 match — Phase 2 默认 'editor' 不挂 QuickMode → 不跑预热,
+  // Phase 2.5 默认改 'quick' 后预热立刻跑 → OOM.
   useEffect(() => {
+    if (isMobile) return; // mobile 完全跳过预热 — random 按需 load 单张 50-150ms 可接受
     const queue: Array<{ src: string }> = [...PANDA_HEADS, ...FACES];
     let cancelled = false;
     const processChunk = (deadline: IdleDeadline) => {
@@ -133,7 +142,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         const img = new Image();
         img.decoding = 'async';
         img.src = item.src;
-        // 真预 decode → 下次 composeMeme 用 cached HTMLImageElement, 无 decode 开销
+        // desktop 仍主动 decode — 16GB RAM 不 OOM, 保 random 冷路径 ~10ms
         img.decode().catch(() => { /* 失败不阻断 */ });
       }
       if (!cancelled && queue.length > 0) {
@@ -150,7 +159,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       cancelled = true;
       if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(handle);
     };
-  }, []);
+  }, [isMobile]);
 
   const previewRef = useRef<HTMLDivElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
@@ -483,7 +492,10 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   }}
                   // transform 用 displayCaptionOffset (旧值保持到 onRendered 才切)
                   // 不再加 opacity 抖动 → 旧 panda 始终 1.0 直到新 panda 真出现
-                  style={{ transform: `translateY(${displayCaptionOffset}px)` }}
+                  // px → % 修 mobile 校准: displayCaptionOffset 是 350-coord 绝对值, mobile
+                  // frame ~225px 跟 desktop 350px 大小不同 → 同 px 相对偏移不一致 ("校准错位").
+                  // 用 % 相对 img 自身高度, 等比缩放, mobile/desktop 视觉一致.
+                  style={{ transform: `translateY(${(displayCaptionOffset / 350 * 100).toFixed(3)}%)` }}
                 />
               </div>
               {displayedText && (
@@ -495,7 +507,104 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </div>
           </div>
 
-          {/* 操作按钮组 */}
+          {/* Mobile-only control stack — Phase 2.7 重排:
+              JSX 顺序: preview / action(模式+随机) / caption / pick-row-4(熊猫/脸/自制/提取) / customFace-clear
+              视觉顺序 (CSS order): preview → transform(.about-banner-card 卡, 见 main 末尾) → action → caption → pick → clear
+              目标: 一屏到底, sticky bottom 走 (复制 / 下载 / ♥ / 编辑器)  */}
+          {isMobile && (
+            <>
+              {/* 行 2: 模式 chip + 🎲 随机生图 */}
+              <div className="qmm-action-row">
+                <button
+                  className="qmm-mode-chip"
+                  onClick={cycleMode}
+                  title={lang === 'zh' ? '点击切换模式 (循环)' : 'Tap to cycle mode'}
+                  type="button"
+                >
+                  <span key={cycleKey} className="qmm-mode-chip-icon" aria-hidden="true">
+                    <RefreshCw size={12} strokeWidth={2.8} />
+                  </span>
+                  <span>{lang === 'zh' ? '模式' : 'Mode'}:</span>
+                  <span>{lang === 'zh' ? MODE_LABELS[mode].zh : MODE_LABELS[mode].en}</span>
+                </button>
+                <button onClick={onRandomize} className="qmm-random-btn" type="button">
+                  <span className="qmm-pick-btn-emoji">🎲</span>
+                  <span>{lang === 'zh' ? '随机生图' : 'Random'}</span>
+                </button>
+              </div>
+
+              {/* Caption card (textarea + 换文字 / 中En / font) — rows={1} 紧凑 + controls 单行 */}
+              <div className="qmm-caption-card">
+                <textarea
+                  value={text}
+                  onChange={(e) => setTextSynced(e.target.value)}
+                  placeholder={t('quickTextPlaceholder')}
+                  rows={1}
+                  className="qmm-caption-textarea"
+                />
+                <div className="qmm-caption-controls">
+                  <button onClick={onRandomText} className="qmm-reroll-btn" type="button">
+                    <Wand2 size={14} /> {lang === 'zh' ? '换文字' : 'Reroll'}
+                  </button>
+                  <div className="qmm-textlang-group" role="group" aria-label={lang === 'zh' ? '文字语言' : 'Caption language'}>
+                    {TEXT_LANG_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => handleSetTextLang(opt.id)}
+                        className={`qmm-textlang-btn-m ${textLang === opt.id ? 'qmm-textlang-btn-m-on' : ''}`}
+                        type="button"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <select
+                    value={fontKey}
+                    onChange={(e) => setFontKey(e.target.value)}
+                    className="qmm-font-select-m"
+                    aria-label={lang === 'zh' ? '字体' : 'Font'}
+                  >
+                    {FONT_OPTIONS.map((f) => (
+                      <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Pick row 4-col: 熊猫 / 脸 / 自制 / 提取 (替代原 3-col + upload row, 节省一行) */}
+              <div className="qmm-pick-row qmm-pick-row-4">
+                <button onClick={() => setPandaSheetOpen(true)} className="qmm-pick-btn" type="button">
+                  <span className="qmm-pick-btn-emoji">🐼</span>
+                  <span>{lang === 'zh' ? '选熊猫头' : 'Pandas'}</span>
+                </button>
+                <button onClick={() => setFaceSheetOpen(true)} className="qmm-pick-btn" type="button">
+                  <span className="qmm-pick-btn-emoji">😂</span>
+                  <span>{lang === 'zh' ? '选人脸' : 'Faces'}</span>
+                </button>
+                <button onClick={() => setCustomFaceModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-photo" type="button">
+                  <Camera size={18} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '自制熊猫脸' : 'Custom face'}</span>
+                </button>
+                <button onClick={() => setSmartModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-emerald" type="button">
+                  <Sparkles size={18} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '智能提取' : 'Smart'}</span>
+                </button>
+              </div>
+
+              {customFace && (
+                <button
+                  onClick={() => setCustomFace(null)}
+                  className="qmm-clear-custom-btn"
+                  type="button"
+                >
+                  <X size={14} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
+                </button>
+              )}
+            </>
+          )}
+
+          {/* 操作按钮组 (desktop only) — mobile 走 sticky bottom bar */}
+          {!isMobile && (
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
             <button onClick={onCopy} className="about-arcade-btn">
               <Copy size={14} /> {t('quickCopy')}
@@ -521,6 +630,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               {t('quickToEditor')} <ArrowRight size={14} />
             </button>
           </div>
+          )}
 
           {/* Transform row 米白卡 — 宽度与上方 preview (maxWidth: 460) 对齐 */}
           <div
@@ -558,7 +668,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
           </div>
         </main>
 
-        {/* ===== 右栏: 操作 → 上传/提取 → 文字（user 指定顺序） ===== */}
+        {/* ===== 右栏: 操作 → 上传/提取 → 文字 (desktop) — mobile 走 main 内 + sticky bar ===== */}
+        {!isMobile && (
         <aside style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <section className="about-panel">
             <div className="about-panel-title">
@@ -701,7 +812,111 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </div>
           </section>
         </aside>
+        )}
       </div>
+
+      {/* Mobile-only: sticky bottom action bar + panda/face picker bottom sheets */}
+      {isMobile && (
+        <>
+          <div className="quickmode-mobile-bottom" role="toolbar" aria-label={lang === 'zh' ? '操作栏' : 'Actions'}>
+            <button onClick={onCopy} className="quickmode-mobile-bottom-btn" type="button">
+              <Copy size={16} strokeWidth={2.2} />
+              <span style={{ marginLeft: 4 }}>{t('quickCopy')}</span>
+            </button>
+            <button onClick={onDownload} className="quickmode-mobile-bottom-btn" type="button">
+              <Download size={16} strokeWidth={2.2} />
+              <span style={{ marginLeft: 4 }}>{t('quickDownload')}</span>
+            </button>
+            <button
+              onClick={onFav}
+              className={`quickmode-mobile-bottom-btn ${isFavored ? 'quickmode-mobile-bottom-btn-active' : ''}`}
+              type="button"
+              aria-pressed={isFavored}
+              aria-label={lang === 'zh' ? '收藏' : 'Favorite'}
+            >
+              <Heart size={18} strokeWidth={2.2} fill={isFavored ? '#fff' : 'none'} />
+            </button>
+            <button
+              onClick={onToEditor}
+              className="quickmode-mobile-bottom-btn quickmode-mobile-bottom-btn-primary"
+              type="button"
+            >
+              <span>{lang === 'zh' ? '编辑器' : 'Editor'}</span>
+              <ArrowRight size={16} strokeWidth={2.4} />
+            </button>
+          </div>
+
+          {/* Panda picker sheet */}
+          <div
+            className={`bottom-sheet-overlay ${pandaSheetOpen ? 'open' : ''}`}
+            onClick={() => setPandaSheetOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            className={`bottom-sheet ${pandaSheetOpen ? 'open' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={lang === 'zh' ? '选熊猫头' : 'Pick panda'}
+          >
+            <div className="bottom-sheet-header">
+              <span className="bottom-sheet-title">🐼 {t('quickPickPanda')} · {PANDA_HEADS.length}</span>
+              <button className="bottom-sheet-close" onClick={() => setPandaSheetOpen(false)} aria-label="Close" type="button">
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+            <div className="bottom-sheet-body">
+              <div className="qmm-picker-grid">
+                {PANDA_HEADS.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => { setPandaId(it.id); setPandaSheetOpen(false); }}
+                    className={`qmm-picker-item ${it.id === pandaId ? 'qmm-picker-item-active' : ''}`}
+                    title={lang === 'zh' ? it.labelCn : it.labelEn}
+                    type="button"
+                  >
+                    <img src={it.src} alt={it.id} loading="lazy" draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Face picker sheet */}
+          <div
+            className={`bottom-sheet-overlay ${faceSheetOpen ? 'open' : ''}`}
+            onClick={() => setFaceSheetOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            className={`bottom-sheet ${faceSheetOpen ? 'open' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={lang === 'zh' ? '选脸' : 'Pick face'}
+          >
+            <div className="bottom-sheet-header">
+              <span className="bottom-sheet-title">😂 {t('quickPickFace')} · {FACES.length}</span>
+              <button className="bottom-sheet-close" onClick={() => setFaceSheetOpen(false)} aria-label="Close" type="button">
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+            <div className="bottom-sheet-body">
+              <div className="qmm-picker-grid">
+                {FACES.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => { setFaceId(it.id); setCustomFace(null); setFaceSheetOpen(false); }}
+                    className={`qmm-picker-item ${(it.id === faceId && !customFace) ? 'qmm-picker-item-active' : ''}`}
+                    title={lang === 'zh' ? it.labelCn : it.labelEn}
+                    type="button"
+                  >
+                    <img src={it.src} alt={it.id} loading="lazy" draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Modals — onConfirm 注入 face 到 quick state */}
       <PhotoCropModal

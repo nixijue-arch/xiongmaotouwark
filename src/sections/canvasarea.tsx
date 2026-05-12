@@ -360,6 +360,7 @@ function DraggableText({ element, isSelected, onSelect }: {
   const inputRef = useRef<HTMLInputElement>(null);
   const { state, dispatch } = useMeme();
   const rh = useTextResizeHandler(element);
+  const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(element.text);
 
@@ -383,6 +384,19 @@ function DraggableText({ element, isSelected, onSelect }: {
     }
     setIsEditing(false);
   }, [dispatch, editText, element.id, element.text]);
+
+  // mobile 用 single tap (selected → editing) 替代双击
+  // 第一次 tap = select, 第二次 tap (已 selected) = 进 inline 编辑
+  // 桌面继续走双击 (避免误触)
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isMobile && isSelected && !isEditing) {
+      setEditText(element.text);
+      setIsEditing(true);
+      return;
+    }
+    onSelect();
+  };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -417,8 +431,8 @@ function DraggableText({ element, isSelected, onSelect }: {
         ref={nodeRef}
         className="absolute select-none"
         style={{ zIndex: isSelected ? 50 : element.zIndex, cursor: isEditing ? 'text' : 'move' }}
-        onClick={(e) => { e.stopPropagation(); onSelect(); }}
-        onDoubleClick={handleDoubleClick}
+        onClick={handleClick}
+        onDoubleClick={isMobile ? undefined : handleDoubleClick}
       >
         {isEditing ? (
           <input
@@ -453,38 +467,43 @@ function DraggableText({ element, isSelected, onSelect }: {
         {isSelected && !isEditing && (
           <>
             <div className="absolute border-2 border-dashed pointer-events-none" style={{ borderColor: '#FF5E00', inset: -4, zIndex: 5 }} />
-            <div
-              className="absolute left-1/2 -translate-x-1/2 text-[9px] font-medium whitespace-nowrap pointer-events-none"
-              style={{ bottom: -18, color: '#FF5E00' }}
-            >
-              {state.language === 'zh' ? '双击编辑' : 'Double-click to edit'}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
-                dispatch({ type: 'SELECT_ELEMENT', id: null });
-              }}
-              className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
-              style={{
-                width: 18, height: 18,
-                top: -12, right: -12,
-                backgroundColor: '#EF4444',
-                zIndex: 20,
-                border: '2px solid #fff',
-              }}
-              title={state.language === 'zh' ? '删除' : 'Delete'}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-            <ResizeHandle dir="nw" onStart={rh} />
-            <ResizeHandle dir="n"  onStart={rh} />
-            <ResizeHandle dir="ne" onStart={rh} />
-            <ResizeHandle dir="w"  onStart={rh} />
-            <ResizeHandle dir="e"  onStart={rh} />
-            <ResizeHandle dir="sw" onStart={rh} />
-            <ResizeHandle dir="s"  onStart={rh} />
-            <ResizeHandle dir="se" onStart={rh} />
+            {/* mobile 不显示 "双击编辑" 提示 (单击就进编辑) + 不显示画布删除按钮 (用 EditorMobilePanel 替代) */}
+            {!isMobile && (
+              <>
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 text-[9px] font-medium whitespace-nowrap pointer-events-none"
+                  style={{ bottom: -18, color: '#FF5E00' }}
+                >
+                  {state.language === 'zh' ? '双击编辑' : 'Double-click to edit'}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
+                    dispatch({ type: 'SELECT_ELEMENT', id: null });
+                  }}
+                  className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
+                  style={{
+                    width: 18, height: 18,
+                    top: -12, right: -12,
+                    backgroundColor: '#EF4444',
+                    zIndex: 20,
+                    border: '2px solid #fff',
+                  }}
+                  title={state.language === 'zh' ? '删除' : 'Delete'}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+                <ResizeHandle dir="nw" onStart={rh} />
+                <ResizeHandle dir="n"  onStart={rh} />
+                <ResizeHandle dir="ne" onStart={rh} />
+                <ResizeHandle dir="w"  onStart={rh} />
+                <ResizeHandle dir="e"  onStart={rh} />
+                <ResizeHandle dir="sw" onStart={rh} />
+                <ResizeHandle dir="s"  onStart={rh} />
+                <ResizeHandle dir="se" onStart={rh} />
+              </>
+            )}
           </>
         )}
       </div>
@@ -845,8 +864,8 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   return (
     <div
       ref={stageRef}
-      className="flex flex-col items-center justify-center flex-1 overflow-y-auto p-3 md:p-4 gap-3"
-      style={isMobile ? { paddingBottom: '60px' } : {}}>
+      className="flex flex-col items-center justify-start flex-1 overflow-y-auto p-3 md:p-4 gap-3"
+      style={isMobile ? { paddingBottom: '12px', paddingTop: '12px' } : { paddingTop: '12px' }}>
       <div
         ref={canvasWrapperRef}
         className="canvas-outer"

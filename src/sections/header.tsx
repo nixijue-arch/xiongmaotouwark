@@ -1,11 +1,13 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText, Menu } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '@/app';
+import { MobileNav } from '@/components/mobilenav';
 
 export function Header({ page, setPage }: { page: Page; setPage: (page: Page) => void }) {
   const { state, dispatch, t } = useMeme();
   const [copied, setCopied] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const activeLinkClass = 'header-link header-link-active';
 
   const switchLang = () => {
@@ -33,6 +35,16 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
   return (
     <header className="header-bar">
       <div className="header-left">
+        {/* Mobile-only hamburger — 桌面 CSS 隐藏 (.mobile-hamburger display:none). 放在 header-left 首位是
+            为了 mobile grid 上自然落到第一列 (左) */}
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          className="mobile-hamburger"
+          aria-label={state.language === 'zh' ? '打开菜单' : 'Open menu'}
+          type="button"
+        >
+          <Menu size={20} strokeWidth={2.4} />
+        </button>
         <div className="brand-icon">
           <img src="/site-logo.png" alt="Site logo" className="brand-logo-image" />
         </div>
@@ -170,6 +182,13 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
           <span className="lang-label">{t('switchLang')}</span>
         </button>
       </div>
+
+      <MobileNav
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        page={page}
+        setPage={setPage}
+      />
     </header>
   );
 }

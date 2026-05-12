@@ -66,8 +66,16 @@
 }
 
 @layer base {
+  /* 强制 light scheme — iOS Safari 系统 dark mode 时不要应用 dark UA 默认色 */
+  :root {
+    color-scheme: only light;
+  }
   * {
     @apply border-border;
+  }
+  html, body {
+    /* iOS Safari 兜底 light bg — 防 React 还没 mount 时看到 dark/transparent */
+    background-color: #b9e1ff;
   }
   body {
     @apply bg-background text-foreground;

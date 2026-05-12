@@ -4,12 +4,15 @@ import { Header } from '@/sections/header';
 import { LeftSidebar } from '@/sections/leftsidebar';
 import { RightSidebar } from '@/sections/rightsidebar';
 import { CanvasArea } from '@/sections/canvasarea';
+import { EditorBottomBar } from '@/components/editorbottombar';
+import { EditorMobilePanel } from '@/components/editormobilepanel';
 import { Museum } from '@/sections/museum';
 import { AboutPanda } from '@/sections/aboutpanda';
 import { QuickMode } from '@/sections/quickmode';
 import { Collection } from '@/sections/collection';
 import { Toaster } from 'sonner';
 import './app.css';
+import './sections/mobile.css';
 
 // DEV-only 工具页 — lazy + DEV conditional import 让 prod build 完全 tree-shake
 const CalibrateAnchorLazy = import.meta.env.DEV
@@ -35,23 +38,35 @@ function App() {
         return p as Page;
       }
     }
-    return 'editor';
+    return 'quick';
   });
+
+  // Mobile scroll fix: page='quick'/'collection'/'museum'/'about' 这些"自然滚动"页加 page-scroll
+  // class, mobile.css 让 .app-shell 改成 overflow visible + height auto → 走 iOS body-level scroll
+  // → URL bar 滚动时自动收起释放视觉空间. 'editor' 等保持 fixed height + inner scroll (canvas 计算依赖)
+  const pageScroll =
+    page === 'quick' || page === 'collection' || page === 'museum' || page === 'about';
 
   return (
     <MemeProvider>
-      <div className="app-shell h-screen w-screen flex flex-col overflow-hidden">
+      <div
+        className={`app-shell h-screen w-screen flex flex-col overflow-hidden ${pageScroll ? 'app-shell-page-scroll' : ''}`}
+      >
         <Header page={page} setPage={setPage} />
         {page === 'quick' ? (
           <QuickMode onOpenEditor={() => setPage('editor')} />
         ) : page === 'collection' ? (
           <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
         ) : page === 'editor' ? (
-          <div className="editor-layout flex-1 flex overflow-hidden main-content">
-            <LeftSidebar />
-            <CanvasArea canvasRef={canvasRef} />
-            <RightSidebar canvasRef={canvasRef} />
-          </div>
+          <>
+            <div className="editor-layout flex-1 flex overflow-hidden main-content">
+              <LeftSidebar />
+              <CanvasArea canvasRef={canvasRef} />
+              <RightSidebar canvasRef={canvasRef} />
+            </div>
+            <EditorMobilePanel />
+            <EditorBottomBar canvasRef={canvasRef} setPage={setPage} />
+          </>
         ) : page === 'museum' ? (
           <Museum onBack={() => setPage('editor')} setPage={setPage} />
         ) : page === 'calibrate' && CalibrateAnchorLazy ? (
