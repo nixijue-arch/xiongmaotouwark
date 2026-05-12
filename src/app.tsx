@@ -5,6 +5,7 @@ import { LeftSidebar } from '@/sections/leftsidebar';
 import { RightSidebar } from '@/sections/rightsidebar';
 import { CanvasArea } from '@/sections/canvasarea';
 import { EditorBottomBar } from '@/components/editorbottombar';
+import { EditorMobilePanel } from '@/components/editormobilepanel';
 import { Museum } from '@/sections/museum';
 import { AboutPanda } from '@/sections/aboutpanda';
 import { QuickMode } from '@/sections/quickmode';
@@ -63,6 +64,7 @@ function App() {
               <CanvasArea canvasRef={canvasRef} />
               <RightSidebar canvasRef={canvasRef} />
             </div>
+            <EditorMobilePanel />
             <EditorBottomBar canvasRef={canvasRef} setPage={setPage} />
           </>
         ) : page === 'museum' ? (

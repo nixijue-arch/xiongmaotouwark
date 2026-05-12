@@ -1,5 +1,49 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react';
+import { toast } from 'sonner';
 import { translations, type Lang, type TranslationKey } from './translations';
+
+// quota-aware localStorage persist for draftSlots — 超 quota 时自动 evict 最旧 draft 重试
+// 浏览器 localStorage ~5 MB; 含 dataURL 的 draft 可能数百 KB, 几十张就爆
+function safePersistDraftSlots(
+  storageKey: string,
+  slots: DraftSlot[],
+): { saved: DraftSlot[]; evicted: number } {
+  if (typeof window === 'undefined') return { saved: slots, evicted: 0 };
+  let candidate = [...slots];
+  let evicted = 0;
+  while (candidate.length > 0) {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(candidate));
+      return { saved: candidate, evicted };
+    } catch (e: unknown) {
+      const err = e as { name?: string; code?: number; message?: string };
+      const isQuota =
+        err?.name === 'QuotaExceededError' ||
+        err?.code === 22 ||
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('quota')) ||
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('exceeded'));
+      if (!isQuota) {
+        // 其他错误 — log + 放弃 (不抛, 避免 Promise rejection 冒泡到 user)
+        // eslint-disable-next-line no-console
+        console.error('[memecontext] persistDraftSlots non-quota error:', e);
+        return { saved: candidate, evicted };
+      }
+      // 删最旧 draft (updatedAt 最小) — slots 是 caller 顺序排列, 不一定是 updatedAt 序
+      const oldestIdx = candidate.reduce((minIdx, s, i, arr) => {
+        const cur = s.updatedAt ?? 0;
+        const min = arr[minIdx].updatedAt ?? 0;
+        return cur < min ? i : minIdx;
+      }, 0);
+      candidate = candidate.filter((_, i) => i !== oldestIdx);
+      evicted++;
+    }
+  }
+  // 全删光仍失败 → 清 key
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch { /* ignore */ }
+  return { saved: [], evicted };
+}
 
 export interface CanvasElement {
   id: string;
@@ -362,11 +406,23 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   const [draftSlots, setDraftSlots] = React.useState<DraftSlot[]>(() => loadDraftSlots());
 
   const persistDraftSlots = useCallback((nextDraftSlots: DraftSlot[]) => {
-    setDraftSlots(nextDraftSlots);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(nextDraftSlots));
+    if (typeof window === 'undefined') {
+      setDraftSlots(nextDraftSlots);
+      return;
     }
-  }, []);
+    // quota-safe: 超 5MB 时自动 LRU evict 最旧 draft 重试 → 防 QuotaExceededError
+    // 之前直接 setItem 会抛 Promise rejection 让 user "无法存草图"
+    const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, nextDraftSlots);
+    setDraftSlots(saved);
+    if (evicted > 0) {
+      toast.info(
+        state.language === 'zh'
+          ? `存储已满, 自动删除 ${evicted} 张最旧草图`
+          : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
+        { duration: 4000 }
+      );
+    }
+  }, [state.language]);
 
   const saveDraft = useCallback(async (slotId: string) => {
     const previewUrl = await renderDraftPreview(state.elements);

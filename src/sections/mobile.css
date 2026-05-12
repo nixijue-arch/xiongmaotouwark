@@ -656,7 +656,7 @@
   }
 }
 
-/* === Mobile FAB (现有 leftsidebar/rightsidebar 用) 改 Win7 === */
+/* === Mobile FAB (现有 leftsidebar/rightsidebar 用) 改 Win7 + 抬高让位 inline panel === */
 @media (max-width: 768px) {
   .mobile-fab-left,
   .mobile-fab-right {
@@ -669,7 +669,9 @@
     box-shadow:
       inset 0 0 0 2px rgba(255, 255, 255, 0.28),
       0 6px 18px rgba(7, 48, 95, 0.42) !important;
-    bottom: calc(20px + var(--mobile-safe-bottom)) !important;
+    /* 抬高让位 EditorMobilePanel (~120) + EditorBottomBar (~70) + safe-bottom */
+    bottom: calc(var(--mobile-safe-bottom) + 200px) !important;
+    z-index: 95 !important;
   }
 
   .mobile-fab-left:active,
@@ -1837,6 +1839,235 @@
   box-shadow:
     inset 0 0 0 1px #8a3408,
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* ============================================================
+ * EditorMobilePanel — 编辑器 mobile inline 工具区 (canvas 跟 BottomBar 之间)
+ * mini layer strip (横排 thumb + ↑↓ reorder) + 选中 quick edit
+ * 桌面 display: none, mobile @768 显示
+ * ============================================================ */
+
+.emp-root { display: none; }
+
+@media (max-width: 768px) {
+  .emp-root {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 12px;
+    background:
+      linear-gradient(180deg, rgba(245, 250, 255, 0.96) 0%, rgba(225, 240, 252, 0.96) 100%);
+    border-top: 1px solid rgba(45, 113, 171, 0.32);
+    flex-shrink: 0;
+    min-height: 64px;
+    z-index: 40;
+  }
+
+  .emp-empty-hint,
+  .emp-hint {
+    text-align: center;
+    color: #4c6c91;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 6px;
+  }
+
+  .emp-layers {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    /* 左右 padding 给 FAB 让位 (FAB 抬到 panel 之上, 但 panel scroll 也可能 visual overlap) */
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .emp-layer-thumb {
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+    background: #fff;
+    border: 2px solid rgba(10, 78, 151, 0.25);
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 2px;
+    color: #173452;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(7, 48, 95, 0.1);
+  }
+
+  .emp-layer-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+
+  .emp-layer-thumb-on {
+    border-color: #ff5e00;
+    border-width: 2.5px;
+    box-shadow:
+      0 0 0 2px rgba(255, 94, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  }
+
+  .emp-layer-thumb:active {
+    transform: scale(0.94);
+  }
+
+  .emp-divider-v {
+    width: 1px;
+    height: 32px;
+    background: rgba(45, 113, 171, 0.32);
+    flex-shrink: 0;
+  }
+
+  .emp-icon-btn {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 9px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    cursor: pointer;
+  }
+
+  .emp-icon-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .emp-icon-btn:active {
+    transform: scale(0.96);
+    background: var(--win7-button-hover);
+  }
+
+  /* Quick edit row for selected image — 4-col grid */
+  .emp-quick-edit {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-quick-btn {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 6px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 9px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .emp-quick-btn:active {
+    transform: scale(0.96);
+  }
+
+  .emp-quick-btn-danger {
+    background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+    color: #fff;
+    border-color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #8a3408,
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+
+  /* Text editing block (selected text) */
+  .emp-text-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-text-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 2px solid #b9d4ee;
+    background: #fff;
+    color: #0a356d;
+    font-size: 16px; /* 防 iOS zoom */
+    font-family: inherit;
+    outline: none;
+    min-height: 40px;
+  }
+
+  .emp-text-input:focus {
+    border-color: #1f92f8;
+  }
+
+  .emp-text-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .emp-text-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0a356d;
+    white-space: nowrap;
+  }
+
+  .emp-text-range {
+    width: 100%;
+    accent-color: #ff9d00;
+    height: 28px;
+  }
+
+  .emp-text-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0a356d;
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .emp-text-del {
+    min-height: 38px !important;
+    width: 38px;
+    padding: 0;
+  }
+}
+
+@media (hover: none) {
+  .emp-layer-thumb:hover,
+  .emp-icon-btn:hover,
+  .emp-quick-btn:hover,
+  .emp-quick-btn-danger:hover {
+    transform: none !important;
+    filter: none !important;
+    background-color: unset !important;
+  }
 }
 
 /* hover-stuck reset for editor-bb-btn */
