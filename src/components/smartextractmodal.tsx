@@ -89,32 +89,67 @@ const PRESETS: Record<string, Params> = {
 };
 
 // ============================================================
-// Master "净化" mapping v4 — purify (0-100) → 5 个 effective 参数 (SSOT)
-// v1 (alpha 半透明) / v2 (edge erase + whiten) / v3 (hard adaptive threshold) 都不行 →
-// v4 = adaptive threshold (Bradley/Wellner) + 3 个 fundamental 改进:
-//   1. padding mean: polygon 外用 face 全局均值填充 → 边缘 mean 无 bias (修 v3 face 黑环)
-//   2. sigmoid 软过渡: 不再 hard 0/255 step, 让 diff 接近 C 的像素平滑过渡 (修 v3 酒窝/粗边 ring)
-//   3. blend 跟原图: master=50 → 50/50 mix, master=100 → 纯 binary (保留原版精髓, 修 v3 川普失真)
+// Master "净化" mapping v4b — purify (0-100) → 5 个 effective 参数 (SSOT)
+// v1-v3 都不行, v4 引入 padding mean / sigmoid / blend 但 v4 第一版 eraseBand 太窄
+// 残留 polygon 边缘黑线. v4b 用 Chamfer Distance Transform 精确算边距, eraseBand 直接给 meanRadius+12 完全覆盖 boundary effect zone.
 // ============================================================
 interface EffectiveParams {
-  enabled: boolean;        // master > 0 才启用 v4, =0 时整段短路
-  adaptiveC: number;       // 12-24, lum < mean - C 判黑; 越大 = 抹掉越多 mid-contrast 细节
-  meanRadius: number;      // 20-50 px, local mean 半径; 比 v3 小, 边缘 bias 更可控
-  sharpness: number;       // 4 → 0.5, sigmoid 锐度; 高 master 接近 hard step
-  blend: number;           // 0..1, 跟原图 blend 比例; master 主控 (保留原版精髓)
-  eraseBand: number;       // 8-20 px, polygon 边缘统一涂白环带 (融入 panda 不出 outline)
+  enabled: boolean;
+  adaptiveC: number;
+  meanRadius: number;
+  sharpness: number;
+  blend: number;
+  eraseBand: number;       // 用作 Chamfer DT distance 阈值 (= meanRadius + 12)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
   const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
+  const meanRadius = Math.max(15, Math.round(20 + m * 25));
   return {
     enabled: m > 0,
     adaptiveC: 12 + Math.round(m * 12),
-    meanRadius: Math.max(15, Math.round(20 + m * 30)),
+    meanRadius,
     sharpness: Math.max(0.5, 4 - m * 3.5),
     blend: m,
-    eraseBand: Math.max(6, Math.round(8 + m * 12)),
+    eraseBand: meanRadius + 12,
   };
+}
+
+// Chamfer Distance Transform — 精确算 polygon 内每像素到 polygon 边的最短距离
+// 2-pass forward+backward, O(N), 比 boxBlur1D 边距估计准确得多
+function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
+  const dist = new Float32Array(w * h);
+  const INF = 1e9;
+  for (let i = 0; i < w * h; i++) dist[i] = W[i] > 0 ? INF : 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x > 0) d = Math.min(d, dist[i - 1] + 1);
+      if (y > 0) {
+        d = Math.min(d, dist[i - w] + 1);
+        if (x > 0) d = Math.min(d, dist[i - w - 1] + 1.41421356);
+        if (x < w - 1) d = Math.min(d, dist[i - w + 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x < w - 1) d = Math.min(d, dist[i + 1] + 1);
+      if (y < h - 1) {
+        d = Math.min(d, dist[i + w] + 1);
+        if (x < w - 1) d = Math.min(d, dist[i + w + 1] + 1.41421356);
+        if (x > 0) d = Math.min(d, dist[i + w - 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  return dist;
 }
 
 function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
@@ -460,11 +495,11 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     }
     const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
 
-    // 3) edge distance (用 binary mask boxBlur)
+    // 3) 精确 edge distance via Chamfer DT (修 v4 第一版 boxBlur 边距估不准的 outline 残留)
     const W = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] > 200 ? 255 : 0;
-    const edgeDist = boxBlur1D(W, w, h, eff.eraseBand);
-    const edgeThr = 240;
+    const edgeDist = chamferDT(W, w, h);
+    const eraseDistance = eff.eraseBand; // px, 精确距离阈值
     const eraseLum = 50;
 
     // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
@@ -485,7 +520,7 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       if (d[di + 3] < 200) continue; // polygon 外不动
 
       const lum = G[i];
-      const edgeNear = edgeDist[i] < edgeThr;
+      const edgeNear = edgeDist[i] < eraseDistance;
 
       if (edgeNear) {
         // 边缘环带 (固定 full strength, 让 polygon outline 100% 消失)
@@ -511,6 +546,43 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       d[di + 2] = newL;
     }
     ctx.putImageData(cur, 0, 0);
+
+    // === 1px thin-black-line erosion (post-process) ===
+    // 任何 lum<25 黑像素, 3x3 邻域内有任何 lum>=180 → 变白
+    // 消除残留细线 (e.g. polygon outline residual / 孤立黑点 / 酒窝细 ring)
+    // 真五官 contour > 1px wide + 邻居都是黑色, 不受影响
+    if (eff.enabled) {
+      const cur2 = ctx.getImageData(0, 0, out, out);
+      const d2 = cur2.data;
+      const N = out * out;
+      const lumMap = new Uint8ClampedArray(N);
+      for (let i = 0; i < N; i++) {
+        if (d2[i * 4 + 3] < 200) { lumMap[i] = 255; continue; }
+        lumMap[i] = (0.299 * d2[i * 4] + 0.587 * d2[i * 4 + 1] + 0.114 * d2[i * 4 + 2]) | 0;
+      }
+      const toWhite = new Uint8Array(N);
+      for (let y = 1; y < out - 1; y++) {
+        for (let x = 1; x < out - 1; x++) {
+          const i = y * out + x;
+          if (lumMap[i] >= 25) continue;
+          let hasLight = false;
+          for (let dy = -1; dy <= 1 && !hasLight; dy++) {
+            for (let dx = -1; dx <= 1 && !hasLight; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              if (lumMap[(y + dy) * out + (x + dx)] >= 180) hasLight = true;
+            }
+          }
+          if (hasLight) toWhite[i] = 1;
+        }
+      }
+      for (let i = 0; i < N; i++) {
+        if (toWhite[i]) {
+          const di = i * 4;
+          d2[di] = 255; d2[di + 1] = 255; d2[di + 2] = 255;
+        }
+      }
+      ctx.putImageData(cur2, 0, 0);
+    }
   }
 
   // 不再 fillUnderneath 白底 — 输出透明 PNG（face 椭圆外保持 alpha=0）
