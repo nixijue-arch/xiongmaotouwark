@@ -43,6 +43,7 @@
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "html2canvas": "^1.4.1",
+    "idb-keyval": "^6.2.2",
     "input-otp": "^1.4.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",

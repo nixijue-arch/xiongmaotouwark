@@ -1,48 +1,20 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react';
-import { toast } from 'sonner';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 import { translations, type Lang, type TranslationKey } from './translations';
 
-// quota-aware localStorage persist for draftSlots — 超 quota 时自动 evict 最旧 draft 重试
-// 浏览器 localStorage ~5 MB; 含 dataURL 的 draft 可能数百 KB, 几十张就爆
-function safePersistDraftSlots(
-  storageKey: string,
-  slots: DraftSlot[],
-): { saved: DraftSlot[]; evicted: number } {
-  if (typeof window === 'undefined') return { saved: slots, evicted: 0 };
-  let candidate = [...slots];
-  let evicted = 0;
-  while (candidate.length > 0) {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(candidate));
-      return { saved: candidate, evicted };
-    } catch (e: unknown) {
-      const err = e as { name?: string; code?: number; message?: string };
-      const isQuota =
-        err?.name === 'QuotaExceededError' ||
-        err?.code === 22 ||
-        (typeof err?.message === 'string' && err.message.toLowerCase().includes('quota')) ||
-        (typeof err?.message === 'string' && err.message.toLowerCase().includes('exceeded'));
-      if (!isQuota) {
-        // 其他错误 — log + 放弃 (不抛, 避免 Promise rejection 冒泡到 user)
-        // eslint-disable-next-line no-console
-        console.error('[memecontext] persistDraftSlots non-quota error:', e);
-        return { saved: candidate, evicted };
-      }
-      // 删最旧 draft (updatedAt 最小) — slots 是 caller 顺序排列, 不一定是 updatedAt 序
-      const oldestIdx = candidate.reduce((minIdx, s, i, arr) => {
-        const cur = s.updatedAt ?? 0;
-        const min = arr[minIdx].updatedAt ?? 0;
-        return cur < min ? i : minIdx;
-      }, 0);
-      candidate = candidate.filter((_, i) => i !== oldestIdx);
-      evicted++;
-    }
-  }
-  // 全删光仍失败 → 清 key
-  try {
-    window.localStorage.removeItem(storageKey);
-  } catch { /* ignore */ }
-  return { saved: [], evicted };
+// draftSlots 持久化 — 用 IndexedDB (idb-keyval), mobile WebView 内 quota ~50MB+
+// 之前用 localStorage (5MB hard limit) — 一张 draft 含 panda+face dataURL 就 ~250KB,
+// 加上 editor-state 占 ~750KB, 几张就撞 quota → user 看到"只能存 1 张"
+const DRAFT_SLOTS_IDB_KEY = 'xiongmaotou.editor-drafts';
+
+// fire-and-forget IDB persist (不能 await in setDraftSlots updater)
+// IDB 内部 transaction 串行 + 顺序保证, 多次连续 set 不会 race
+function persistDraftSlots(slots: DraftSlot[]): void {
+  if (typeof window === 'undefined') return;
+  void idbSet(DRAFT_SLOTS_IDB_KEY, slots).catch((e: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error('[memecontext] IDB persist failed:', e);
+  });
 }
 
 export interface CanvasElement {
@@ -241,33 +213,61 @@ function sanitizeStoredState(input: Pick<AppState, 'elements' | 'selectedId' | '
   } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
 }
 
-function loadDraftSlots(): DraftSlot[] {
-  if (typeof window === 'undefined') return [];
+function sanitizeDraftSlots(parsed: unknown): DraftSlot[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .slice(0, DRAFT_SLOT_MAX)
+    .map((slot: Partial<DraftSlot> | null | undefined, index): DraftSlot => {
+      const safeState = sanitizeStoredState(slot?.state);
+      return {
+        id: typeof slot?.id === 'string' && slot.id ? slot.id : `draft-${index + 1}`,
+        name: typeof slot?.name === 'string' && slot.name ? slot.name : `草稿${index + 1}`,
+        updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
+        previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
+        elementCount: safeState?.elements.length ?? 0,
+        state: safeState,
+      };
+    })
+    // 兼容旧版 3-slot schema：filter 掉初始化时 state=null 但 updatedAt=null 的占位
+    .filter(slot => slot.state !== null);
+}
 
+// 从 localStorage 同步读 (legacy 数据 — 启动 useEffect 里 migrate 到 IDB)
+function loadLegacyDraftSlotsSync(): DraftSlot[] {
+  if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(DRAFT_SLOTS_STORAGE_KEY);
     if (!raw) return [];
-
-    const parsed = JSON.parse(raw) as DraftSlot[];
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .slice(0, DRAFT_SLOT_MAX)
-      .map((slot, index): DraftSlot => {
-        const safeState = sanitizeStoredState(slot?.state);
-        return {
-          id: typeof slot?.id === 'string' && slot.id ? slot.id : `draft-${index + 1}`,
-          name: typeof slot?.name === 'string' && slot.name ? slot.name : `草稿${index + 1}`,
-          updatedAt: typeof slot?.updatedAt === 'number' ? slot.updatedAt : null,
-          previewUrl: typeof slot?.previewUrl === 'string' ? slot.previewUrl : '',
-          elementCount: safeState?.elements.length ?? 0,
-          state: safeState,
-        };
-      })
-      // 兼容旧版 3-slot schema：filter 掉初始化时 state=null 但 updatedAt=null 的占位
-      .filter(slot => slot.state !== null);
+    return sanitizeDraftSlots(JSON.parse(raw));
   } catch {
     return [];
+  }
+}
+
+// 从 IDB load draftSlots, 没 IDB 数据时 migrate localStorage → IDB
+async function loadDraftSlotsAsync(): Promise<DraftSlot[]> {
+  if (typeof window === 'undefined') return [];
+  try {
+    const fromIdb = await idbGet<DraftSlot[]>(DRAFT_SLOTS_IDB_KEY);
+    if (Array.isArray(fromIdb) && fromIdb.length > 0) {
+      return sanitizeDraftSlots(fromIdb);
+    }
+    // IDB 空 → 检查 localStorage 老数据 → migrate
+    const legacy = loadLegacyDraftSlotsSync();
+    if (legacy.length > 0) {
+      try {
+        await idbSet(DRAFT_SLOTS_IDB_KEY, legacy);
+        window.localStorage.removeItem(DRAFT_SLOTS_STORAGE_KEY);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[memecontext] migrate legacy → IDB failed:', e);
+      }
+    }
+    return legacy;
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[memecontext] IDB load failed, fallback localStorage:', e);
+    return loadLegacyDraftSlotsSync();
   }
 }
 
@@ -403,26 +403,17 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     (key: TranslationKey) => translations[state.language][key],
     [state.language]
   );
-  const [draftSlots, setDraftSlots] = React.useState<DraftSlot[]>(() => loadDraftSlots());
+  // useState init [] — useEffect 启动时 IDB load 替换 (有 1 帧空 但 drafts 不在首屏)
+  const [draftSlots, setDraftSlots] = React.useState<DraftSlot[]>([]);
 
-  const persistDraftSlots = useCallback((nextDraftSlots: DraftSlot[]) => {
-    if (typeof window === 'undefined') {
-      setDraftSlots(nextDraftSlots);
-      return;
-    }
-    // quota-safe: 超 5MB 时自动 LRU evict 最旧 draft 重试 → 防 QuotaExceededError
-    // 之前直接 setItem 会抛 Promise rejection 让 user "无法存草图"
-    const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, nextDraftSlots);
-    setDraftSlots(saved);
-    if (evicted > 0) {
-      toast.info(
-        state.language === 'zh'
-          ? `存储已满, 自动删除 ${evicted} 张最旧草图`
-          : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
-        { duration: 4000 }
-      );
-    }
-  }, [state.language]);
+  // mount: load drafts from IDB (or migrate from localStorage)
+  useEffect(() => {
+    let cancelled = false;
+    void loadDraftSlotsAsync().then(slots => {
+      if (!cancelled) setDraftSlots(slots);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const saveDraft = useCallback(async (slotId: string) => {
     const previewUrl = await renderDraftPreview(state.elements);
@@ -432,9 +423,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
       language: state.language,
     } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
 
-    // 用 functional setState 防 race: 之前用 closure 的 draftSlots 在 await 期间陈旧,
-    // 连续点击 → 多个 saveDraft 看同 stale draftSlots → setDraftSlots(...) 后写覆盖前 →
-    // 最终只剩 1 张 ('只能存一个草稿' bug). prev 永远是 React 内部最新.
+    // functional setState 防 race; IDB persist fire-and-forget (transactions 串行保证顺序)
     setDraftSlots(prev => {
       const existingIndex = prev.findIndex(slot => slot.id === slotId);
       let next: DraftSlot[];
@@ -469,19 +458,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
             : slot
         ));
       }
-      // quota-aware persist 内联到 functional setter, 防止 setState + persist 不同步
-      if (typeof window !== 'undefined') {
-        const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, next);
-        if (evicted > 0) {
-          toast.info(
-            state.language === 'zh'
-              ? `存储已满, 自动删除 ${evicted} 张最旧草图`
-              : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
-            { duration: 4000 }
-          );
-        }
-        return saved;
-      }
+      persistDraftSlots(next);
       return next;
     });
   }, [state.elements, state.language, state.selectedId]);
@@ -495,7 +472,6 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     const safe = sanitizeStoredState(snapshot);
     if (!safe) return;
 
-    // functional setState 防 race (同 saveDraft 修法)
     setDraftSlots(prev => {
       const existingIndex = prev.findIndex(slot => slot.id === slotId);
       let next: DraftSlot[];
@@ -537,21 +513,10 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
             : slot
         ));
       }
-      if (typeof window !== 'undefined') {
-        const { saved, evicted } = safePersistDraftSlots(DRAFT_SLOTS_STORAGE_KEY, next);
-        if (evicted > 0) {
-          toast.info(
-            state.language === 'zh'
-              ? `存储已满, 自动删除 ${evicted} 张最旧草图`
-              : `Storage full — auto-removed ${evicted} oldest draft${evicted > 1 ? 's' : ''}`,
-            { duration: 4000 }
-          );
-        }
-        return saved;
-      }
+      persistDraftSlots(next);
       return next;
     });
-  }, [state.language]);
+  }, []);
 
   const loadDraft = useCallback((slotId: string) => {
     const slot = draftSlots.find(item => item.id === slotId);
@@ -569,52 +534,33 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   const clearDraft = useCallback((slotId: string) => {
     setDraftSlots(prev => {
       const next = prev.filter(slot => slot.id !== slotId);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
-      }
+      persistDraftSlots(next);
       return next;
     });
   }, []);
 
-  // 批量删除: 单次 setState + 单次 localStorage 写入, 避免 forEach 多次 setState 的 batching 边缘 case
+  // 批量删除: 单次 setState + 单次 persist, 避免 forEach 多次 setState 的 batching 边缘 case
   const clearDrafts = useCallback((slotIds: string[]) => {
     if (slotIds.length === 0) return;
     const idSet = new Set(slotIds);
     setDraftSlots(prev => {
       const next = prev.filter(slot => !idSet.has(slot.id));
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
-      }
+      persistDraftSlots(next);
       return next;
     });
   }, []);
 
   const renameDraft = useCallback((slotId: string, name: string) => {
     const trimmed = name.trim();
-    // eslint-disable-next-line no-console
-    console.log('[renameDraft] called', { slotId, name: trimmed });
     if (!trimmed) return;
-    setDraftSlots((prev) => {
+    setDraftSlots(prev => {
       const matchedSlot = prev.find(s => s.id === slotId);
-      // eslint-disable-next-line no-console
-      console.log('[renameDraft] inside setDraftSlots', {
-        slotId,
-        foundInPrev: !!matchedSlot,
-        oldName: matchedSlot?.name,
-        newName: trimmed,
-        prevLen: prev.length,
-      });
       if (!matchedSlot) return prev;
-      if (matchedSlot.name === trimmed) return prev; // 同名跳过
+      if (matchedSlot.name === trimmed) return prev;
       const next = prev.map(slot => (
         slot.id === slotId ? { ...slot, name: trimmed } : slot
       ));
-      // 同步 localStorage
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(DRAFT_SLOTS_STORAGE_KEY, JSON.stringify(next));
-        } catch { /* ignore */ }
-      }
+      persistDraftSlots(next);
       return next;
     });
   }, []);
