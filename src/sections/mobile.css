@@ -1859,16 +1859,24 @@
   }
 }
 
-/* Mobile: 紧凑 — 按钮 icon-only (隐藏 label), 单行不 wrap, padding 缩小 */
+/* Mobile: 紧凑 + 隐藏 nav buttons (Quick/Drafts) 避免跟 LeftSidebar/RightSidebar
+   的 .mobile-fab-left/right (bottom corner fixed FAB) 重叠. Hamburger 已提供 nav. */
 @media (max-width: 768px) {
   .editor-bottom-bar {
-    gap: 6px;
-    padding: 8px 8px;
+    gap: 8px;
+    padding: 8px;
+    padding-left: 72px; /* 给左 FAB 让位 (56 + 12 margin + 4 buffer) */
+    padding-right: 72px; /* 给右 FAB 让位 */
     padding-bottom: calc(8px + var(--mobile-safe-bottom));
     flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    justify-content: space-around;
+    overflow: visible;
+    justify-content: center;
+  }
+
+  /* mobile 隐藏 Quick / Drafts 导航组 — 已在 hamburger 菜单 */
+  .editor-bb-group-nav,
+  .editor-bb-divider-nav {
+    display: none !important;
   }
 
   .editor-bb-group {
@@ -1877,20 +1885,19 @@
 
   .editor-bb-btn {
     min-height: 44px;
-    padding: 0 8px;
+    padding: 0 10px;
     font-size: 11px;
     gap: 3px;
     border-radius: 9px;
   }
 
   .editor-bb-btn span {
-    /* 极窄屏: 缩字号 + nowrap 防换行 */
     white-space: nowrap;
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .editor-bb-divider {
-    height: 22px;
+    height: 26px;
   }
 }
 
