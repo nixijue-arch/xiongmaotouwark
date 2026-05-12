@@ -155,22 +155,8 @@ function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
   return dist;
 }
 
-function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5, displaySmooth = false) {
-  let n = points.length;
-  // ⚠️ displaySmooth=true 时入口 3-tap smoothing pass —— 只用在 drawOriginalWithOverlay 显示曲线时
-  // processFace 内 ctx.clip() 一律 false: 否则会把 polygon mask 内移 → 破坏 v4 算法距离场平衡
-  // (957081f 之前 default 开启 smoothing 导致 v4g face mask 收缩, 右脸颊深阴影落入 fade 末端被 adaptive 判暗 → 大块 mid-gray)
-  if (displaySmooth && n >= 4) {
-    const smoothed: Point[] = new Array(n);
-    for (let i = 0; i < n; i++) {
-      const prev = points[(i - 1 + n) % n];
-      const cur = points[i];
-      const next = points[(i + 1) % n];
-      smoothed[i] = { x: cur.x * 0.6 + (prev.x + next.x) * 0.2, y: cur.y * 0.6 + (prev.y + next.y) * 0.2 };
-    }
-    points = smoothed;
-  }
-  n = points.length;
+function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
+  const n = points.length;
   if (n < 3) {
     points.forEach((p, i) => {
       const x = p.x * scale + offX, y = p.y * scale + offY;
@@ -823,11 +809,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
       }
       setRecommendReason(recommended.reason);
     }
-    // ⚠️ 修 undo bug: pushHistory(true) 必须等 React state flush 完才 read snapshot,
-    // 否则 snapshot() 读 stale state (items=[], activeId=null) → 第一个 snap 是空状态
-    // → 用户后续点 undo 回到空状态 → activeItem=undefined → modal 中部渲染空 (image #26)
-    // setTimeout(0) 跑 next macrotask, React commit phase 已结束, state 已 update.
-    setTimeout(() => pushHistory(true), 0);
+    pushHistory(true);
   }, [autoMode, currentPreset, pushHistory]);
 
   // active item / params 变化时重渲染输出 + 同步生成 face dataURL 给 PandaCanvas 用
@@ -869,14 +851,14 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(img, 0, 0, cw, ch);
-    // 圆滑 face polygon (橙色) — displaySmooth=true 让 display 曲线圆滑, 不影响 processFace 实际 clip mask
+    // 圆滑 face polygon (橙色)
     ctx.strokeStyle = 'rgba(245, 197, 106, 0.9)';
     ctx.lineWidth = Math.max(2, cw / 400);
     ctx.beginPath();
-    tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })), 1, 0, 0, 0.5, true);
+    tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })));
     ctx.closePath();
     ctx.stroke();
-    // 拖动中的 handle hint (单个红点)
+    // 拖动中的 handle hint
     if (draggingHandle >= 0 && item.maskHandles[draggingHandle]) {
       const h = item.maskHandles[draggingHandle];
       const x = h.x * cw, y = h.y * ch;
@@ -909,8 +891,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     let nearestI = -1, nearestD = Infinity;
     activeItem.maskHandles.forEach((h, i) => {
       const d = Math.hypot(h.x - nx, h.y - ny);
-      // 0.05 hit radius — slightly larger than visual dot for easier grab (~32px @ 640 canvas)
-      if (d < 0.05 && d < nearestD) { nearestI = i; nearestD = d; }
+      if (d < 0.04 && d < nearestD) { nearestI = i; nearestD = d; }
     });
     if (nearestI < 0 && activeItem.maskHandles.length < 64) {
       // 找最近 edge 插入新点
@@ -925,7 +906,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
         tt = Math.max(0, Math.min(1, tt));
         const px = a.x + dx * tt, py = a.y + dy * tt;
         const d = Math.hypot(nx - px, ny - py);
-        if (d < 0.06 && d < bestD) { bestSeg = i; bestD = d; }
+        if (d < 0.05 && d < bestD) { bestSeg = i; bestD = d; }
       }
       if (bestSeg >= 0) {
         const newHandles = [...activeItem.maskHandles];
@@ -1003,7 +984,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     let nearest = -1, nd = Infinity;
     activeItem.maskHandles.forEach((h, i) => {
       const d = Math.hypot(h.x - nx, h.y - ny);
-      if (d < 0.05 && d < nd) { nearest = i; nd = d; }
+      if (d < 0.04 && d < nd) { nearest = i; nd = d; }
     });
     if (nearest >= 0) {
       const nh = activeItem.maskHandles.filter((_, i) => i !== nearest);
@@ -1028,38 +1009,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     pushHistory(true);
   };
 
-  // === Quick actions: 整体扩大 / 缩小 / 平滑 (设计软件常用) ===
-  const expandAll = (factor: number) => {
-    if (!activeItem) return;
-    const handles = activeItem.maskHandles;
-    const cx = handles.reduce((s, h) => s + h.x, 0) / handles.length;
-    const cy = handles.reduce((s, h) => s + h.y, 0) / handles.length;
-    const newHandles = handles.map(h => ({
-      x: Math.max(0.01, Math.min(0.99, cx + (h.x - cx) * (1 + factor))),
-      y: Math.max(0.01, Math.min(0.99, cy + (h.y - cy) * (1 + factor))),
-    }));
-    setItems(prev => prev.map(it => it.id === activeItem.id ? { ...it, maskHandles: newHandles } : it));
-    pushHistory(true);
-  };
-
-  const smoothAll = () => {
-    if (!activeItem) return;
-    const handles = activeItem.maskHandles;
-    const n = handles.length;
-    if (n < 4) return;
-    // 3-tap weighted average pass, 保留整体形状但削掉锯齿
-    const newHandles = handles.map((h, i) => {
-      const prev = handles[(i - 1 + n) % n];
-      const next = handles[(i + 1) % n];
-      return {
-        x: h.x * 0.6 + (prev.x + next.x) * 0.2,
-        y: h.y * 0.6 + (prev.y + next.y) * 0.2,
-      };
-    });
-    setItems(prev => prev.map(it => it.id === activeItem.id ? { ...it, maskHandles: newHandles } : it));
-    pushHistory(true);
-  };
-
   // 滑块变化 → 自动 push history
   const setParam = <K extends keyof Params>(key: K, value: Params[K]) => {
     setParams(p => ({ ...p, [key]: value }));
@@ -1077,15 +1026,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     setFaceDataUrl('');
     historyRef.current = { stack: [], idx: -1 };
     onClose();
-  };
-
-  // 重新选图: 清当前 items 状态 + 触发文件选择
-  const reuploadInputRef = useRef<HTMLInputElement>(null);
-  const handleReupload = () => {
-    setItems([]); setActiveId(null); setError(''); setRecommendReason('');
-    setFaceDataUrl('');
-    historyRef.current = { stack: [], idx: -1 };
-    setTimeout(() => reuploadInputRef.current?.click(), 0);
   };
 
   if (!isOpen) return null;
@@ -1107,13 +1047,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             <span className="text-xs hidden sm:inline" style={{ color: '#456' }}>· {t('smartExtractHint')}</span>
           </div>
           <div className="flex items-center gap-1">
-            {items.length > 0 && (
-              <button onClick={handleReupload} title="重新选图"
-                className="p-1.5 rounded hover:bg-blue-100"
-                style={{ color: '#0a356d' }}>
-                <Upload size={16} />
-              </button>
-            )}
             <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"
               className="p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ color: '#0a356d' }}>
@@ -1129,20 +1062,6 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             </button>
           </div>
         </div>
-
-        {/* Hidden input for reupload */}
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/jpg,image/webp"
-          multiple
-          ref={reuploadInputRef}
-          className="hidden"
-          onChange={e => {
-            const fs = Array.from(e.target.files || []);
-            if (fs.length) handleFiles(fs);
-            (e.target as HTMLInputElement).value = '';
-          }}
-        />
 
         {loadingModel && (
           <div className="mb-3 p-2 rounded text-xs" style={{ background: 'linear-gradient(180deg, #ddf5e8 0%, #c6ecd9 100%)', border: '1.5px solid #0a8552', color: '#0a5c39', fontWeight: 600 }}>
@@ -1185,30 +1104,12 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
             <div className="grid gap-3 md:grid-cols-3 grid-cols-1">
               <div>
                 <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#456' }}>
-                  <span style={{ fontWeight: 600 }}>原图 · 拖锚点 / 双击删 / 空白处单击加</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => expandAll(0.05)} title="整体扩大 5%"
-                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>⤢</button>
-                    <button onClick={() => expandAll(-0.05)} title="整体缩小 5%"
-                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>⤡</button>
-                    <button onClick={smoothAll} title="一键平滑"
-                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a4e97', color: '#0a356d' }}>～</button>
-                    <button onClick={resetHandles} title="重置 mask"
-                      className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                      style={{ background: 'linear-gradient(180deg, #ffffff 0%, #e8f1fa 100%)', border: '1px solid #0a8552', color: '#0a5c39' }}>↺</button>
-                  </div>
+                  <span style={{ fontWeight: 600 }}>原图 · 拖曲线 / 双击删点</span>
+                  <button onClick={resetHandles} className="text-[10px] font-semibold" style={{ color: '#0a8552' }}>重置 mask</button>
                 </div>
                 <div
                   className="rounded-lg overflow-hidden aspect-square flex items-center justify-center select-none"
-                  style={{
-                    background: '#fff',
-                    border: '2px solid #0a4e97',
-                    cursor: draggingHandle >= 0 ? 'grabbing' : 'grab',
-                    touchAction: 'none',
-                  }}
+                  style={{ background: '#fff', border: '2px solid #0a4e97', cursor: draggingHandle >= 0 ? 'grabbing' : 'grab', touchAction: 'none' }}
                   onPointerDown={onOriginalPointerDown}
                   onPointerMove={onOriginalPointerMove}
                   onPointerUp={onOriginalPointerUp}
