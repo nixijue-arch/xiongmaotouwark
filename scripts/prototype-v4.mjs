@@ -50,11 +50,11 @@ function deriveEffective(purify) {
     meanRadius,
     sharpness: Math.max(0.5, 4 - m * 3.5),
     blend: m,
-    // eraseBand = meanRadius + 12: covers entire boundary-bias zone + healthy
-    // safety margin. boxBlur1D(W, R) at distance X inside polygon gives
-    // mean ≈ (X+R)/(2R+1) * 255, so edge zone reaches dist < R - small_eps.
     eraseBand: meanRadius + 12,
     edgeThr: 253,
+    // master 控 pre-blur: master<40 不 blur (保细五官), master 50 → 1px (mild),
+    // master 100 → 5px (强 blur 抹 wrinkles). 细眉毛/嘴 typically 1-3px wide, σ<2 不破.
+    preBlurR: Math.max(0, Math.round((m - 0.4) * 8)),
   };
 }
 
@@ -207,6 +207,49 @@ function erodeThinBlackLines(rgba, w, h) {
 function applyL2(rgba, w, h, eff) {
   if (!eff.enabled) return;
   const N = w * h;
+
+  // 0. v4g: master-controlled pre-blur (抹平 wrinkles / skin texture noise)
+  // 3-pass boxBlur1D ≈ Gaussian. radius = master/100 * 5. master=50 → r=3.
+  // 只 blur RGB, alpha 不动. 也只对 polygon 内做 (用 padded average避免 edge bleed).
+  if (eff.preBlurR > 0) {
+    // 用 polygon mask weighted average 防 leak (polygon 外参与 mean 计算会拉低 face 边缘 lum)
+    let sumR = 0, sumG = 0, sumB = 0, cn = 0;
+    for (let i = 0; i < N; i++) {
+      if (rgba[i * 4 + 3] > 200) {
+        sumR += rgba[i * 4]; sumG += rgba[i * 4 + 1]; sumB += rgba[i * 4 + 2]; cn++;
+      }
+    }
+    if (cn > 0) {
+      const avgR = Math.round(sumR / cn);
+      const avgG = Math.round(sumG / cn);
+      const avgB = Math.round(sumB / cn);
+      const Rs = new Uint8ClampedArray(N);
+      const Gs = new Uint8ClampedArray(N);
+      const Bs = new Uint8ClampedArray(N);
+      for (let i = 0; i < N; i++) {
+        if (rgba[i * 4 + 3] > 200) {
+          Rs[i] = rgba[i * 4]; Gs[i] = rgba[i * 4 + 1]; Bs[i] = rgba[i * 4 + 2];
+        } else {
+          Rs[i] = avgR; Gs[i] = avgG; Bs[i] = avgB; // padding
+        }
+      }
+      let Rb = boxBlur1D(Rs, w, h, eff.preBlurR);
+      let Gb = boxBlur1D(Gs, w, h, eff.preBlurR);
+      let Bb = boxBlur1D(Bs, w, h, eff.preBlurR);
+      Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+      Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+      Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+      Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+      Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+      Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+      for (let i = 0; i < N; i++) {
+        if (rgba[i * 4 + 3] > 200) {
+          rgba[i * 4] = Rb[i]; rgba[i * 4 + 1] = Gb[i]; rgba[i * 4 + 2] = Bb[i];
+        }
+      }
+    }
+  }
+
   // 1. luma map + face average
   const G = new Uint8ClampedArray(N);
   let sumLum = 0, cnt = 0;
@@ -245,15 +288,37 @@ function applyL2(rgba, w, h, eff) {
     if (rgba[di + 3] < 200) continue;
     const lum = G[i];
     const dist = edgeDist[i];
-    if (dist < eraseDistance + fadeDist && lum < eraseLum) {
+
+    // v4g 修1: 头发渗入透明仅限 polygon 最外圈 12px (之前 125px 误杀内部五官!)
+    const hairEraseR = 12;
+    if (dist < hairEraseR && lum < eraseLum) {
       rgba[di + 3] = 0; continue;
     }
+
+    // adaptive output (always compute)
     const mean = meanG[i];
     let diff = mean - lum;
     if (diff < -128) diff = -128;
     else if (diff > 127) diff = 127;
     const target = sigLut[(diff + 128) | 0];
     const adaptiveLum = (blend * target + (1 - blend) * lum) | 0;
+
+    // alpha feather (5px 软渐变)
+    let finalAlpha;
+    if (dist < alphaFeatherR) {
+      const t = dist / alphaFeatherR;
+      finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
+    } else finalAlpha = 255;
+
+    // v4g 修2: 深色五官像素 (lum<60) 永远走纯 adaptive, 不被 erase blend lighten 成 mid-gray
+    // adaptive 对深色像素 lum<60 + mean=150 输出接近 0 (纯黑) → 五官保持黑色
+    if (lum < 60) {
+      rgba[di] = adaptiveLum; rgba[di + 1] = adaptiveLum; rgba[di + 2] = adaptiveLum;
+      rgba[di + 3] = finalAlpha;
+      continue;
+    }
+
+    // 其他像素 (skin / shadow / texture): erase ↔ adaptive smoothstep blend
     let eraseW;
     if (dist < eraseDistance) eraseW = 1;
     else if (dist < eraseDistance + fadeDist) {
@@ -261,11 +326,6 @@ function applyL2(rgba, w, h, eff) {
       eraseW = 1 - t * t * (3 - 2 * t);
     } else eraseW = 0;
     const finalLum = (eraseW * 255 + (1 - eraseW) * adaptiveLum) | 0;
-    let finalAlpha;
-    if (dist < alphaFeatherR) {
-      const t = dist / alphaFeatherR;
-      finalAlpha = ((t * t * (3 - 2 * t)) * 255) | 0;
-    } else finalAlpha = 255;
     rgba[di] = finalLum; rgba[di + 1] = finalLum; rgba[di + 2] = finalLum;
     rgba[di + 3] = finalAlpha;
   }
@@ -302,17 +362,14 @@ for (let i = 0; i < rgba.length; i += 4) {
 // Levels + contrast
 applyLevelsContrast(rgba, w, h);
 
-// SUSPECT HYPOTHESIS: trimDark before L2 leaves polygon-interior edge pixels
-// at alpha 50-200 (mid range), which L2 main loop SKIPS due to `alpha < 200`
-// guard → those pixels render as semi-transparent dark ring.
-// To verify: set env DISABLE_TRIMDARK=1 to skip this step.
-if (process.env.DISABLE_TRIMDARK !== '1') {
-  applyTrimDark(rgba, w, h, 65, 72);
-}
+// ROOT CAUSE 已确认: trimDark 在 purify>0 时 produces alpha-mid ring (v4 skip).
+// Real app 已 fix: purify > 0 时 skip trimDark. Prototype mirror 同样逻辑.
+const trimDarkActive = PURIFY === 0 && process.env.DISABLE_TRIMDARK !== '1';
+if (trimDarkActive) applyTrimDark(rgba, w, h, 65, 72);
 
 // L2-v4 main
 const eff = deriveEffective(PURIFY);
-console.log('eff =', eff, 'PURIFY =', PURIFY, 'trimDark =', process.env.DISABLE_TRIMDARK === '1' ? 'OFF' : 'ON');
+console.log('eff =', eff, 'PURIFY =', PURIFY, 'trimDark =', trimDarkActive ? 'ON' : 'OFF (v4 enabled)');
 applyL2(rgba, w, h, eff);
 erodeThinBlackLines(rgba, w, h);
 
