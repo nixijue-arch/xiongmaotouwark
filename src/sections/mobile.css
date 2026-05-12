@@ -1523,20 +1523,53 @@
     order: 6;
   }
 
-  /* Preview tighten — 给其他元素让空间 (max 42vh) */
+  /* Preview tighten — 给其他元素让空间 (max 38vh, min 220) */
   .quickmode-three-col .quickmode-preview {
     padding: 10px 12px 14px !important;
-    min-height: 260px;
+    min-height: 220px;
   }
   .quickmode-preview .qm-panda-frame {
-    max-height: 42vh !important;
+    max-height: 38vh !important;
   }
   .quickmode-preview .qm-panda-img {
-    max-height: 42vh !important;
+    max-height: 38vh !important;
   }
   .quickmode-preview .qm-caption {
-    margin-top: 8px !important;
-    font-size: clamp(18px, 5vw, 24px) !important;
+    margin-top: 6px !important;
+    font-size: clamp(17px, 4.6vw, 22px) !important;
+  }
+
+  /* Caption card 紧凑: controls 改 3-col 单行 (reroll + textlang + font), textarea rows=1 */
+  .qmm-caption-card {
+    padding: 10px !important;
+    gap: 8px !important;
+  }
+  .qmm-caption-textarea {
+    min-height: 44px !important;
+  }
+  .qmm-caption-controls {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    gap: 6px !important;
+    align-items: stretch !important;
+  }
+  .qmm-caption-controls .qmm-reroll-btn,
+  .qmm-caption-controls .qmm-textlang-group,
+  .qmm-caption-controls .qmm-font-select-m {
+    min-height: 40px !important;
+    height: 40px !important;
+  }
+  .qmm-caption-controls .qmm-font-select-m {
+    grid-column: auto !important; /* 单 col, 不再独占一行 */
+    font-size: 13px !important;
+    padding: 0 28px 0 10px !important;
+  }
+  .qmm-caption-controls .qmm-textlang-btn-m {
+    padding: 0 10px !important;
+    font-size: 13px !important;
+  }
+  .qmm-caption-controls .qmm-reroll-btn {
+    padding: 0 8px !important;
+    font-size: 12px !important;
   }
 
   /* Transform card mobile compact (跟 Phase 2.2 横向 fix 配合) */

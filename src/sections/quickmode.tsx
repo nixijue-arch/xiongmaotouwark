@@ -530,13 +530,13 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                 </button>
               </div>
 
-              {/* Caption card (textarea + 换文字 / 中En / font) */}
+              {/* Caption card (textarea + 换文字 / 中En / font) — rows={1} 紧凑 + controls 单行 */}
               <div className="qmm-caption-card">
                 <textarea
                   value={text}
                   onChange={(e) => setTextSynced(e.target.value)}
                   placeholder={t('quickTextPlaceholder')}
-                  rows={2}
+                  rows={1}
                   className="qmm-caption-textarea"
                 />
                 <div className="qmm-caption-controls">
