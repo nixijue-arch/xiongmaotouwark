@@ -81,7 +81,7 @@ const PRESETS: Record<string, Params> = {
   'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
   // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 75, trimThr: 72, autoNorm: true, blackPoint: 88, whitePoint: 178, gamma: 0.80, contrast: 55, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
   // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
   'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024, purify: 0 },
   // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
@@ -89,27 +89,31 @@ const PRESETS: Record<string, Params> = {
 };
 
 // ============================================================
-// Master "净化" mapping v3 — purify (0-100) → 4 个 effective 参数 (SSOT)
-// v1 (alpha 半透明) / v2 (edge erase + whiten) 都不够干净 →
-// v3 用 Wellner/Bradley adaptive threshold (cv2.adaptiveThreshold 经典算法):
-//   - 内部每像素 lum < (local_mean - C) → 黑 (五官细节)
-//   - 否则 → 白 (大面积阴影自然消失, 因为它们的 local_mean 也低)
-//   - 边缘环带统一涂白/erase, 避免 face polygon 轮廓可见
+// Master "净化" mapping v4 — purify (0-100) → 5 个 effective 参数 (SSOT)
+// v1 (alpha 半透明) / v2 (edge erase + whiten) / v3 (hard adaptive threshold) 都不行 →
+// v4 = adaptive threshold (Bradley/Wellner) + 3 个 fundamental 改进:
+//   1. padding mean: polygon 外用 face 全局均值填充 → 边缘 mean 无 bias (修 v3 face 黑环)
+//   2. sigmoid 软过渡: 不再 hard 0/255 step, 让 diff 接近 C 的像素平滑过渡 (修 v3 酒窝/粗边 ring)
+//   3. blend 跟原图: master=50 → 50/50 mix, master=100 → 纯 binary (保留原版精髓, 修 v3 川普失真)
 // ============================================================
 interface EffectiveParams {
-  enabled: boolean;        // master > 0 才启用 v3, =0 时整段短路
-  adaptiveC: number;       // 8-24, lum < mean - C 判黑; 越大 = 抹掉越多阴影
-  meanRadius: number;      // 40-70 px, local mean 计算半径; 大半径分辨"大阴影 vs 五官"更准
-  edgeBand: number;        // 8-26 px, 边缘统一涂白环带 (融入 panda 不出 outline)
+  enabled: boolean;        // master > 0 才启用 v4, =0 时整段短路
+  adaptiveC: number;       // 12-24, lum < mean - C 判黑; 越大 = 抹掉越多 mid-contrast 细节
+  meanRadius: number;      // 20-50 px, local mean 半径; 比 v3 小, 边缘 bias 更可控
+  sharpness: number;       // 4 → 0.5, sigmoid 锐度; 高 master 接近 hard step
+  blend: number;           // 0..1, 跟原图 blend 比例; master 主控 (保留原版精髓)
+  eraseBand: number;       // 8-20 px, polygon 边缘统一涂白环带 (融入 panda 不出 outline)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
   const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
   return {
     enabled: m > 0,
-    adaptiveC: 8 + Math.round(m * 16),
-    meanRadius: Math.max(20, Math.round(40 + m * 30)),
-    edgeBand: Math.max(6, Math.round(8 + m * 18)),
+    adaptiveC: 12 + Math.round(m * 12),
+    meanRadius: Math.max(15, Math.round(20 + m * 30)),
+    sharpness: Math.max(0.5, 4 - m * 3.5),
+    blend: m,
+    eraseBand: Math.max(6, Math.round(8 + m * 12)),
   };
 }
 
@@ -424,50 +428,58 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     ctx.putImageData(orig, 0, 0);
   }
 
-  // === [L2-v3] Wellner/Bradley adaptive threshold + edge unify ===
-  // 用户反馈 v2 还不够: face 还有轮廓线 + 大面积黑色阴影
-  // 目标参考 Image #11 (标准熊猫头风格): 内部纯黑/纯白二值化, 边缘 invisible
-  // 算法 (cv2.adaptiveThreshold 经典做法, OpenCV ADAPTIVE_THRESH_MEAN_C):
-  //   1. 算 luma map G
-  //   2. mask-aware 加权 local mean (polygon 外不参与, 避免 edge bias)
-  //   3. polygon 内每像素:
-  //      - 边缘环带: 暗→透明 / 其他→白 (面 polygon 边界完全融入 panda)
-  //      - 内部: lum < (local_mean - adaptiveC) → 黑 (五官) / 否则 → 白
-  //      - "大面积黑色阴影": local_mean 也低 → diff 小 → 判白 → 消失 ✓
+  // === [L2-v4] Bradley adaptive threshold + padding mean + sigmoid + blend ===
+  // 3 个 fundamental 改进 (修 v3 的 face 黑环 / 酒窝 ring / 川普失真):
+  //   1. padding mean: polygon 外用 face 全局均值填充, 单次 boxBlur (无 weighted 除法 bias)
+  //   2. sigmoid soft transition: diff∈[C-12, C+12] 平滑过渡, 不再 hard 0/255 step
+  //   3. blend 跟原图: master 控制混合比, 保留原版细节精髓
+  // 边缘环带: 暗→透明 / 其他→涂白 (固定 full strength, 让 polygon outline 消失)
   if (eff.enabled) {
     const w = out, h = out;
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
 
-    // 1) luma map G
+    // 1) luma map G + polygon 内全局平均 lum (padding 用)
     const G = new Uint8ClampedArray(w * h);
+    let sumLum = 0, cnt = 0;
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
       G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
+      if (d[di + 3] > 200) { sumLum += G[i]; cnt++; }
     }
+    if (cnt === 0) {
+      ctx.putImageData(cur, 0, 0);
+      return canvas;
+    }
+    const faceAvg = Math.round(sumLum / cnt);
 
-    // 2) polygon mask W + masked luma lumW
-    const W = new Uint8ClampedArray(w * h);
-    const lumW = new Uint8ClampedArray(w * h);
+    // 2) padded luma: polygon 外用 faceAvg 填充 → boxBlur mean 边缘不 biased
+    const lumPad = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) {
-      W[i] = d[i * 4 + 3] > 200 ? 255 : 0;
-      lumW[i] = W[i] > 0 ? G[i] : 0;
+      lumPad[i] = d[i * 4 + 3] > 200 ? G[i] : faceAvg;
+    }
+    const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
+
+    // 3) edge distance (用 binary mask boxBlur)
+    const W = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] > 200 ? 255 : 0;
+    const edgeDist = boxBlur1D(W, w, h, eff.eraseBand);
+    const edgeThr = 240;
+    const eraseLum = 50;
+
+    // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
+    const sigmoidLut = new Uint8ClampedArray(256);
+    const C = eff.adaptiveC;
+    const sharp = eff.sharpness;
+    for (let i = 0; i < 256; i++) {
+      const diff = i - 128;
+      const t = 1 / (1 + Math.exp(-(diff - C) / sharp)); // 0..1, 1 = full black
+      sigmoidLut[i] = Math.round((1 - t) * 255); // 255 = white, 0 = black
     }
 
-    // 3) mask-aware weighted local mean (避免 polygon 边缘 mean 被外部 0 拉低)
-    const R = eff.meanRadius;
-    const lumMeanBlur = boxBlur1D(lumW, w, h, R);
-    const wMeanBlur = boxBlur1D(W, w, h, R);
-    // 真 mean (考虑 mask): meanLocal = lumMeanBlur * 255 / wMeanBlur
+    const blend = eff.blend;
 
-    // 4) 距 polygon edge 距离场
-    const edgeR = eff.edgeBand;
-    const edgeDist = boxBlur1D(W, w, h, edgeR);
-    const edgeThr = 245; // edgeDist[i] < edgeThr → 在边缘环带内
-    const eraseLum = 50; // 边缘极暗像素 (头发渗入) → 完全透明
-
-    // 5) 像素分类: edge unify + internal adaptive threshold
-    const C = eff.adaptiveC;
+    // 5) 像素 apply
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
       if (d[di + 3] < 200) continue; // polygon 外不动
@@ -476,25 +488,27 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       const edgeNear = edgeDist[i] < edgeThr;
 
       if (edgeNear) {
-        // 边缘环带: 统一处理避免 face polygon outline 可见
+        // 边缘环带 (固定 full strength, 让 polygon outline 100% 消失)
         if (lum < eraseLum) {
-          d[di + 3] = 0; // 头发/阴影渗入 face 边缘 → 完全透明
+          d[di + 3] = 0; // 头发/阴影渗入 → 透明
         } else {
-          // 任何非极暗的边缘像素 → 涂白 (跟 panda 白脸同色, 边界消失)
-          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255;
+          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; // 涂白融入 panda
         }
         continue;
       }
 
-      // 内部: adaptive threshold
-      const meanLocal = wMeanBlur[i] > 32 ? ((lumMeanBlur[i] * 255 / wMeanBlur[i]) | 0) : lum;
-      if (lum < meanLocal - C) {
-        // 比局部均值暗 C 以上 → 黑色细节 (眉/眼/鼻/嘴 contour)
-        d[di] = 0; d[di + 1] = 0; d[di + 2] = 0;
-      } else {
-        // 否则 → 纯白 (大面积阴影自动消失, 因为其 local mean 也低 → diff 小)
-        d[di] = 255; d[di + 1] = 255; d[di + 2] = 255;
-      }
+      // 内部 — sigmoid adaptive threshold + blend
+      const mean = meanG[i];
+      let diff = mean - lum;
+      if (diff < -128) diff = -128;
+      else if (diff > 127) diff = 127;
+      const target = sigmoidLut[(diff + 128) | 0];
+
+      // blend with original lum (master 控制): blend=1 纯 binary, blend=0 完全原图
+      const newL = (blend * target + (1 - blend) * lum) | 0;
+      d[di] = newL;
+      d[di + 1] = newL;
+      d[di + 2] = newL;
     }
     ctx.putImageData(cur, 0, 0);
   }
