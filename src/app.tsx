@@ -36,7 +36,7 @@ function App() {
         return p as Page;
       }
     }
-    return 'editor';
+    return 'quick';
   });
 
   return (

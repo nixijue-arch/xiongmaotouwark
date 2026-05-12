@@ -63,9 +63,13 @@
   }
 }
 
-/* === Mobile Header ========================================== */
+/* === Mobile Header (3-col grid: 汉堡 left / brand center 2-line / lang right) === */
 @media (max-width: 768px) {
   .header-bar {
+    display: grid !important;
+    grid-template-columns: 48px 1fr 60px !important;
+    align-items: center !important;
+    gap: 10px !important;
     height: auto !important;
     min-height: var(--mobile-header-h);
     padding: 6px 12px !important;
@@ -75,57 +79,81 @@
 
   .header-bar::after {
     height: 22px !important;
+    inset: 3px 3px auto !important;
   }
 
-  .header-left {
-    gap: 8px !important;
-    flex: 1 1 auto !important;
-    min-width: 0 !important;
+  /* 让 header-left / header-right 的 children 直接进 .header-bar 的 grid */
+  .header-bar .header-left,
+  .header-bar .header-right {
+    display: contents !important;
   }
 
-  .header-bar .brand-icon {
-    width: 38px !important;
-    height: 38px !important;
-    border-radius: 10px !important;
-    flex-shrink: 0 !important;
-  }
-
-  .header-bar .brand-text {
-    flex: 1 1 auto !important;
-    min-width: 0 !important;
-    gap: 0 !important;
-  }
-
-  .header-bar .brand-name {
-    font-size: 15px !important;
-    line-height: 1.2 !important;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* 隐藏 brand-tag / brand-bubble / 桌面 nav / 外链 / CA badge — 全部进 drawer */
-  .header-bar .brand-tag,
+  /* 隐藏 logo / brand-bubble / 桌面 nav / 外链 / CA badge — 不进 grid layout */
+  .header-bar .brand-icon,
   .header-bar .brand-bubble,
-  .header-bar .header-link:not(.mobile-hamburger),
+  .header-bar .header-link,
   .header-bar .header-link-external,
   .header-bar .ca-badge {
     display: none !important;
   }
 
-  /* lang-toggle 留在 header 但压缩到 icon-only */
+  /* 汉堡占 col 1 (左) */
+  .header-bar .mobile-hamburger {
+    grid-column: 1 !important;
+    justify-self: start;
+    width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* brand-text 占 col 2 (中, 居中 2 行) */
+  .header-bar .brand-text {
+    grid-column: 2 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-self: stretch !important;
+    text-align: center !important;
+    gap: 1px !important;
+    min-width: 0 !important;
+    flex: initial !important;
+  }
+
+  .header-bar .brand-name {
+    font-size: 17px !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    letter-spacing: 0.02em !important;
+    color: #061f39 !important;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+
+  /* brand-tag = t('subtitle') = '表情包工坊' / 'Meme Generator' — mobile 显示在第 2 行 */
+  .header-bar .brand-tag {
+    display: block !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    color: #11385f !important;
+    line-height: 1.1 !important;
+    margin-top: 1px !important;
+  }
+
+  /* lang-toggle 占 col 3 (右), 显示 t('switchLang') 的 "中/En" 字样 */
   .header-bar .lang-toggle {
-    padding: 0 10px !important;
-    min-width: 48px !important;
+    grid-column: 3 !important;
+    justify-self: end !important;
+    padding: 0 8px !important;
+    min-width: 56px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    gap: 4px !important;
   }
 
   .header-bar .lang-toggle .lang-label {
-    display: none !important;
-  }
-
-  .header-right {
-    gap: 6px !important;
-    flex-shrink: 0 !important;
+    display: inline !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.02em !important;
   }
 }
 
@@ -958,4 +986,476 @@
   box-shadow:
     0 0 0 2px rgba(31, 146, 248, 0.25),
     0 2px 8px rgba(7, 48, 95, 0.18);
+}
+
+/* ================================================================
+ * Phase 2.1 — QuickMode 黑屏/乱跳/卡 修复
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  /* PandaHead 遗留 dark theme — .quickmode-root { background: #1a1a1a } 是 "黑屏" 根源.
+     mobile 透明让 app-shell Win7 蓝渐变透下来; color 还给浏览器继承 */
+  .quickmode-root,
+  .quickmode-root.about-arcade-shell {
+    background: transparent !important;
+    color: inherit !important;
+  }
+
+  /* PandaCanvas 初次 url='' 时 opacity 0.4, 父 frame 无底色 → 透出后面深色背景.
+     给 frame 白底兜底, img 完成 load 后 opacity 1 完全覆盖 */
+  .qm-panda-frame {
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 14px;
+  }
+
+  /* preview 卡片 height: auto 时 caption load 完会 reflow → caption 跳.
+     min-height 给 panda area 预留空间, 避免新 panda load 时整卡高度抖 */
+  .quickmode-three-col .quickmode-preview {
+    min-height: 320px;
+  }
+}
+
+/* ================================================================
+ * Phase 2.2 — Transform card 强制横向一行
+ * (反推 app.css @860 .about-banner-card { flex-direction: column })
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  .about-banner-card.quickmode-transform-card {
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* RotationDot 占剩余空间, 其他 children 自然宽度 */
+  .quickmode-transform-card .qm-rotation-track {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    cursor: pointer;
+  }
+
+  .quickmode-transform-card .qm-rotation-display {
+    flex: 0 0 auto !important;
+    min-width: 44px !important;
+    padding: 4px 6px !important;
+  }
+
+  .quickmode-transform-card .qm-icon-btn {
+    flex: 0 0 auto !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.3 — iOS hover-stuck 修复
+ * 触屏设备 tap 后 :hover 会粘住, 把 hover 状态显式重置回 base
+ * ================================================================ */
+
+@media (hover: none) {
+  /* Header 链接 / 语言切换 */
+  .header-link:hover,
+  .header-bar .header-link:hover,
+  .lang-toggle:hover,
+  .header-bar .lang-toggle:hover {
+    background: var(--win7-button) !important;
+    color: #122d4a !important;
+    filter: none !important;
+    transform: none !important;
+  }
+
+  .header-link.header-link-active:hover,
+  .header-bar .header-link.header-link-active:hover {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%) !important;
+    color: #4c3000 !important;
+  }
+
+  /* About-arcade 蓝色 chunky 按钮 (主流量) */
+  .about-arcade-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* 分享 icon / 素材卡 / 草图卡 */
+  .share-icon-btn:hover,
+  .material-card:hover,
+  .draft-slot-card:hover {
+    transform: none !important;
+  }
+
+  /* QuickMode 老 dark theme 按钮 (qm-btn / qm-icon-btn / qm-rail-item) — 重置回 base */
+  .qm-btn:hover {
+    background: #2a2a2a !important;
+    border-color: #3a3a3a !important;
+    transform: none !important;
+  }
+
+  .qm-icon-btn:hover {
+    background: #fff !important;
+    transform: none !important;
+  }
+
+  .qm-rail-item:hover {
+    border-color: #3a3a3a !important;
+    transform: none !important;
+  }
+
+  /* Win7 工具栏 + 草图按钮 */
+  .win7-toolbar-btn:hover,
+  .win7-toolbar-pill:hover {
+    background: var(--win7-button) !important;
+    filter: none !important;
+  }
+
+  .draft-card-btn:hover,
+  .draft-save-current-btn:hover,
+  .material-search-clear:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* Museum / About 返回 / footer */
+  .museum-back-btn:hover,
+  .about-back-btn:hover,
+  .about-footer-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* QuickMode mobile 自家按钮 (.qmm-* / .quickmode-mobile-bottom-btn / .mobile-*) */
+  .qmm-reroll-btn:hover,
+  .qmm-pick-btn:hover,
+  .qmm-upload-btn:hover,
+  .qmm-mode-chip:hover,
+  .qmm-picker-item:hover,
+  .quickmode-mobile-bottom-btn:hover,
+  .mobile-hamburger:hover,
+  .mobile-nav-item:hover,
+  .mobile-nav-dev-btn:hover,
+  .mobile-nav-close:hover,
+  .mobile-nav-ca-copy:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* RightSidebar mobile sheet 新按钮 */
+  .rs-mobile-btn:hover,
+  .rs-mobile-action:hover,
+  .rs-mobile-align-btn:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.4 — Editor Mobile Sheet content classes (RightSidebar 重做)
+ * 由 rightsidebar.tsx mobile 分支用 — Win7 light + 语义色 (危险/收藏/绿色 emerald)
+ * ================================================================ */
+
+.rs-mobile-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rs-mobile-preview-frame {
+  background: #ffffff;
+  border: 2px solid #0a4e97;
+  border-radius: 14px;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 4px 12px rgba(7, 48, 95, 0.14);
+}
+
+.rs-mobile-preview-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.rs-mobile-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #6886b0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rs-mobile-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(10, 78, 151, 0.18);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.rs-mobile-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0a356d;
+  letter-spacing: 0.04em;
+}
+
+.rs-mobile-btn-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rs-mobile-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(74, 112, 159, 0.12);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+}
+
+.rs-mobile-btn:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.98);
+}
+
+.rs-mobile-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rs-mobile-btn-danger {
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 60%, #d8541a 100%);
+  color: #fff;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #8a3408,
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 2px 6px rgba(176, 76, 26, 0.32);
+}
+
+.rs-mobile-btn-danger:active {
+  background: linear-gradient(180deg, #ff7840 0%, #d8541a 100%);
+  color: #fff;
+}
+
+.rs-mobile-btn-subtle {
+  background: linear-gradient(180deg, #fafafa 0%, #d7dde5 100%);
+  color: #354f6d;
+  border-color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #889db3,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  margin-top: 14px;
+}
+
+.rs-mobile-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid #b9d4ee;
+  background: #f7fbff;
+  color: #0a356d;
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.rs-mobile-input:focus {
+  border-color: #1f92f8;
+  background: #fff;
+}
+
+.rs-mobile-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rs-mobile-range-row label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0a356d;
+  min-width: 36px;
+}
+
+.rs-mobile-range-row input[type='range'] {
+  flex: 1;
+  accent-color: #ff9d00;
+  height: 32px;
+}
+
+.rs-mobile-range-row span {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #0a356d;
+  min-width: 36px;
+  text-align: right;
+}
+
+.rs-mobile-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rs-mobile-color-row input[type='color'] {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid #0a4e97;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.rs-mobile-align-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 6px;
+}
+
+.rs-mobile-align-btn {
+  min-height: 40px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.rs-mobile-align-btn:active {
+  transform: scale(0.96);
+}
+
+.rs-mobile-align-btn-on {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+}
+
+.rs-mobile-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.rs-mobile-action {
+  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--win7-button);
+  color: #173452;
+  border: 1px solid #fff;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 8px rgba(74, 112, 159, 0.16);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
+  width: 100%;
+}
+
+.rs-mobile-action:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.97);
+}
+
+.rs-mobile-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rs-mobile-action-primary {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 3px 10px rgba(210, 148, 24, 0.32);
+}
+
+.rs-mobile-action-photo {
+  background: linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%);
+  border-color: #7a5a1a;
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #6a4d12,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.rs-mobile-action-emerald {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+  border-color: #0a6e50;
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #064c37,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.rs-mobile-action-fav {
+  background: linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%);
+  border-color: #8a3408;
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px #6c2706,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.rs-mobile-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
 }

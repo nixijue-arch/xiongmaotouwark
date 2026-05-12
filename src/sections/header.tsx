@@ -35,6 +35,16 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
   return (
     <header className="header-bar">
       <div className="header-left">
+        {/* Mobile-only hamburger — 桌面 CSS 隐藏 (.mobile-hamburger display:none). 放在 header-left 首位是
+            为了 mobile grid 上自然落到第一列 (左) */}
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          className="mobile-hamburger"
+          aria-label={state.language === 'zh' ? '打开菜单' : 'Open menu'}
+          type="button"
+        >
+          <Menu size={20} strokeWidth={2.4} />
+        </button>
         <div className="brand-icon">
           <img src="/site-logo.png" alt="Site logo" className="brand-logo-image" />
         </div>
@@ -170,16 +180,6 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
         <button onClick={switchLang} className="lang-toggle" title="Switch language">
           <Languages size={14} />
           <span className="lang-label">{t('switchLang')}</span>
-        </button>
-
-        {/* Mobile-only hamburger — 桌面 CSS 隐藏 (.mobile-hamburger display:none) */}
-        <button
-          onClick={() => setMobileNavOpen(true)}
-          className="mobile-hamburger"
-          aria-label={state.language === 'zh' ? '打开菜单' : 'Open menu'}
-          type="button"
-        >
-          <Menu size={20} strokeWidth={2.4} />
         </button>
       </div>
 
