@@ -100,6 +100,7 @@ interface EffectiveParams {
   sharpness: number;
   blend: number;
   eraseBand: number;       // 用作 Chamfer DT distance 阈值 (= meanRadius + 12)
+  preBlurR: number;        // v4f-PLUS: pre-blur 抹 wrinkle 保五官 (不动 hair erase/adaptive/blend)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
@@ -112,6 +113,8 @@ function deriveEffective(purify: number | undefined): EffectiveParams {
     sharpness: Math.max(0.5, 4 - m * 3.5),
     blend: m,
     eraseBand: meanRadius + 12,
+    // master<40 不 blur (保 image #25 干净); master 50→1px mild; master 100→5px (抹 wrinkly 老脸)
+    preBlurR: Math.max(0, Math.round((m - 0.4) * 8)),
   };
 }
 
@@ -477,6 +480,48 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     const w = out, h = out;
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
+
+    // 0) v4f-PLUS: master-controlled pre-blur — 抹 wrinkle / skin texture / 颗粒 但保五官 contour
+    // 用 polygon mask weighted average padding 防 edge bleed (避免 polygon 外 0 像素拉低 edge 颜色)
+    // 3-pass boxBlur1D ≈ Gaussian. master 50 → r=1 (mild, 不破细五官), master 100 → r=5 (强, wrinkly 老脸)
+    if (eff.preBlurR > 0) {
+      const N0 = w * h;
+      let sR = 0, sG = 0, sB = 0, cP = 0;
+      for (let i = 0; i < N0; i++) {
+        if (d[i * 4 + 3] > 200) {
+          sR += d[i * 4]; sG += d[i * 4 + 1]; sB += d[i * 4 + 2]; cP++;
+        }
+      }
+      if (cP > 0) {
+        const aR = Math.round(sR / cP);
+        const aG = Math.round(sG / cP);
+        const aB = Math.round(sB / cP);
+        const Rs = new Uint8ClampedArray(N0);
+        const Gs0 = new Uint8ClampedArray(N0);
+        const Bs = new Uint8ClampedArray(N0);
+        for (let i = 0; i < N0; i++) {
+          if (d[i * 4 + 3] > 200) {
+            Rs[i] = d[i * 4]; Gs0[i] = d[i * 4 + 1]; Bs[i] = d[i * 4 + 2];
+          } else {
+            Rs[i] = aR; Gs0[i] = aG; Bs[i] = aB;
+          }
+        }
+        let Rb = boxBlur1D(Rs, w, h, eff.preBlurR);
+        let Gb = boxBlur1D(Gs0, w, h, eff.preBlurR);
+        let Bb = boxBlur1D(Bs, w, h, eff.preBlurR);
+        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+        Rb = boxBlur1D(Rb, w, h, eff.preBlurR);
+        Gb = boxBlur1D(Gb, w, h, eff.preBlurR);
+        Bb = boxBlur1D(Bb, w, h, eff.preBlurR);
+        for (let i = 0; i < N0; i++) {
+          if (d[i * 4 + 3] > 200) {
+            d[i * 4] = Rb[i]; d[i * 4 + 1] = Gb[i]; d[i * 4 + 2] = Bb[i];
+          }
+        }
+      }
+    }
 
     // 1) luma map G + polygon 内全局平均 lum (padding 用)
     const G = new Uint8ClampedArray(w * h);
