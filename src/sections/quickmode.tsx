@@ -184,7 +184,6 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // 视觉同步 v3: 只有 onRandomize (一键随机, panda+face+text 一起换) 走 lagging,
   // 其他场景 (打字 / Reroll / 切语言 / 切模式 / 切 panda picker / 切 face picker) 都走 immediate.
   // → displayedText 跟 displayCaptionOffset 平时同步 text/panda, onRandomize 触发后等 onRendered 一起切.
-  const [imgReady, setImgReady] = useState(true);
   const [displayedText, setDisplayedText] = useState(text);
   const [displayCaptionOffset, setDisplayCaptionOffset] = useState(() => getLiveCaptionOffset(panda));
 
@@ -213,8 +212,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     const newText = pickRandomText(textLang, mode, text);
 
     // 不再 await 预合成 → 点击瞬间响应, 不卡 ~100-200ms
-    // PandaCanvas onRendered 触发 setImgReady(true), caption 同帧出现
-    setImgReady(false);
+    // panda/face/text 都新, displayed* 由 onRendered 一起同步
     setPandaId(newPanda.id);
     setFaceId(newFace.id);
     setText(newText);
@@ -424,10 +422,8 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             items={PANDA_HEADS}
             value={pandaId}
             onChange={(id) => {
-              // 点同一个 panda 直接 return — 避免 setImgReady(false) 但 setPandaId 是 noop
-              // PandaCanvas 不重渲染, onRendered 不触发, caption 永久隐藏
+              // 同 id 直接 return — setPandaId 会被 React noop 但其他副作用要避免
               if (id === pandaId) return;
-              setImgReady(false);
               setPandaId(id);
             }}
             lang={lang}
@@ -440,7 +436,6 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             onChange={(id) => {
               // 同 face 且无 customFace 直接 return; customFace 存在则点同 id 也算切换 (清 customFace)
               if (id === faceId && !customFace) return;
-              setImgReady(false);
               setFaceId(id);
               setCustomFace(null);
             }}
@@ -483,7 +478,6 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   // v2 同步切换: onRendered = panda 实际显示 (img onLoad) 后才触发
                   // 一起切 displayed* (caption + transform), 旧版本完整保持到这一刻
                   onRendered={() => {
-                    setImgReady(true);
                     setDisplayedText(text);
                     setDisplayCaptionOffset(getLiveCaptionOffset(panda));
                   }}
