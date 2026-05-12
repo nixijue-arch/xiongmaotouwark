@@ -496,14 +496,17 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
 
     // 3) 精确 edge distance via Chamfer DT
-    // W: alpha >= 200 算 polygon 内 (跟 main loop 一致, 不用 > 200)
     const W = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] >= 200 ? 255 : 0;
     const edgeDist = chamferDT(W, w, h);
-    const eraseDistance = eff.eraseBand;          // inner erase: 全部统一处理
-    const extendedDistance = eraseDistance + 18;  // outer erase: 暗肤色阴影也强制涂白
+    // graded fade erase zone (替代旧 inner+outer hard 双阶):
+    //   dist < eraseDistance: lumThr=256 (任何非头发 lum 都涂白)
+    //   dist ∈ [eraseDistance, eraseDistance+fadeDist]: lumThr 线性从 256 渐变到 0
+    //   dist > eraseDistance+fadeDist: 完全走 adaptive threshold
+    // 渐变 zone 让浅/深 lum 在不同距离都被涂白, 没有 hard 阈值跨越的"黑线伪影"
+    const eraseDistance = eff.eraseBand;
+    const fadeDist = 40;
     const eraseLum = 50;
-    const extendedLumThr = 120;                   // outer 区: lum<120 → 涂白
 
     // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
     const sigmoidLut = new Uint8ClampedArray(256);
@@ -525,21 +528,25 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
       const lum = G[i];
       const dist = edgeDist[i];
 
-      if (dist < eraseDistance) {
-        // Inner erase: polygon 边缘 hard 处理
-        if (lum < eraseLum) {
-          d[di + 3] = 0; // 头发/阴影渗入 → 透明
-        } else {
-          // 涂白 + 强制 alpha=255 (消除 polygon anti-alias 半透明 dark mix)
-          // 关键: anti-alias 边缘 alpha∈[200,254] 像素 RGB 是 face 边缘 dark color,
-          // 半透明显示在 panda 上呈现"细黑线" → 强制 alpha=255 + RGB=255 让边缘 100% 纯白
-          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
-        }
+      // 头发 / 阴影渗入 → 完全透明 (适用于任何 polygon edge 附近)
+      if (dist < eraseDistance + fadeDist && lum < eraseLum) {
+        d[di + 3] = 0;
         continue;
       }
 
-      if (dist < extendedDistance && lum < extendedLumThr) {
-        // Outer erase: 距 edge 18px 内的暗肤色阴影 (lum<120) 强行涂白
+      // graded erase zone — lum 阈值随 dist 渐变下降
+      let lumThr;
+      if (dist < eraseDistance) {
+        lumThr = 256; // inner zone: 任何非头发 lum 都涂白
+      } else if (dist < eraseDistance + fadeDist) {
+        const t = (dist - eraseDistance) / fadeDist;
+        lumThr = 256 * (1 - t); // 渐变: 256 → 0
+      } else {
+        lumThr = 0;
+      }
+
+      if (lum < lumThr) {
+        // 涂白 + alpha=255 (消除 anti-alias dark mix + 边缘阴影逐渐 lum 越深越远)
         d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
         continue;
       }

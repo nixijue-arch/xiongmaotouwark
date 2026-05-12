@@ -197,14 +197,12 @@ function applyL2(rgba, w, h, eff) {
   for (let i = 0; i < N; i++) lumPad[i] = rgba[i * 4 + 3] > 200 ? G[i] : faceAvg;
   const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
 
-  // 3. exact edge distance via Chamfer DT (much more accurate than boxBlur)
   const W = new Uint8ClampedArray(N);
   for (let i = 0; i < N; i++) W[i] = rgba[i * 4 + 3] >= 200 ? 255 : 0;
   const edgeDist = chamferDT(W, w, h);
   const eraseDistance = eff.eraseBand;
-  const extendedDistance = eraseDistance + 18;
+  const fadeDist = 40;
   const eraseLum = 50;
-  const extendedLumThr = 120;
 
   // 4. sigmoid LUT
   const sigLut = new Uint8ClampedArray(256);
@@ -220,12 +218,16 @@ function applyL2(rgba, w, h, eff) {
     if (rgba[di + 3] < 200) continue;
     const lum = G[i];
     const dist = edgeDist[i];
-    if (dist < eraseDistance) {
-      if (lum < eraseLum) { rgba[di + 3] = 0; }
-      else { rgba[di] = 255; rgba[di + 1] = 255; rgba[di + 2] = 255; rgba[di + 3] = 255; }
-      continue;
+    if (dist < eraseDistance + fadeDist && lum < eraseLum) {
+      rgba[di + 3] = 0; continue;
     }
-    if (dist < extendedDistance && lum < extendedLumThr) {
+    let lumThr;
+    if (dist < eraseDistance) lumThr = 256;
+    else if (dist < eraseDistance + fadeDist) {
+      const t = (dist - eraseDistance) / fadeDist;
+      lumThr = 256 * (1 - t);
+    } else lumThr = 0;
+    if (lum < lumThr) {
       rgba[di] = 255; rgba[di + 1] = 255; rgba[di + 2] = 255; rgba[di + 3] = 255;
       continue;
     }
