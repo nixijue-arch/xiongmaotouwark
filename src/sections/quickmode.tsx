@@ -492,7 +492,10 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   }}
                   // transform 用 displayCaptionOffset (旧值保持到 onRendered 才切)
                   // 不再加 opacity 抖动 → 旧 panda 始终 1.0 直到新 panda 真出现
-                  style={{ transform: `translateY(${displayCaptionOffset}px)` }}
+                  // px → % 修 mobile 校准: displayCaptionOffset 是 350-coord 绝对值, mobile
+                  // frame ~225px 跟 desktop 350px 大小不同 → 同 px 相对偏移不一致 ("校准错位").
+                  // 用 % 相对 img 自身高度, 等比缩放, mobile/desktop 视觉一致.
+                  style={{ transform: `translateY(${(displayCaptionOffset / 350 * 100).toFixed(3)}%)` }}
                 />
               </div>
               {displayedText && (

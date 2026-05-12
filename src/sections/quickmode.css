@@ -41,7 +41,8 @@
 .quickmode-preview {
   /* v5: 固定尺寸预览框（不随 panda aspect 变高变矮）
      panda-frame 固定 350×350 box，panda contain 居中显示
-     caption 固定 margin-top → 视觉始终一致 */
+     caption 固定 margin-top → 视觉始终一致
+     v6: overflow hidden — panda/caption translateY 超出画框时被裁掉, 不再"画框是摆设" */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -52,6 +53,7 @@
   border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
+  overflow: hidden;
 }
 .quickmode-preview .qm-panda-frame {
   width: 350px;
@@ -60,10 +62,12 @@
   /* 关键：bottom-align IMG 元素到 frame 底部
      之前 align-items: center 让 wide-shaped panda (350x273) 在 frame (350x350) 居中
      内容底部 y=311 不在 frame 底部 y=350 → caption 距离不一致
-     改成 flex-end 后所有 panda 的内容底都贴 frame 底, caption 距离统一 */
+     改成 flex-end 后所有 panda 的内容底都贴 frame 底, caption 距离统一
+     v6: overflow hidden — translateY 让 panda 移出 frame 范围时被画框裁掉 */
   align-items: flex-end;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
 }
 .quickmode-preview .qm-panda-img {
   display: block;
