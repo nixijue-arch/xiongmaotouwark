@@ -656,29 +656,11 @@
   }
 }
 
-/* === Mobile FAB (现有 leftsidebar/rightsidebar 用) 改 Win7 + 抬高让位 inline panel === */
+/* === Mobile FAB — 删除常驻 (EditorMobilePanel 的 chunky row 4 个按钮代替入口) === */
 @media (max-width: 768px) {
   .mobile-fab-left,
   .mobile-fab-right {
-    width: 56px !important;
-    height: 56px !important;
-    border-radius: 16px !important;
-    background: linear-gradient(180deg, #1f92f8 0%, #116bcc 100%) !important;
-    border: 2px solid #09498f !important;
-    color: #fff !important;
-    box-shadow:
-      inset 0 0 0 2px rgba(255, 255, 255, 0.28),
-      0 6px 18px rgba(7, 48, 95, 0.42) !important;
-    /* 抬高让位 EditorMobilePanel (~120) + EditorBottomBar (~70) + safe-bottom */
-    bottom: calc(var(--mobile-safe-bottom) + 200px) !important;
-    z-index: 95 !important;
-  }
-
-  .mobile-fab-left:active,
-  .mobile-fab-right:active {
-    transform: scale(0.94);
-    background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%) !important;
-    color: #5e3d00 !important;
+    display: none !important;
   }
 }
 
@@ -2056,6 +2038,67 @@
     min-height: 38px !important;
     width: 38px;
     padding: 0;
+  }
+
+  /* === Chunky 4-col row — 仿 QuickMode pick-row-4 大按钮模式 === */
+  .emp-chunky-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .emp-chunky-btn {
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 12px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 2px 8px rgba(74, 112, 159, 0.16);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .emp-chunky-btn:active {
+    transform: scale(0.96);
+    background: var(--win7-button-hover);
+    color: #5e3d00;
+  }
+
+  .emp-chunky-emoji {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .emp-chunky-btn-primary {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+    color: #4c3000;
+    box-shadow:
+      inset 0 0 0 1px #bb7e11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      0 3px 10px rgba(210, 148, 24, 0.32);
+  }
+
+  .emp-chunky-btn-emerald {
+    background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%);
+    border-color: #0a6e50;
+    color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #064c37,
+      inset 0 1px 0 rgba(255, 255, 255, 0.32),
+      0 3px 10px rgba(8, 90, 60, 0.28);
   }
 }
 

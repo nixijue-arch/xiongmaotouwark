@@ -10,6 +10,7 @@ import { useMeme } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import {
   ArrowUp, ArrowDown, Trash2, FlipHorizontal, RotateCw, RotateCcw, Type as TypeIcon,
+  Shuffle, Wand2, Settings2,
 } from 'lucide-react';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
 import { ALL_PANDAS, ALL_FACES } from '@/data/materials';
@@ -57,11 +58,46 @@ export function EditorMobilePanel() {
   const canMoveUp = selected ? selectedTopDownIdx > 0 : false;
   const canMoveDown = selected ? selectedTopDownIdx < sortedTopDown.length - 1 : false;
 
+  // 当画布为空时, 只显示 chunky row (选素材 / 换图 / 换文字 / 更多) — 主入口
   if (state.elements.length === 0) {
     return (
       <div className="emp-root">
         <div className="emp-empty-hint">
-          {lang === 'zh' ? '点击左下 🐼 按钮选熊猫头 / 人脸开始' : 'Tap 🐼 bottom-left to pick a panda / face'}
+          {lang === 'zh' ? '从下方按钮开始 — 选素材 / 一键换图' : 'Start below — pick assets / randomize'}
+        </div>
+        <div className="emp-chunky-row">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-open-left-sheet'))}
+            className="emp-chunky-btn emp-chunky-btn-primary"
+            type="button"
+          >
+            <span className="emp-chunky-emoji">🐼</span>
+            <span>{lang === 'zh' ? '选素材' : 'Assets'}</span>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-switch-image'))}
+            className="emp-chunky-btn emp-chunky-btn-primary"
+            type="button"
+          >
+            <Shuffle size={20} strokeWidth={2.2} />
+            <span>{lang === 'zh' ? '一键随机' : 'Random'}</span>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-recommend-text'))}
+            className="emp-chunky-btn emp-chunky-btn-emerald"
+            type="button"
+          >
+            <Wand2 size={20} strokeWidth={2.2} />
+            <span>{lang === 'zh' ? '加文字' : 'Text'}</span>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-open-right-sheet'))}
+            className="emp-chunky-btn"
+            type="button"
+          >
+            <Settings2 size={20} strokeWidth={2.2} />
+            <span>{lang === 'zh' ? '更多' : 'More'}</span>
+          </button>
         </div>
       </div>
     );
@@ -206,12 +242,50 @@ export function EditorMobilePanel() {
         </div>
       )}
 
-      {/* Hint when nothing selected */}
-      {!selected && (
+      {/* Hint when nothing selected (only when have content but nothing selected) */}
+      {!selected && state.elements.length > 0 && (
         <div className="emp-hint">
           {lang === 'zh' ? '点上面的图层 / 画布元素来编辑' : 'Tap a layer or canvas element to edit'}
         </div>
       )}
+
+      {/* === Chunky 4-col 大按钮 row — 仿 QuickMode pick-row-4 风格 ===
+          🐼 选素材 / 🎲 换图 / 🔤 换文字 / 🔧 更多
+          通过 window CustomEvent 调 LeftSidebar / RightSidebar 的现有 handler */}
+      <div className="emp-chunky-row">
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-open-left-sheet'))}
+          className="emp-chunky-btn"
+          type="button"
+        >
+          <span className="emp-chunky-emoji">🐼</span>
+          <span>{lang === 'zh' ? '选素材' : 'Assets'}</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-switch-image'))}
+          className="emp-chunky-btn emp-chunky-btn-primary"
+          type="button"
+        >
+          <Shuffle size={20} strokeWidth={2.2} />
+          <span>{lang === 'zh' ? '换图' : 'Swap'}</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-recommend-text'))}
+          className="emp-chunky-btn emp-chunky-btn-emerald"
+          type="button"
+        >
+          <Wand2 size={20} strokeWidth={2.2} />
+          <span>{lang === 'zh' ? '换文字' : 'Text'}</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('xmw-editor-open-right-sheet'))}
+          className="emp-chunky-btn"
+          type="button"
+        >
+          <Settings2 size={20} strokeWidth={2.2} />
+          <span>{lang === 'zh' ? '更多' : 'More'}</span>
+        </button>
+      </div>
     </div>
   );
 }

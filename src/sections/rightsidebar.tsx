@@ -311,6 +311,28 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   const [smartModalOpen, setSmartModalOpen] = useState(false);
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+
+  // RPC for EditorMobilePanel — 通过 window event 调用本组件内部 handler
+  // 用 ref 模式避免 useEffect 反复 attach/remove listener (handler 每渲染都重新创建)
+  const editorRpcRef = useRef<{
+    switchImage?: () => void;
+    recommendText?: () => void;
+    openSheet?: () => void;
+  }>({});
+
+  useEffect(() => {
+    const onSwitchImg = () => editorRpcRef.current.switchImage?.();
+    const onRecText = () => editorRpcRef.current.recommendText?.();
+    const onOpen = () => editorRpcRef.current.openSheet?.();
+    window.addEventListener('xmw-editor-switch-image', onSwitchImg);
+    window.addEventListener('xmw-editor-recommend-text', onRecText);
+    window.addEventListener('xmw-editor-open-right-sheet', onOpen);
+    return () => {
+      window.removeEventListener('xmw-editor-switch-image', onSwitchImg);
+      window.removeEventListener('xmw-editor-recommend-text', onRecText);
+      window.removeEventListener('xmw-editor-open-right-sheet', onOpen);
+    };
+  }, []);
   const previewRequestIdRef = useRef(0);
   const previewCropActionRef = useRef<{
     handle: CropHandle;
@@ -453,6 +475,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (isMobile) setSheetOpen(false);
   };
 
+  // expose handlers for window event RPC
+  editorRpcRef.current.switchImage = handleSwitchImage;
+  editorRpcRef.current.openSheet = () => setSheetOpen(true);
+
   const handleRecommendText = () => {
     const texts = state.language === 'zh' ? ZH_TEXTS : EN_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
@@ -464,6 +490,9 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element: textEl });
     }
   };
+
+  // bind recommendText after definition
+  editorRpcRef.current.recommendText = handleRecommendText;
 
   const handleAddText = () => {
     const promptText = state.language === 'zh' ? '输入文字内容' : 'Enter text content';

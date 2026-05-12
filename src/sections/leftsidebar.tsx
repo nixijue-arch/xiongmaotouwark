@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
@@ -78,6 +78,20 @@ export function LeftSidebar() {
   const isMobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'panda' | 'face'>('panda');
+
+  // RPC for EditorMobilePanel — 通过 window event 触发本组件 sheet 打开
+  // CustomEvent detail.tab 可指定打开时显示哪个 tab ('panda' / 'face')
+  useEffect(() => {
+    const onOpenLeft = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.tab === 'panda' || detail?.tab === 'face') {
+        setActiveTab(detail.tab);
+      }
+      setSheetOpen(true);
+    };
+    window.addEventListener('xmw-editor-open-left-sheet', onOpenLeft);
+    return () => window.removeEventListener('xmw-editor-open-left-sheet', onOpenLeft);
+  }, []);
   const [pandaSearch, setPandaSearch] = useState('');
   const [faceSearch, setFaceSearch] = useState('');
 
