@@ -709,25 +709,27 @@
     flex-wrap: nowrap;
   }
 
-  /* === Editor mobile: editor-layout fixed height (消 canvas → panel 中间 127px 空白) ===
-     Probe 实测: 之前 editor-layout flex-1 占 539, canvas auto-scaled 394 (width-limited),
-     justify-start → 145px blank below canvas. user 反馈 "画板到下面功能区距离太远".
-     真凶: canvas 必须 square + width-limited 在 iPhone 17 PM 430 viewport (canvas 406 max),
-     而 editor-layout flex-1 抢到的 539 比 canvas 大 → blank 必然.
-     修法: editor-layout 改 fixed height = canvas 大小 (即 viewport-width - 24px),
-     不再 flex-1 grow. emp-root flex-grow 1 顺势填补 remaining → canvas / panel 紧贴. */
+  /* === Editor mobile: 全部 tight stack from top (user 要求"全都向上移动") ===
+     Strategy: 不再 flex-grow 任何 child. 让 header / editor-layout / emp-root / bottombar
+     各自 auto height, 自然按 source order 顶部对齐排列. 任何 blank 自动落到 viewport 最底
+     (Chrome iOS native tab bar 覆盖那 ~80px, user 看不见, 不会感觉留空) */
   .editor-layout {
     flex: 0 0 auto !important;
-    height: calc(min(var(--visual-vh, 100dvh) - 240px, 100vw - 24px)) !important;
-    min-height: 240px;
+    /* editor-layout = canvas 大小 (square = viewport width). 让 canvas 占整宽. */
+    height: 100vw !important;
+    max-height: 60vh !important; /* 防 tall narrow 手机过大 */
     overflow: hidden !important;
   }
 
-  /* EditorMobilePanel flex-grow 1 让它顺势填补 editor-layout 后剩余空间
-     space-around 让 hint / chunky row 在 panel 内均匀分布, 消化 panel 内部 blank */
+  /* EditorMobilePanel = content 自然 height, 不 grow, 不 space-around */
   .emp-root {
-    flex: 1 1 auto !important;
-    justify-content: space-around !important;
+    flex: 0 0 auto !important;
+    justify-content: flex-start !important;
+  }
+
+  /* EditorBottomBar = 自然 height, 紧跟 emp-root */
+  .editor-bottom-bar {
+    flex: 0 0 auto !important;
   }
 }
 
