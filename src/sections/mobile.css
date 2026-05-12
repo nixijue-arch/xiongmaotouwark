@@ -667,11 +667,15 @@
 /* === 防顶栏挡住 page content === */
 @media (max-width: 768px) {
   .app-shell {
-    /* 双 fallback: vh 是 baseline 兼容 (iOS Safari < 15.4 也接受);
-       dvh 在新版上更准, 若浏览器不识别会忽略, vh 兜底.
+    /* 真机适配三 fallback (按优先级):
+         1) --visual-vh: main.tsx 用 visualViewport.height 实时算的可视高度
+            (标准解法, 适配 iOS Chrome native tab bar 等 chrome 占据空间不被 dvh 覆盖的 case)
+         2) 100dvh: 现代浏览器 dynamic viewport
+         3) 100vh: 老浏览器 fallback
        重要: 不能让 height 计算成 0, 否则 overflow:hidden 把所有内容剪没看见 = "黑屏" */
     height: 100vh !important;
     height: 100dvh !important;
+    height: var(--visual-vh, 100dvh) !important;
     min-height: 100vh;
   }
 
