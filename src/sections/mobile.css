@@ -1839,13 +1839,13 @@
   .emp-root {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: 6px;
+    padding: 6px 10px;
     background:
       linear-gradient(180deg, rgba(245, 250, 255, 0.96) 0%, rgba(225, 240, 252, 0.96) 100%);
     border-top: 1px solid rgba(45, 113, 171, 0.32);
     flex-shrink: 0;
-    min-height: 64px;
+    min-height: 56px;
     z-index: 40;
   }
 
@@ -1853,9 +1853,9 @@
   .emp-hint {
     text-align: center;
     color: #4c6c91;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    padding: 8px 6px;
+    padding: 4px 6px;
   }
 
   .emp-layers {
@@ -1872,8 +1872,8 @@
   }
 
   .emp-layer-thumb {
-    width: 46px;
-    height: 46px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
     background: #fff;
     border: 2px solid rgba(10, 78, 151, 0.25);
@@ -2053,7 +2053,7 @@
   }
 
   .emp-chunky-btn {
-    min-height: 60px;
+    min-height: 54px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2141,11 +2141,10 @@
    的 .mobile-fab-left/right (bottom corner fixed FAB) 重叠. Hamburger 已提供 nav. */
 @media (max-width: 768px) {
   .editor-bottom-bar {
-    gap: 8px;
-    padding: 8px;
-    padding-left: 72px; /* 给左 FAB 让位 (56 + 12 margin + 4 buffer) */
-    padding-right: 72px; /* 给右 FAB 让位 */
-    padding-bottom: calc(8px + var(--mobile-safe-bottom));
+    gap: 6px;
+    padding: 6px 8px;
+    /* FAB 删了不需要 padding-left/right buffer 了 */
+    padding-bottom: calc(6px + var(--mobile-safe-bottom));
     flex-wrap: nowrap;
     overflow: visible;
     justify-content: center;
@@ -2162,11 +2161,11 @@
   }
 
   .editor-bb-btn {
-    min-height: 44px;
-    padding: 0 10px;
+    min-height: 40px;
+    padding: 0 8px;
     font-size: 11px;
     gap: 3px;
-    border-radius: 9px;
+    border-radius: 8px;
   }
 
   .editor-bb-btn span {
