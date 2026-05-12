@@ -572,19 +572,19 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
               <div className="qmm-pick-row qmm-pick-row-4">
                 <button onClick={() => setPandaSheetOpen(true)} className="qmm-pick-btn" type="button">
                   <span className="qmm-pick-btn-emoji">🐼</span>
-                  <span>{lang === 'zh' ? '熊猫' : 'Panda'}</span>
+                  <span>{lang === 'zh' ? '选熊猫头' : 'Pandas'}</span>
                 </button>
                 <button onClick={() => setFaceSheetOpen(true)} className="qmm-pick-btn" type="button">
                   <span className="qmm-pick-btn-emoji">😂</span>
-                  <span>{lang === 'zh' ? '脸' : 'Face'}</span>
+                  <span>{lang === 'zh' ? '选人脸' : 'Faces'}</span>
                 </button>
                 <button onClick={() => setCustomFaceModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-photo" type="button">
-                  <Camera size={20} strokeWidth={2.2} />
-                  <span>{lang === 'zh' ? '自制' : 'Custom'}</span>
+                  <Camera size={18} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '自制熊猫脸' : 'Custom face'}</span>
                 </button>
                 <button onClick={() => setSmartModalOpen(true)} className="qmm-pick-btn qmm-pick-btn-emerald" type="button">
-                  <Sparkles size={20} strokeWidth={2.2} />
-                  <span>{lang === 'zh' ? '提取' : 'Extract'}</span>
+                  <Sparkles size={18} strokeWidth={2.2} />
+                  <span>{lang === 'zh' ? '智能提取' : 'Smart'}</span>
                 </button>
               </div>
 

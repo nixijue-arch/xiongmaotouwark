@@ -39,9 +39,17 @@ function App() {
     return 'quick';
   });
 
+  // Mobile scroll fix: page='quick'/'collection'/'museum'/'about' 这些"自然滚动"页加 page-scroll
+  // class, mobile.css 让 .app-shell 改成 overflow visible + height auto → 走 iOS body-level scroll
+  // → URL bar 滚动时自动收起释放视觉空间. 'editor' 等保持 fixed height + inner scroll (canvas 计算依赖)
+  const pageScroll =
+    page === 'quick' || page === 'collection' || page === 'museum' || page === 'about';
+
   return (
     <MemeProvider>
-      <div className="app-shell h-screen w-screen flex flex-col overflow-hidden">
+      <div
+        className={`app-shell h-screen w-screen flex flex-col overflow-hidden ${pageScroll ? 'app-shell-page-scroll' : ''}`}
+      >
         <Header page={page} setPage={setPage} />
         {page === 'quick' ? (
           <QuickMode onOpenEditor={() => setPage('editor')} />

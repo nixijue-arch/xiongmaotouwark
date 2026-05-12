@@ -691,6 +691,31 @@
     min-height: 100vh;
   }
 
+  /* 自然滚动页 (quick/collection/museum/about): 用 body-level scroll 让 iOS Safari 滚动时 URL bar
+     自动收起释放视觉空间, 不再 inner-scroll 锁死. Editor / DEV 工具页保持 fixed-height + inner-scroll
+     (canvas 算 stage 尺寸依赖父高度). */
+  .app-shell.app-shell-page-scroll {
+    height: auto !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+    overflow-x: hidden !important;
+  }
+
+  .app-shell-page-scroll .quickmode-root,
+  .app-shell-page-scroll .about-container,
+  .app-shell-page-scroll .collection-root,
+  .app-shell-page-scroll .museum-root {
+    flex: initial !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+  }
+
+  /* body 自身 scroll 时启用 iOS momentum scroll */
+  html, body {
+    -webkit-overflow-scrolling: touch;
+  }
+
   .editor-layout {
     /* mobile 编辑器三栏先不动 (Phase 3 重做) — 但留个最小可读宽度 */
     flex-wrap: nowrap;
@@ -1673,5 +1698,45 @@
   .qmm-clear-custom-btn:hover {
     background-image: none !important;
     background: #fff !important;
+  }
+}
+
+/* ================================================================
+ * Phase 2.8 — 细节修
+ *   1) 0° 度数 badge 用 inline-flex 强制双向居中 (replace inline span text-align)
+ *   2) pick-row-4 button label 给"自制熊猫脸"(5字) 适当空间 — 减小 emoji + font 12, line tight
+ * ================================================================ */
+
+/* 度数 badge: 强制双向居中 — inline span text-align 在 inline-formatting context 内有时
+   跟 sibling 不完美对齐, 用 inline-flex 直接 vertical+horizontal center */
+.qm-rotation-display {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+}
+
+/* 4-col pick btn 在 iPhone 17 PM (430px - 24 padding - 18 gap)/4 ≈ 97px 列宽,
+   "自制熊猫脸" 5 中文 (font 12 ≈ 60px) + 内边距 + emoji 行高刚好 fit. 不允许 wrap,
+   超长 ellipsis 兜底 (实际 5 字 fit, EN "Custom face" 11 chars ≈ 77 fit, "Smart" fit). */
+@media (max-width: 768px) {
+  .qmm-pick-row-4 .qmm-pick-btn span:not(.qmm-pick-btn-emoji) {
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+    letter-spacing: -0.01em;
+  }
+
+  /* 缩小 emoji + lucide icon 给 label 更多空间 */
+  .qmm-pick-row-4 .qmm-pick-btn .qmm-pick-btn-emoji {
+    font-size: 20px;
+  }
+  .qmm-pick-row-4 .qmm-pick-btn svg {
+    width: 18px;
+    height: 18px;
   }
 }
