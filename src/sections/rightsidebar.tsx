@@ -343,8 +343,11 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     startX: number;
     startY: number;
     startRect: CropRect;
+    frame: HTMLDivElement | null;
   } | null>(null);
   const previewCropFrameRef = useRef<HTMLDivElement | null>(null);
+  // mobile sheet 单独 ref — 跟 desktop 同时挂在 DOM, 互不冲突
+  const previewCropFrameMobileRef = useRef<HTMLDivElement | null>(null);
 
   const handleExport = async () => {
     if (state.elements.length === 0) {
@@ -663,9 +666,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   }, [elementsKey]);
 
   useEffect(() => {
-    const onMove = (event: MouseEvent) => {
+    // PointerEvent 统一 mouse + touch — 让 mobile preview cropper 也能用同一逻辑
+    const onMove = (event: PointerEvent) => {
       const action = previewCropActionRef.current;
-      const frame = previewCropFrameRef.current;
+      const frame = action?.frame ?? previewCropFrameRef.current;
       if (!action || !frame) return;
 
       const rect = frame.getBoundingClientRect();
@@ -725,24 +729,31 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       previewCropActionRef.current = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
   }, []);
 
-  const startPreviewCropAction = useCallback((handle: CropHandle, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    previewCropActionRef.current = {
-      handle,
-      startX: event.clientX,
-      startY: event.clientY,
-      startRect: previewCrop,
-    };
-  }, [previewCrop]);
+  // 接 frameEl 参数 — 让 mobile sheet 传自己的 frame ref (不共用 desktop 的)
+  const startPreviewCropAction = useCallback(
+    (handle: CropHandle, event: React.PointerEvent, frameEl?: HTMLDivElement | null) => {
+      event.preventDefault();
+      event.stopPropagation();
+      previewCropActionRef.current = {
+        handle,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRect: previewCrop,
+        frame: frameEl ?? previewCropFrameRef.current,
+      };
+    },
+    [previewCrop]
+  );
 
   const resetPreviewCrop = useCallback(async () => {
     if (state.elements.length === 0) return;
@@ -807,11 +818,39 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
             <button className="bottom-sheet-close" onClick={() => setSheetOpen(false)}><X size={18} /></button>
           </div>
           <div className="bottom-sheet-body">
-            {/* === Preview === */}
+            {/* === Preview — 跟 desktop 同样 export bbox 拖动 + 4 角 handle + 重置范围 === */}
             <div className="rs-mobile-preview-wrap">
-              <div className="rs-mobile-preview-frame">
+              <div ref={previewCropFrameMobileRef} className="rs-mobile-preview-frame">
                 {previewUrl ? (
-                  <img src={previewUrl} alt="preview" />
+                  <>
+                    <img src={previewUrl} alt="preview" />
+                    <div
+                      className="rs-mobile-preview-bbox"
+                      onPointerDown={(event) => startPreviewCropAction('move', event, previewCropFrameMobileRef.current)}
+                      style={{
+                        left: `${(previewCrop.x / CAPTURE_SIZE) * 100}%`,
+                        top: `${(previewCrop.y / CAPTURE_SIZE) * 100}%`,
+                        width: `${(previewCrop.width / CAPTURE_SIZE) * 100}%`,
+                        height: `${(previewCrop.height / CAPTURE_SIZE) * 100}%`,
+                      }}
+                    >
+                      {(['nw', 'ne', 'sw', 'se'] as const).map(handle => {
+                        const pos =
+                          handle === 'nw' ? { left: -8, top: -8 } :
+                          handle === 'ne' ? { right: -8, top: -8 } :
+                          handle === 'sw' ? { left: -8, bottom: -8 } :
+                                            { right: -8, bottom: -8 };
+                        return (
+                          <div
+                            key={handle}
+                            className="rs-mobile-preview-handle"
+                            onPointerDown={(event) => startPreviewCropAction(handle, event, previewCropFrameMobileRef.current)}
+                            style={pos}
+                          />
+                        );
+                      })}
+                    </div>
+                  </>
                 ) : (
                   <div className="rs-mobile-preview-empty">
                     <Image size={28} strokeWidth={1.8} color="#6886b0" />
@@ -819,6 +858,18 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   </div>
                 )}
               </div>
+              {previewUrl && (
+                <div className="rs-mobile-preview-meta">
+                  <span>{state.language === 'zh' ? '默认自动贴边，可拖动或拉角调整复制范围' : 'Auto-trim. Drag or resize to adjust.'}</span>
+                  <button
+                    onClick={() => void resetPreviewCrop()}
+                    className="rs-mobile-preview-reset"
+                    type="button"
+                  >
+                    {state.language === 'zh' ? '重置范围' : 'Reset'}
+                  </button>
+                </div>
+              )}
               <button
                 onClick={handleCopyPreview}
                 disabled={state.elements.length === 0}
@@ -914,22 +965,8 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                     <span>{(state.elements.find(e => e.id === state.selectedId) as TextElement).strokeWidth}</span>
                   </div>
                 </div>
-                <div className="rs-mobile-align-row">
-                  {(['left', 'center', 'right'] as const).map(align => {
-                    const cur = (state.elements.find(e => e.id === state.selectedId) as TextElement).textAlign;
-                    return (
-                      <button
-                        key={align}
-                        onClick={() => dispatch({ type: 'UPDATE_ELEMENT', id: state.selectedId!, updates: { textAlign: align } })}
-                        className={`rs-mobile-align-btn ${cur === align ? 'rs-mobile-align-btn-on' : ''}`}
-                        type="button"
-                      >
-                        {state.language === 'zh'
-                          ? (align === 'left' ? '左' : align === 'center' ? '中' : '右')
-                          : (align === 'left' ? 'L' : align === 'center' ? 'C' : 'R')}
-                      </button>
-                    );
-                  })}
+                {/* 粗体 + 删除文字 一行 — 左中右对齐已删 (mobile 文字 caption 一般居中, 用户极少改对齐) */}
+                <div className="rs-mobile-text-action-row">
                   <button
                     onClick={() => {
                       const el = state.elements.find(e => e.id === state.selectedId) as TextElement;
@@ -938,16 +975,17 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                     className={`rs-mobile-align-btn ${(state.elements.find(e => e.id === state.selectedId) as TextElement).fontWeight === 'bold' ? 'rs-mobile-align-btn-on' : ''}`}
                     type="button"
                   >
-                    {state.language === 'zh' ? '粗' : 'B'}
+                    {state.language === 'zh' ? '粗体' : 'Bold'}
+                  </button>
+                  <button
+                    onClick={() => dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId! })}
+                    className="rs-mobile-btn rs-mobile-btn-danger"
+                    type="button"
+                    style={{ flex: 1 }}
+                  >
+                    {state.language === 'zh' ? '删除文字' : 'Delete'}
                   </button>
                 </div>
-                <button
-                  onClick={() => dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId! })}
-                  className="rs-mobile-btn rs-mobile-btn-danger"
-                  type="button"
-                >
-                  {state.language === 'zh' ? '删除文字' : 'Delete'}
-                </button>
               </div>
             )}
 
@@ -996,13 +1034,10 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               </button>
             </div>
 
-            {/* === Share row — icon buttons === */}
+            {/* === Share row — X 单按钮 (Facebook 实际无人用, 已隐藏) === */}
             <div className="rs-mobile-share-row">
               <button onClick={() => handleShare('x')} disabled={state.elements.length === 0} title={t('shareX')} className="share-icon-btn share-x" type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-              </button>
-              <button onClick={() => handleShare('facebook')} disabled={state.elements.length === 0} title={t('shareFB')} className="share-icon-btn share-fb" type="button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
               </button>
             </div>
 
@@ -1064,7 +1099,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
               <img src={previewUrl} alt="preview" className="w-full h-full object-contain" style={{ backgroundColor: '#FFFFFF' }} />
               <div
                 className="absolute border-2"
-                onMouseDown={(event) => startPreviewCropAction('move', event)}
+                onPointerDown={(event) => startPreviewCropAction('move', event)}
                 style={{
                   left: `${(previewCrop.x / CAPTURE_SIZE) * 100}%`,
                   top: `${(previewCrop.y / CAPTURE_SIZE) * 100}%`,
@@ -1074,6 +1109,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   background: 'rgba(255,94,0,0.08)',
                   cursor: 'move',
                   boxShadow: '0 0 0 9999px rgba(255,255,255,0.42)',
+                  touchAction: 'none',
                 }}
               >
                 {(['nw', 'ne', 'sw', 'se'] as const).map(handle => {
@@ -1086,7 +1122,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                   return (
                     <div
                       key={handle}
-                      onMouseDown={(event) => startPreviewCropAction(handle, event)}
+                      onPointerDown={(event) => startPreviewCropAction(handle, event)}
                       style={{
                         position: 'absolute',
                         width: 12,
@@ -1094,6 +1130,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
                         borderRadius: '50%',
                         backgroundColor: '#FF5E00',
                         border: '2px solid #fff',
+                        touchAction: 'none',
                         ...positionStyle,
                       }}
                     />
@@ -1386,14 +1423,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
           </button>
-          <button
-            onClick={() => handleShare('facebook')}
-            disabled={state.elements.length === 0}
-            title={t('shareFB')}
-            className="share-icon-btn share-fb"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-          </button>
+          {/* Facebook 已隐藏 — 实际无人用, 中文用户主要走 X / 微信 */}
         </div>
       </div>
 
