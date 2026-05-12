@@ -155,12 +155,12 @@ function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
   return dist;
 }
 
-function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
+function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5, displaySmooth = false) {
   let n = points.length;
-  // 入口 3-tap smoothing pass (display-time only, 不修改 caller 传入 points)
-  // 用户拖锚点到极端位置时, dragged 周围曲线局部尖锐 → 入口预平滑让 display + clip 都更圆滑
-  // 5-tap pointer-up smoothing 是 commit (actual handles 改); 这里 3-tap 是 draw-only (handles 不变)
-  if (n >= 4) {
+  // ⚠️ displaySmooth=true 时入口 3-tap smoothing pass —— 只用在 drawOriginalWithOverlay 显示曲线时
+  // processFace 内 ctx.clip() 一律 false: 否则会把 polygon mask 内移 → 破坏 v4 算法距离场平衡
+  // (957081f 之前 default 开启 smoothing 导致 v4g face mask 收缩, 右脸颊深阴影落入 fade 末端被 adaptive 判暗 → 大块 mid-gray)
+  if (displaySmooth && n >= 4) {
     const smoothed: Point[] = new Array(n);
     for (let i = 0; i < n; i++) {
       const prev = points[(i - 1 + n) % n];
@@ -869,11 +869,11 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(img, 0, 0, cw, ch);
-    // 圆滑 face polygon (橙色, tracePolygonPath 内部 3-tap smoothing 让曲线更柔)
+    // 圆滑 face polygon (橙色) — displaySmooth=true 让 display 曲线圆滑, 不影响 processFace 实际 clip mask
     ctx.strokeStyle = 'rgba(245, 197, 106, 0.9)';
     ctx.lineWidth = Math.max(2, cw / 400);
     ctx.beginPath();
-    tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })));
+    tracePolygonPath(ctx, item.maskHandles.map(h => ({ x: h.x * cw, y: h.y * ch })), 1, 0, 0, 0.5, true);
     ctx.closePath();
     ctx.stroke();
     // 拖动中的 handle hint (单个红点)
