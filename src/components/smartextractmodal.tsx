@@ -81,7 +81,7 @@ const PRESETS: Record<string, Params> = {
   'ground-truth': { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 30, whitePoint: 225, gamma: 1.05, contrast: 20, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 0 },
   // 高调亮白：熊猫头表情包的"标准美学" — 少纹理 / 神似 / 更白
   // 比经典更激进的 white clip + 黑场提升 + 更高对比, 让肤色平整 / 接近水墨白
-  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 75, trimThr: 72, autoNorm: true, blackPoint: 88, whitePoint: 178, gamma: 0.80, contrast: 55, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
+  'high-key':     { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 65, trimThr: 72, autoNorm: true, blackPoint: 72, whitePoint: 182, gamma: 0.80, contrast: 40, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: false, jpegQ: 35, blur: 0, size: 1024, purify: 50 },
   // 低保真做旧：JPEG 损伤 + 轻模糊, 适合本身低光 / 噪点多的图
   'lofi':         { headExpand: -2, foreheadExt: -12, chinExt: 0, feather: 0, alphaCut: 200, trimDark: 50, trimThr: 60, autoNorm: true, blackPoint: 40, whitePoint: 215, gamma: 1.0,  contrast: 15, edgeStrength: 0, saturation: 0, quantize: false, jpegLofi: true,  jpegQ: 25, blur: 1, size: 1024, purify: 0 },
   // 极致黑白：高对比抠线条, 适合本身就有强烈明暗反差的图
@@ -89,21 +89,67 @@ const PRESETS: Record<string, Params> = {
 };
 
 // ============================================================
-// Master "净化" mapping v2 — purify (0-100) → 2 个 effective 参数 (SSOT)
-// v1 用 alpha 半透明 → 用户反馈产生橙色 ring + 眼睛被淡化, 弃用
-// v2 改用 "边缘暗色硬切透明 + 边缘/低对比区涂白" — 不再用半透明
+// Master "净化" mapping v4b — purify (0-100) → 5 个 effective 参数 (SSOT)
+// v1-v3 都不行, v4 引入 padding mean / sigmoid / blend 但 v4 第一版 eraseBand 太窄
+// 残留 polygon 边缘黑线. v4b 用 Chamfer Distance Transform 精确算边距, eraseBand 直接给 meanRadius+12 完全覆盖 boundary effect zone.
 // ============================================================
 interface EffectiveParams {
-  edgeBand: number;            // 0-28 px, 距 polygon edge 的环带宽度 (erase + whiten 影响范围)
-  whitenStrength: number;      // 0..1, 内部低对比中灰区涂白强度
+  enabled: boolean;
+  adaptiveC: number;
+  meanRadius: number;
+  sharpness: number;
+  blend: number;
+  eraseBand: number;       // 用作 Chamfer DT distance 阈值 (= meanRadius + 12)
 }
 
 function deriveEffective(purify: number | undefined): EffectiveParams {
   const m = Math.max(0, Math.min(100, purify ?? 0)) / 100;
+  const meanRadius = Math.max(15, Math.round(20 + m * 25));
   return {
-    edgeBand: Math.round(m * 28),
-    whitenStrength: m * 0.85,
+    enabled: m > 0,
+    adaptiveC: 12 + Math.round(m * 12),
+    meanRadius,
+    sharpness: Math.max(0.5, 4 - m * 3.5),
+    blend: m,
+    eraseBand: meanRadius + 12,
   };
+}
+
+// Chamfer Distance Transform — 精确算 polygon 内每像素到 polygon 边的最短距离
+// 2-pass forward+backward, O(N), 比 boxBlur1D 边距估计准确得多
+function chamferDT(W: Uint8ClampedArray, w: number, h: number): Float32Array {
+  const dist = new Float32Array(w * h);
+  const INF = 1e9;
+  for (let i = 0; i < w * h; i++) dist[i] = W[i] > 0 ? INF : 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x > 0) d = Math.min(d, dist[i - 1] + 1);
+      if (y > 0) {
+        d = Math.min(d, dist[i - w] + 1);
+        if (x > 0) d = Math.min(d, dist[i - w - 1] + 1.41421356);
+        if (x < w - 1) d = Math.min(d, dist[i - w + 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x;
+      if (W[i] === 0) continue;
+      let d = dist[i];
+      if (x < w - 1) d = Math.min(d, dist[i + 1] + 1);
+      if (y < h - 1) {
+        d = Math.min(d, dist[i + w] + 1);
+        if (x < w - 1) d = Math.min(d, dist[i + w + 1] + 1.41421356);
+        if (x > 0) d = Math.min(d, dist[i + w - 1] + 1.41421356);
+      }
+      dist[i] = d;
+    }
+  }
+  return dist;
 }
 
 function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale = 1, offX = 0, offY = 0, _tension = 0.5) {
@@ -417,78 +463,138 @@ function processFace(image: HTMLImageElement, maskHandles: Point[], landmarks: a
     ctx.putImageData(orig, 0, 0);
   }
 
-  // === [L2-v2] Edge erase + Whiten (取代旧 alpha 半透明方案) ===
-  // 用户反馈: 透明度不是好解法 → 橙色 ring / 眼睛被淡化
-  // 新设计: 距 polygon edge < edgeBand 像素的环带:
-  //   - 暗像素 (lum<100) → alpha=0 硬切 (脸的轮廓不出现黑线)
-  //   - 中灰平坦像素 (lum<210, std<18) → RGB 涂白 (融入 panda 白脸, "看不出轮廓")
-  // 内部 (距 edge >= edgeBand): 低对比中灰 (std<12, lum∈[80,220]) → RGB 涂白 (抹平肤纹/皱纹根)
-  // 高 std (五官 contour) 永远保留. 不动 alpha 半透明 → 不会有 ring / 灰眼睛.
-  if (eff.edgeBand > 0 || eff.whitenStrength > 0) {
+  // === [L2-v4] Bradley adaptive threshold + padding mean + sigmoid + blend ===
+  // 3 个 fundamental 改进 (修 v3 的 face 黑环 / 酒窝 ring / 川普失真):
+  //   1. padding mean: polygon 外用 face 全局均值填充, 单次 boxBlur (无 weighted 除法 bias)
+  //   2. sigmoid soft transition: diff∈[C-12, C+12] 平滑过渡, 不再 hard 0/255 step
+  //   3. blend 跟原图: master 控制混合比, 保留原版细节精髓
+  // 边缘环带: 暗→透明 / 其他→涂白 (固定 full strength, 让 polygon outline 消失)
+  if (eff.enabled) {
     const w = out, h = out;
     const cur = ctx.getImageData(0, 0, w, h);
     const d = cur.data;
 
-    // 1) 距 polygon edge 距离场: 用 alpha map (0/255) 算大半径 boxBlur,
-    //    blurred 值越小 = 越靠 edge (因为模糊后边缘内侧 alpha < 255)
-    const alphaIn = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) alphaIn[i] = d[i * 4 + 3] > 200 ? 255 : 0;
-    const distR = Math.max(1, eff.edgeBand);
-    const distBlur = boxBlur1D(alphaIn, w, h, distR);
-
-    // 2) luma + local std (5×5) — 用现有 boxBlur1D 复用
+    // 1) luma map G + polygon 内全局平均 lum (padding 用)
     const G = new Uint8ClampedArray(w * h);
+    let sumLum = 0, cnt = 0;
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
       G[i] = (0.299 * d[di] + 0.587 * d[di + 1] + 0.114 * d[di + 2]) | 0;
+      if (d[di + 3] > 200) { sumLum += G[i]; cnt++; }
     }
-    const meanG = boxBlur1D(G, w, h, 2);
-    const G2 = new Uint8ClampedArray(w * h);
-    for (let i = 0; i < w * h; i++) G2[i] = ((G[i] * G[i]) / 255) | 0;
-    const meanG2 = boxBlur1D(G2, w, h, 2);
-    const stdMap = new Uint8ClampedArray(w * h);
+    if (cnt === 0) {
+      ctx.putImageData(cur, 0, 0);
+      return canvas;
+    }
+    const faceAvg = Math.round(sumLum / cnt);
+
+    // 2) padded luma: polygon 外用 faceAvg 填充 → boxBlur mean 边缘不 biased
+    const lumPad = new Uint8ClampedArray(w * h);
     for (let i = 0; i < w * h; i++) {
-      const v = meanG2[i] * 255 - meanG[i] * meanG[i];
-      stdMap[i] = Math.min(255, Math.sqrt(Math.max(0, v))) | 0;
+      lumPad[i] = d[i * 4 + 3] > 200 ? G[i] : faceAvg;
+    }
+    const meanG = boxBlur1D(lumPad, w, h, eff.meanRadius);
+
+    // 3) 精确 edge distance via Chamfer DT
+    // W: alpha >= 200 算 polygon 内 (跟 main loop 一致, 不用 > 200)
+    const W = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) W[i] = d[i * 4 + 3] >= 200 ? 255 : 0;
+    const edgeDist = chamferDT(W, w, h);
+    const eraseDistance = eff.eraseBand;          // inner erase: 全部统一处理
+    const extendedDistance = eraseDistance + 18;  // outer erase: 暗肤色阴影也强制涂白
+    const eraseLum = 50;
+    const extendedLumThr = 120;                   // outer 区: lum<120 → 涂白
+
+    // 4) 预计算 sigmoid LUT for diff in [-128, 127] (避免每像素 Math.exp)
+    const sigmoidLut = new Uint8ClampedArray(256);
+    const C = eff.adaptiveC;
+    const sharp = eff.sharpness;
+    for (let i = 0; i < 256; i++) {
+      const diff = i - 128;
+      const t = 1 / (1 + Math.exp(-(diff - C) / sharp)); // 0..1, 1 = full black
+      sigmoidLut[i] = Math.round((1 - t) * 255); // 255 = white, 0 = black
     }
 
-    // 3) 像素处理
-    const whitenS = eff.whitenStrength; // 0..1
-    const inEdgeThr = 245; // distBlur < 245 表示在边缘环带内 (255-10≈245 留 10 弹性)
+    const blend = eff.blend;
+
+    // 5) 像素 apply
     for (let i = 0; i < w * h; i++) {
       const di = i * 4;
-      if (d[di + 3] < 200) continue;
-      const lum = G[i];
-      const std = stdMap[i];
-      const edgeNear = distBlur[i] < inEdgeThr;
+      if (d[di + 3] < 200) continue; // polygon 外不动
 
-      if (edgeNear) {
-        // 边缘环带
-        if (lum < 100) {
-          // 暗 → 硬切透明 (头发/阴影渗入 face 边缘 → 完全擦除)
-          d[di + 3] = 0;
-          continue;
-        }
-        if (lum < 210 && std < 18) {
-          // 中灰 + 平坦 → 涂白 (融入 panda 白脸; whitenS 控制强度)
-          d[di]     = Math.round(d[di]     * (1 - whitenS) + 255 * whitenS);
-          d[di + 1] = Math.round(d[di + 1] * (1 - whitenS) + 255 * whitenS);
-          d[di + 2] = Math.round(d[di + 2] * (1 - whitenS) + 255 * whitenS);
+      const lum = G[i];
+      const dist = edgeDist[i];
+
+      if (dist < eraseDistance) {
+        // Inner erase: polygon 边缘 hard 处理
+        if (lum < eraseLum) {
+          d[di + 3] = 0; // 头发/阴影渗入 → 透明
+        } else {
+          // 涂白 + 强制 alpha=255 (消除 polygon anti-alias 半透明 dark mix)
+          // 关键: anti-alias 边缘 alpha∈[200,254] 像素 RGB 是 face 边缘 dark color,
+          // 半透明显示在 panda 上呈现"细黑线" → 强制 alpha=255 + RGB=255 让边缘 100% 纯白
+          d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
         }
         continue;
       }
 
-      // 内部 — 低 std 中灰平坦区 → 涂白 (抹平肤纹/皱纹根, 保五官 contour)
-      if (whitenS > 0 && std < 12 && lum > 80 && lum < 220) {
-        // smooth fade 0→1 over std∈[12, 4]
-        const sFade = Math.max(0, Math.min(1, (12 - std) / 8));
-        const s = whitenS * sFade;
-        d[di]     = Math.round(d[di]     * (1 - s) + 255 * s);
-        d[di + 1] = Math.round(d[di + 1] * (1 - s) + 255 * s);
-        d[di + 2] = Math.round(d[di + 2] * (1 - s) + 255 * s);
+      if (dist < extendedDistance && lum < extendedLumThr) {
+        // Outer erase: 距 edge 18px 内的暗肤色阴影 (lum<120) 强行涂白
+        d[di] = 255; d[di + 1] = 255; d[di + 2] = 255; d[di + 3] = 255;
+        continue;
       }
+
+      // 内部 — sigmoid adaptive threshold + blend
+      const mean = meanG[i];
+      let diff = mean - lum;
+      if (diff < -128) diff = -128;
+      else if (diff > 127) diff = 127;
+      const target = sigmoidLut[(diff + 128) | 0];
+
+      // blend with original lum (master 控制): blend=1 纯 binary, blend=0 完全原图
+      const newL = (blend * target + (1 - blend) * lum) | 0;
+      d[di] = newL;
+      d[di + 1] = newL;
+      d[di + 2] = newL;
     }
     ctx.putImageData(cur, 0, 0);
+
+    // === 1px thin-black-line erosion (post-process) ===
+    // 任何 lum<25 黑像素, 3x3 邻域内有任何 lum>=180 → 变白
+    // 消除残留细线 (e.g. polygon outline residual / 孤立黑点 / 酒窝细 ring)
+    // 真五官 contour > 1px wide + 邻居都是黑色, 不受影响
+    if (eff.enabled) {
+      const cur2 = ctx.getImageData(0, 0, out, out);
+      const d2 = cur2.data;
+      const N = out * out;
+      const lumMap = new Uint8ClampedArray(N);
+      for (let i = 0; i < N; i++) {
+        if (d2[i * 4 + 3] < 200) { lumMap[i] = 255; continue; }
+        lumMap[i] = (0.299 * d2[i * 4] + 0.587 * d2[i * 4 + 1] + 0.114 * d2[i * 4 + 2]) | 0;
+      }
+      const toWhite = new Uint8Array(N);
+      for (let y = 1; y < out - 1; y++) {
+        for (let x = 1; x < out - 1; x++) {
+          const i = y * out + x;
+          if (lumMap[i] >= 25) continue;
+          let hasLight = false;
+          for (let dy = -1; dy <= 1 && !hasLight; dy++) {
+            for (let dx = -1; dx <= 1 && !hasLight; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              if (lumMap[(y + dy) * out + (x + dx)] >= 180) hasLight = true;
+            }
+          }
+          if (hasLight) toWhite[i] = 1;
+        }
+      }
+      for (let i = 0; i < N; i++) {
+        if (toWhite[i]) {
+          const di = i * 4;
+          d2[di] = 255; d2[di + 1] = 255; d2[di + 2] = 255;
+        }
+      }
+      ctx.putImageData(cur2, 0, 0);
+    }
   }
 
   // 不再 fillUnderneath 白底 — 输出透明 PNG（face 椭圆外保持 alpha=0）
