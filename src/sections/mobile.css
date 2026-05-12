@@ -1,0 +1,662 @@
+/* ================================================================
+ * xmw mobile layout system (≤ 768px)
+ * 目标设备 iPhone 17 Pro Max (430×932 dp, iOS Safari 17+)
+ * 美学延续 Win7 retro (跟 app.css 同色系 — 蓝色渐变 / 金色 CTA / 玻璃质感)
+ * ================================================================ */
+
+:root {
+  --mobile-header-h: 56px;
+  --mobile-bottom-h: 64px;
+  --mobile-tap-min: 48px;
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* === 全局 mobile rules (≤768px) ============================ */
+@media (max-width: 768px) {
+  html, body {
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  /* 防 iOS Safari 自动 zoom — font-size 必须 >= 16px */
+  input:not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* 干净 tap 反馈 + 关掉双击缩放干扰 */
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* tap target 最小 48px — 比 iOS 推荐的 44 大一点，单手好戳 */
+  .header-link,
+  .lang-toggle,
+  .mobile-hamburger,
+  .about-arcade-btn,
+  .qm-btn,
+  .qm-icon-btn,
+  .qm-textlang-btn,
+  .draft-card-btn,
+  .draft-save-current-btn,
+  .material-search-clear,
+  .win7-toolbar-btn,
+  .mobile-action-btn,
+  .mobile-nav-item {
+    min-height: var(--mobile-tap-min) !important;
+  }
+
+  /* hover transform 在触屏会"挂着" — 关掉 */
+  .header-link:hover,
+  .lang-toggle:hover,
+  .about-arcade-btn:hover,
+  .material-card:hover,
+  .draft-slot-card:hover,
+  .qm-btn:hover,
+  .qm-rail-item:hover {
+    transform: none !important;
+  }
+}
+
+/* === Mobile Header ========================================== */
+@media (max-width: 768px) {
+  .header-bar {
+    height: auto !important;
+    min-height: var(--mobile-header-h);
+    padding: 6px 12px !important;
+    padding-top: calc(6px + var(--mobile-safe-top)) !important;
+    border-radius: 0 0 14px 14px !important;
+  }
+
+  .header-bar::after {
+    height: 22px !important;
+  }
+
+  .header-left {
+    gap: 8px !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  .header-bar .brand-icon {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 10px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .header-bar .brand-text {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    gap: 0 !important;
+  }
+
+  .header-bar .brand-name {
+    font-size: 15px !important;
+    line-height: 1.2 !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 隐藏 brand-tag / brand-bubble / 桌面 nav / 外链 / CA badge — 全部进 drawer */
+  .header-bar .brand-tag,
+  .header-bar .brand-bubble,
+  .header-bar .header-link:not(.mobile-hamburger),
+  .header-bar .header-link-external,
+  .header-bar .ca-badge {
+    display: none !important;
+  }
+
+  /* lang-toggle 留在 header 但压缩到 icon-only */
+  .header-bar .lang-toggle {
+    padding: 0 10px !important;
+    min-width: 48px !important;
+  }
+
+  .header-bar .lang-toggle .lang-label {
+    display: none !important;
+  }
+
+  .header-right {
+    gap: 6px !important;
+    flex-shrink: 0 !important;
+  }
+}
+
+/* === Hamburger Button (默认隐藏，mobile 才显示) =============== */
+.mobile-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: var(--win7-button);
+  color: #122d4a;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px var(--win7-button-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(52, 97, 146, 0.18);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-hamburger:active {
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+  transform: scale(0.96);
+}
+
+@media (max-width: 768px) {
+  .mobile-hamburger {
+    display: inline-flex;
+  }
+}
+
+/* === Mobile Nav Drawer (从顶部滑下) ========================== */
+.mobile-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 36, 70, 0.42);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.mobile-nav-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobile-nav-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 210;
+  max-height: min(92vh, 92dvh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: linear-gradient(180deg, #eaf4fc 0%, #d6e9fb 100%);
+  border-bottom: 2px solid #2d71ab;
+  border-radius: 0 0 18px 18px;
+  box-shadow: 0 14px 36px rgba(15, 72, 131, 0.32);
+  transform: translateY(-105%);
+  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: max(16px, var(--mobile-safe-bottom));
+}
+
+.mobile-nav-drawer.open {
+  transform: translateY(0);
+}
+
+.mobile-nav-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: calc(var(--mobile-safe-top) + 4px) 14px 6px;
+  background: var(--win7-titlebar);
+  color: #fff;
+  box-shadow: var(--win7-titlebar-light);
+}
+
+.mobile-nav-titlebar-text {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-nav-close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ffb28d 0%, #ff7840 100%);
+  color: #fff;
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px #b83a11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+
+.mobile-nav-close:active {
+  transform: scale(0.94);
+}
+
+.mobile-nav-banner {
+  padding: 14px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(180deg, #fffef9 0%, #fff0b9 100%);
+  border-bottom: 1px solid #e6c75a;
+}
+
+.mobile-nav-banner-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: #fff;
+  object-fit: contain;
+  box-shadow:
+    inset 0 0 0 1px #d4b042,
+    0 2px 6px rgba(192, 134, 20, 0.18);
+}
+
+.mobile-nav-banner-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mobile-nav-banner-name {
+  font-size: 16px;
+  font-weight: 900;
+  color: #5c3a00;
+  letter-spacing: 0.02em;
+}
+
+.mobile-nav-banner-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8a5f10;
+}
+
+.mobile-nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-nav-section-label {
+  margin: 10px 14px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4c6c91;
+}
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  background: var(--win7-button);
+  border: 1px solid #fff;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px #8daccc,
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 6px rgba(74, 112, 159, 0.12);
+  color: #173452;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.98);
+  background: var(--win7-button-hover);
+  color: #5e3d00;
+}
+
+.mobile-nav-item-active {
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 2px 8px rgba(210, 148, 24, 0.24);
+}
+
+.mobile-nav-item-label {
+  flex: 1;
+}
+
+.mobile-nav-item-meta {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.55;
+}
+
+.mobile-nav-dev-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 0 8px 12px;
+}
+
+.mobile-nav-dev-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 60px;
+  padding: 8px 4px;
+  background: rgba(255, 94, 0, 0.08);
+  border: 1.5px dashed #ff5e00;
+  border-radius: 10px;
+  color: #ff5e00;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mobile-nav-dev-btn-active {
+  background: rgba(255, 94, 0, 0.22);
+}
+
+.mobile-nav-dev-btn:active {
+  transform: scale(0.96);
+}
+
+.mobile-nav-ca-row {
+  margin: 6px 12px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #182536 0%, #243347 100%);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px #ffcf55,
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  color: #ffe36c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mobile-nav-ca-star {
+  color: #ffcf55;
+  font-size: 13px;
+}
+
+.mobile-nav-ca-text {
+  flex: 1;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-ca-copy {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  color: #ffe36c;
+  border: 1px solid rgba(255, 207, 85, 0.45);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-nav-ca-copy:active {
+  background: rgba(255, 207, 85, 0.15);
+}
+
+/* === QuickMode mobile shell (≤768) ========================== */
+/* 替换 .quickmode-three-col 在 mobile 上的桌面三栏布局 */
+@media (max-width: 768px) {
+  .quickmode-root.about-arcade-shell {
+    padding: 0 !important;
+  }
+
+  .quickmode-three-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    padding: 10px 12px calc(20px + var(--mobile-bottom-h) + var(--mobile-safe-bottom)) !important;
+    min-height: 0 !important;
+  }
+
+  /* 桌面左/右栏（aside）在 mobile 全部隐藏 — 选 panda/face 走 sheet */
+  .quickmode-three-col > aside {
+    display: none !important;
+  }
+
+  /* 中间 main 充满 */
+  .quickmode-three-col > main {
+    width: 100% !important;
+    max-width: 100% !important;
+    gap: 12px !important;
+  }
+
+  /* preview 卡 — 占视口宽度，sticky 在顶部下方一点 */
+  .quickmode-preview {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    padding: 14px 14px 18px !important;
+    border-radius: 18px !important;
+    border-width: 2px !important;
+  }
+
+  .quickmode-preview .qm-panda-frame {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 1 / 1;
+    max-height: 56vh;
+  }
+
+  .quickmode-preview .qm-panda-img {
+    max-height: 56vh !important;
+  }
+
+  .quickmode-preview .qm-caption {
+    margin-top: 10px !important;
+    font-size: clamp(20px, 5.6vw, 26px) !important;
+    padding: 0 8px !important;
+  }
+
+  /* 操作按钮组 — 两行 wrap, 大 tap target */
+  .quickmode-three-col > main > div:nth-of-type(2) {
+    width: 100%;
+    gap: 8px !important;
+  }
+
+  .quickmode-three-col .about-arcade-btn {
+    flex: 1 1 calc(50% - 6px) !important;
+    min-height: 48px !important;
+    padding: 10px 12px !important;
+    font-size: 14px !important;
+    justify-content: center;
+  }
+
+  /* transform row 全宽，缩 rotation track */
+  .quickmode-three-col .quickmode-transform-card {
+    max-width: 100% !important;
+  }
+
+  .quickmode-three-col .qm-rotation-track {
+    width: auto !important;
+    flex: 1 1 auto !important;
+    min-width: 120px;
+  }
+}
+
+/* === QuickMode mobile action bar (sticky bottom) ============ */
+.quickmode-mobile-bottom {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .quickmode-mobile-bottom {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    padding-bottom: calc(10px + var(--mobile-safe-bottom));
+    background: linear-gradient(180deg, rgba(234, 244, 252, 0.96) 0%, rgba(214, 233, 251, 0.96) 100%);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border-top: 2px solid #2d71ab;
+    box-shadow: 0 -8px 24px rgba(15, 72, 131, 0.18);
+  }
+
+  .quickmode-mobile-bottom-btn {
+    flex: 1 1 0;
+    min-height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 6px;
+    background: var(--win7-button);
+    color: #173452;
+    border: 1px solid #fff;
+    border-radius: 12px;
+    box-shadow:
+      inset 0 0 0 1px var(--win7-button-border),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 2px 6px rgba(52, 97, 146, 0.18);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .quickmode-mobile-bottom-btn-primary {
+    background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+    color: #4c3000;
+    box-shadow:
+      inset 0 0 0 1px #bb7e11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      0 2px 8px rgba(210, 148, 24, 0.32);
+  }
+
+  .quickmode-mobile-bottom-btn-active {
+    background: linear-gradient(180deg, #ff7e3e 0%, #d8541a 100%);
+    color: #fff;
+    box-shadow:
+      inset 0 0 0 1px #8a3408,
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+
+  .quickmode-mobile-bottom-btn:active {
+    transform: scale(0.96);
+  }
+
+  /* 用 padding bottom 给 sticky 底栏让位 — 已加到 .quickmode-three-col 上 */
+}
+
+/* === Mobile picker bottom-sheet — 覆盖 dark theme primitives === */
+@media (max-width: 768px) {
+  .bottom-sheet {
+    background: linear-gradient(180deg, #eaf4fc 0%, #d6e9fb 100%) !important;
+    border-top: 2px solid #2d71ab !important;
+    border-radius: 18px 18px 0 0 !important;
+    max-height: 78vh !important;
+    padding-bottom: var(--mobile-safe-bottom);
+  }
+
+  .bottom-sheet-header {
+    background: var(--win7-titlebar) !important;
+    color: #fff !important;
+    border-bottom: 1px solid #2b6ba5 !important;
+    box-shadow: var(--win7-titlebar-light) !important;
+    padding: 10px 14px !important;
+  }
+
+  .bottom-sheet-title {
+    color: #fff !important;
+    font-weight: 800 !important;
+    font-size: 14px !important;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  }
+
+  .bottom-sheet-close {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 6px !important;
+    background: linear-gradient(180deg, #ffb28d 0%, #ff7840 100%) !important;
+    color: #fff !important;
+    box-shadow:
+      inset 0 0 0 1px #b83a11,
+      inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+  }
+
+  .bottom-sheet-body {
+    padding: 12px 14px calc(20px + var(--mobile-safe-bottom)) !important;
+    background: transparent !important;
+  }
+
+  .bottom-sheet-overlay {
+    background: rgba(8, 36, 70, 0.42) !important;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+}
+
+/* === Mobile FAB (现有 leftsidebar/rightsidebar 用) 改 Win7 === */
+@media (max-width: 768px) {
+  .mobile-fab-left,
+  .mobile-fab-right {
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 16px !important;
+    background: linear-gradient(180deg, #1f92f8 0%, #116bcc 100%) !important;
+    border: 2px solid #09498f !important;
+    color: #fff !important;
+    box-shadow:
+      inset 0 0 0 2px rgba(255, 255, 255, 0.28),
+      0 6px 18px rgba(7, 48, 95, 0.42) !important;
+    bottom: calc(20px + var(--mobile-safe-bottom)) !important;
+  }
+
+  .mobile-fab-left:active,
+  .mobile-fab-right:active {
+    transform: scale(0.94);
+    background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%) !important;
+    color: #5e3d00 !important;
+  }
+}
+
+/* === 防顶栏挡住 page content === */
+@media (max-width: 768px) {
+  .app-shell {
+    /* dvh 让 iOS Safari 地址栏收起时不闪屏 */
+    height: 100dvh !important;
+  }
+
+  .editor-layout {
+    /* mobile 编辑器三栏先不动 (Phase 3 重做) — 但留个最小可读宽度 */
+    flex-wrap: nowrap;
+  }
+}

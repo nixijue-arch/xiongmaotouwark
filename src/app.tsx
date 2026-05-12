@@ -10,6 +10,7 @@ import { QuickMode } from '@/sections/quickmode';
 import { Collection } from '@/sections/collection';
 import { Toaster } from 'sonner';
 import './app.css';
+import './sections/mobile.css';
 
 // DEV-only 工具页 — lazy + DEV conditional import 让 prod build 完全 tree-shake
 const CalibrateAnchorLazy = import.meta.env.DEV
