@@ -67,7 +67,8 @@
 @media (max-width: 768px) {
   .header-bar {
     display: grid !important;
-    grid-template-columns: 48px 1fr 60px !important;
+    /* col 3 用 auto 让 lang-toggle 按内容自适应宽度, 永不换行 ("中/En" + icon ≈ 64-72px) */
+    grid-template-columns: 48px minmax(0, 1fr) auto !important;
     align-items: center !important;
     gap: 10px !important;
     height: auto !important;
@@ -138,15 +139,17 @@
     margin-top: 1px !important;
   }
 
-  /* lang-toggle 占 col 3 (右), 显示 t('switchLang') 的 "中/En" 字样 */
+  /* lang-toggle 占 col 3 (右), 显示 t('switchLang') 的 "中/En" 字样 — nowrap 防 button 内换行 */
   .header-bar .lang-toggle {
     grid-column: 3 !important;
     justify-self: end !important;
-    padding: 0 8px !important;
-    min-width: 56px !important;
+    padding: 0 10px !important;
+    min-width: 0 !important;
     height: 44px !important;
     min-height: 44px !important;
     gap: 4px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
   }
 
   .header-bar .lang-toggle .lang-label {
@@ -154,6 +157,7 @@
     font-size: 12px !important;
     font-weight: 800 !important;
     letter-spacing: 0.02em !important;
+    white-space: nowrap !important;
   }
 }
 
@@ -1462,4 +1466,212 @@
   justify-content: center;
   gap: 16px;
   margin-top: 12px;
+}
+
+/* ================================================================
+ * Phase 2.7 — QuickMode mobile 重排 + 紧凑 (一屏到底)
+ * 视觉顺序 (CSS order): preview → transform → action(模式+随机) → caption → pick(4-col) → customFace-clear
+ * (JSX 顺序: preview / action / caption / pick / clear-custom / [desktop only] / transform)
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  /* main flex children 排序 — 让 transform card (JSX 在末尾) 视觉跟到 preview 之后 */
+  .quickmode-three-col > main > * {
+    order: 100;
+  }
+  .quickmode-three-col > main > div:first-of-type {
+    order: 1;
+  }
+  .quickmode-three-col .quickmode-transform-card {
+    order: 2;
+  }
+  .qmm-action-row {
+    order: 3;
+  }
+  .qmm-caption-card {
+    order: 4;
+  }
+  .qmm-pick-row {
+    order: 5;
+  }
+  .qmm-clear-custom-btn {
+    order: 6;
+  }
+
+  /* Preview tighten — 给其他元素让空间 (max 42vh) */
+  .quickmode-three-col .quickmode-preview {
+    padding: 10px 12px 14px !important;
+    min-height: 260px;
+  }
+  .quickmode-preview .qm-panda-frame {
+    max-height: 42vh !important;
+  }
+  .quickmode-preview .qm-panda-img {
+    max-height: 42vh !important;
+  }
+  .quickmode-preview .qm-caption {
+    margin-top: 8px !important;
+    font-size: clamp(18px, 5vw, 24px) !important;
+  }
+
+  /* Transform card mobile compact (跟 Phase 2.2 横向 fix 配合) */
+  .about-banner-card.quickmode-transform-card {
+    padding: 8px 12px !important;
+    border-radius: 14px !important;
+    gap: 8px !important;
+  }
+  .quickmode-transform-card .qm-rotation-track {
+    height: 32px !important;
+  }
+  .quickmode-transform-card .qm-icon-btn {
+    width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    border-radius: 9px !important;
+  }
+  .quickmode-transform-card .qm-rotation-display {
+    min-width: 42px !important;
+    height: 30px !important;
+    font-size: 11px !important;
+    padding: 2px 6px !important;
+  }
+
+  /* main column gap 紧凑些 — 12 → 10 */
+  .quickmode-three-col > main {
+    gap: 10px !important;
+  }
+}
+
+/* Action row: 模式 + 🎲 随机 — 2-col grid */
+.qmm-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  align-items: stretch;
+}
+
+.qmm-action-row .qmm-mode-chip {
+  width: 100% !important;
+  justify-self: stretch;
+  align-self: stretch;
+  min-height: 52px !important;
+  border-radius: 14px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+}
+
+.qmm-random-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 14px;
+  background: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  color: #4c3000;
+  border: 2px solid #fff;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px #bb7e11,
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 4px 12px rgba(210, 148, 24, 0.32);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.qmm-random-btn:active {
+  background: linear-gradient(180deg, #ffd25a 0%, #ffb62d 100%);
+  transform: scale(0.96);
+}
+
+.qmm-random-btn .qmm-pick-btn-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* Pick row 4-col modifier */
+.qmm-pick-row-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.qmm-pick-row-4 .qmm-pick-btn {
+  min-height: 56px !important;
+  padding: 6px 4px !important;
+  font-size: 12px !important;
+  gap: 3px;
+  border-radius: 12px;
+}
+
+.qmm-pick-row-4 .qmm-pick-btn-emoji {
+  font-size: 22px;
+}
+
+/* Semantic variants on pick-btn (photo 自制 / emerald 智能提取) */
+.qmm-pick-btn-photo {
+  background: linear-gradient(180deg, #f5c56a 0%, #e0a13e 100%) !important;
+  border-color: #7a5a1a !important;
+  color: #4c3000 !important;
+  box-shadow:
+    inset 0 0 0 1px #6a4d12,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 3px 10px rgba(140, 90, 20, 0.22) !important;
+}
+
+.qmm-pick-btn-emerald {
+  background: linear-gradient(180deg, #34d4a1 0%, #10a87a 100%) !important;
+  border-color: #0a6e50 !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 0 0 1px #064c37,
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 3px 10px rgba(8, 90, 60, 0.28) !important;
+}
+
+.qmm-pick-btn-photo:active,
+.qmm-pick-btn-emerald:active {
+  filter: brightness(1.06);
+  transform: scale(0.96);
+}
+
+/* Clear custom face — secondary subtle button */
+.qmm-clear-custom-btn {
+  width: 100%;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: #fff;
+  color: #0a356d;
+  border: 1.5px dashed #8a3408;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.qmm-clear-custom-btn:active {
+  background: #fff0e0;
+  transform: scale(0.97);
+}
+
+/* Append hover-stuck reset for new classes (.qmm-random-btn / .qmm-clear-custom-btn) */
+@media (hover: none) {
+  .qmm-random-btn:hover,
+  .qmm-clear-custom-btn:hover {
+    transform: none !important;
+    filter: none !important;
+    background-image: linear-gradient(180deg, #fff5c8 0%, #ffd25a 52%, #ffb62d 100%);
+  }
+  .qmm-clear-custom-btn:hover {
+    background-image: none !important;
+    background: #fff !important;
+  }
 }
