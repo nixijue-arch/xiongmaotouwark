@@ -24,6 +24,7 @@ const SOURCE_WEIGHTS: Record<SourceName, number> = {
   duitang: 1.0,
   fabiaoqing: 0.95,
   baidu: 0.85,
+  so360: 0.90,
   sogou: 0.85,
   bing: 0.7,
 };

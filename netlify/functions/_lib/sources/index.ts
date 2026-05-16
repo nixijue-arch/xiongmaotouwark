@@ -4,6 +4,7 @@ import { duitangAdapter } from './duitang';
 import { fabiaoqingAdapter } from './fabiaoqing';
 import { baiduAdapter } from './baidu';
 import { sogouAdapter } from './sogou';
+import { so360Adapter } from './so360';
 import type {
   ExpansionPlan,
   SearchResponse,
@@ -12,7 +13,7 @@ import type {
   SourceName,
 } from '../types';
 
-const ALL_SOURCES: SourceAdapter[] = [duitangAdapter, fabiaoqingAdapter, baiduAdapter, sogouAdapter];
+const ALL_SOURCES: SourceAdapter[] = [duitangAdapter, fabiaoqingAdapter, baiduAdapter, sogouAdapter, so360Adapter];
 
 const MAX_QUERIES_PER_SOURCE = 8; // 8 个 query 变体 × 3 源 = 600+ 候选, 过滤后留 ~200/页
 
@@ -26,6 +27,7 @@ function queriesForSource(name: SourceName, plan: ExpansionPlan): string[] {
   if (name === 'baidu') return plan.baiduQueries ?? [];
   if (name === 'sogou') return plan.sogouQueries ?? [];
   if (name === 'bing') return plan.bingQueries ?? [];
+  if (name === 'so360') return plan.so360Queries ?? [];
   return [];
 }
 

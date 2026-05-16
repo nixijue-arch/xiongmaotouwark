@@ -1,13 +1,13 @@
 // 联网搜熊猫头表情包 — 共享类型
 // 前后端都用 (前端 import 用相对 + 复制类型 / 后端 .mts 入口 import 这里)
 
-export type SourceName = 'duitang' | 'fabiaoqing' | 'bing' | 'baidu' | 'sogou';
+export type SourceName = 'duitang' | 'fabiaoqing' | 'bing' | 'baidu' | 'sogou' | 'so360';
 
 export interface SearchResultItem {
   id: string;       // `${source}:${hash(url)}` 全局唯一
   src: string;      // 原图 URL
   thumb: string;    // 缩略图 URL (源给则用, 否则 = src)
-  source: SourceName;
+  source: SourceName;  // 360 image search = 'so360' (image.so.com /j JSON endpoint)
   w?: number;
   h?: number;
   hint?: string;    // 源给的 alt/caption, 用于过滤评分
@@ -36,4 +36,5 @@ export interface ExpansionPlan {
   baiduQueries?: string[];
   sogouQueries?: string[];
   bingQueries?: string[];
+  so360Queries?: string[];
 }

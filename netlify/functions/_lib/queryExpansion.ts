@@ -77,6 +77,8 @@ export function expandQuery(raw: string): ExpansionPlan {
     fabiaoqingQueries: top,
     baiduQueries: Array.from(new Set(baiduQueries)).slice(0, 8),
     sogouQueries: Array.from(new Set(sogouQueries)).slice(0, 8),
+    // 360 跟 sogou 同形 (空格分词 + panda 前缀)
+    so360Queries: Array.from(new Set(sogouQueries)).slice(0, 8),
     bingQueries: top.map((v) => (HAS_PANDA_RE.test(v) ? v : `${v} 熊猫头 表情包`)),
   };
 }

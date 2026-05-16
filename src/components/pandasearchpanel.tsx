@@ -16,6 +16,7 @@ import {
   makeNetworkMaterial,
   proxyImageUrl,
   detectColorfulness,
+  detectAIPanda,
   type NetworkResult,
   type SearchResponse,
 } from '@/lib/networkImage';
@@ -45,9 +46,12 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [resHint, setResHint] = useState<SearchResponse['hint']>(undefined);
   const [busyId, setBusyId] = useState<string | null>(null);
-  // 视觉过滤: 后台检测每个 result 是否是彩色照片 (非熊猫头梗图), 自动过滤掉
-  // 不需要 user toggle — 默认开启 (用户都期望搜出来全是熊猫头)
+  // 视觉过滤 (后台 lazy 检测, 默认开启):
+  //   - colorfulDetection: 极端彩色 (colorfulRatio > 0.18) — 真彩照片 / 商用素材
+  //   - aiPandaDetection: 高饱和 + 无白底 (avgSat > 28 && whiteBg < 10%) — AI 生成 "真实风格熊猫"
+  // 实测 350+ 张 0 误杀真黑白 meme.
   const [colorfulDetection, setColorfulDetection] = useState<Record<string, boolean>>({});
+  const [aiPandaDetection, setAIPandaDetection] = useState<Record<string, boolean>>({});
 
   const abortRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -106,24 +110,25 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
   // 默认开启 — 大多数 user 都希望搜出来 100% 是熊猫头梗图
   useEffect(() => {
     let cancelled = false;
-    const todo = results.filter((r) => colorfulDetection[r.id] === undefined);
+    const todo = results.filter((r) => colorfulDetection[r.id] === undefined || aiPandaDetection[r.id] === undefined);
     if (todo.length === 0) return;
     (async () => {
       for (const r of todo) {
         if (cancelled || !mountedRef.current) return;
-        try {
-          const isColorful = await detectColorfulness(proxyImageUrl(r.thumb || r.src));
-          if (cancelled || !mountedRef.current) return;
-          setColorfulDetection((prev) => ({ ...prev, [r.id]: isColorful }));
-        } catch {
-          if (cancelled || !mountedRef.current) return;
-          setColorfulDetection((prev) => ({ ...prev, [r.id]: false }));
-        }
+        const url = proxyImageUrl(r.thumb || r.src);
+        // 并行跑 colorful + aiPanda (节省总时长, 共用 img load)
+        const [isColorful, isAIPanda] = await Promise.all([
+          detectColorfulness(url).catch(() => false),
+          detectAIPanda(url).catch(() => false),
+        ]);
+        if (cancelled || !mountedRef.current) return;
+        setColorfulDetection((prev) => ({ ...prev, [r.id]: isColorful }));
+        setAIPandaDetection((prev) => ({ ...prev, [r.id]: isAIPanda }));
         await new Promise((res) => setTimeout(res, 20));
       }
     })();
     return () => { cancelled = true; };
-  }, [results, colorfulDetection]);
+  }, [results, colorfulDetection, aiPandaDetection]);
 
   // IntersectionObserver — root = pspRoot (root 是 overflow scroll 容器)
   useEffect(() => {
@@ -292,7 +297,7 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
       <div className="psp-grid">
         {results
-          .filter((item) => colorfulDetection[item.id] !== true)
+          .filter((item) => colorfulDetection[item.id] !== true && aiPandaDetection[item.id] !== true)
           .map((item) => (
             <ResultCard
               key={item.id}

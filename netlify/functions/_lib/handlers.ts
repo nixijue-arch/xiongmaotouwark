@@ -145,6 +145,12 @@ const ALLOWED_HOSTS = new Set<string>([
   'i02piccdn.sogoucdn.com',
   'i03piccdn.sogoucdn.com',
   'i04piccdn.sogoucdn.com',
+  // 360 图片 (2026-05-17 加)
+  'p0.ssl.qhimgs1.com', 'p1.ssl.qhimgs1.com', 'p2.ssl.qhimgs1.com',
+  'p3.ssl.qhimgs1.com', 'p4.ssl.qhimgs1.com', 'p5.ssl.qhimgs1.com',
+  'p0.ssl.qhimgs2.com', 'p1.ssl.qhimgs2.com', 'p2.ssl.qhimgs2.com',
+  'p3.ssl.qhimgs2.com', 'p4.ssl.qhimgs2.com', 'p5.ssl.qhimgs2.com',
+  'p0.ssl.qhmsg.com', 'p1.ssl.qhmsg.com',
   // 必应 (预留)
   'tse1.mm.bing.net',
   'tse2.mm.bing.net',

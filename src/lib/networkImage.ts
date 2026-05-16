@@ -276,6 +276,63 @@ export async function detectColorfulness(imgUrl: string): Promise<boolean> {
   }
 }
 
+/**
+ * AI 生成熊猫检测 — 比 colorfulness 更精细的 false-positive 杀手.
+ *
+ * 实测 (2026-05-17, scripts/test-ai-panda.mjs q=打工 40 张) 发现:
+ *   AI 生成的"打工人熊猫"(真实风格 office panda) hint 含"熊猫头"骗过 STRICT 过滤,
+ *   colorfulness 单维度也漏过 (avgSat 18-34 落在 colorfulRatio 灰区).
+ *
+ * 但 AI 图共有**两强信号**, 真黑白 panda meme 完全不命中:
+ *   1. avgSat > 28          — 自然色 (棕黄/绿草/木桌), 真 meme avgSat 几乎 = 0
+ *   2. whiteBgRatio < 0.10  — 复杂背景无白底, 真 meme 30-78% 白底环绕 panda
+ *
+ * 实测 q=打工: 此 rule 砍 3 张 AI panda (1024×N 打工人熊猫头, sat 28-34 + wbg 1-6%),
+ * 0 误杀 (真 meme + 红心彩色装饰版 都保留, 边缘 GIF 也安全).
+ *
+ * 性能: 60×60 = 3600 像素, ~15-25ms/张. 跟 detectColorfulness 并行 lazy 跑.
+ */
+const _aiPandaCache = new Map<string, boolean>();
+
+export async function detectAIPanda(imgUrl: string): Promise<boolean> {
+  const cached = _aiPandaCache.get(imgUrl);
+  if (cached !== undefined) return cached;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      const timer = window.setTimeout(() => reject(new Error('timeout')), 6000);
+      i.onload = () => { window.clearTimeout(timer); resolve(i); };
+      i.onerror = () => { window.clearTimeout(timer); reject(new Error('img load failed')); };
+      i.src = imgUrl;
+    });
+    const c = document.createElement('canvas');
+    c.width = 60; c.height = 60;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+    ctx.drawImage(img, 0, 0, 60, 60);
+    const data = ctx.getImageData(0, 0, 60, 60).data;
+    const total = 60 * 60;
+    let totalSat = 0;
+    let whiteBgCount = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const gray = (r + g + b) / 3;
+      totalSat += (max - min);
+      if (gray > 240) whiteBgCount++;
+    }
+    const avgSat = totalSat / total;
+    const whiteBgRatio = whiteBgCount / total;
+    // 双条件: 高饱和 + 极低白底 = AI 生成嫌疑
+    const isAIPanda = avgSat > 28 && whiteBgRatio < 0.10;
+    _aiPandaCache.set(imgUrl, isAIPanda);
+    return isAIPanda;
+  } catch {
+    return false;  // 失败兜底保留 (不误杀)
+  }
+}
+
 /** Blob → base64 (不含 data: 前缀) — 沉淀工具传给后端写盘用 */
 export async function blobToBase64(blob: Blob): Promise<string> {
   const dataUrl = await blobToDataUrl(blob);
