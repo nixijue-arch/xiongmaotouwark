@@ -1,0 +1,107 @@
+// 启发式过滤 + 评分排序
+// 输入: 聚合后的搜索结果 + 原始 query
+// 输出: 去重 / 黑名单过滤 / 排序后的结果
+
+import type { SearchResultItem, SourceName } from './types';
+
+const VALID_EXT_RE = /\.(jpe?g|png|gif|webp)(\?|#|$)/i;
+// 部分 CDN URL 没显式扩展名 (e.g. 百度 acjson thumbURL 是 image_search 代理路径), 这些 host 豁免扩展名检查
+const EXT_LESS_CDN_RE = /(?:gimg[0-3]|img[0-2]|t[0-9]+)\.baidu\.com|mm\.bing\.net|(?:pic|img|i\d+piccdn)\.sogoucdn\.com/i;
+const URL_BLACKLIST_RE = /\b(logo|banner|advert|favicon|placeholder|avatar)\b/i;
+const PANDA_HINT_RE = /熊猫|panda|表情|biaoqing|meme|沙雕/i;
+// 严格 panda hint: 必须有"熊猫头"三字或"沙雕熊猫"组合, 单独"表情"/"meme" 都不够
+// 用于 filterAndScore 的 hard filter, 大幅提升命中率
+const STRICT_PANDA_HINT_RE = /熊猫头|沙雕熊猫|panda.head/i;
+// hint 含这些词 + 无 panda 关键词 → 高概率非熊猫头梗图, drop
+const NON_PANDA_HINT_RE = /(?:cos(?:er|play)|二次元|动漫|偶像|明星|帅哥|美女|真人|写真|coser)/i;
+
+const SOURCE_WEIGHTS: Record<SourceName, number> = {
+  duitang: 1.0,
+  fabiaoqing: 0.95,
+  baidu: 0.85,
+  sogou: 0.85,
+  bing: 0.7,
+};
+
+export function isValidImageUrl(url: string): boolean {
+  // 百度 / 必应 CDN URL 没显式扩展名 (代理转发 URL), 域名匹配后豁免扩展检查
+  if (EXT_LESS_CDN_RE.test(url)) return true;
+  return VALID_EXT_RE.test(url);
+}
+
+export function isAspectRatioOk(w?: number, h?: number): boolean {
+  if (!w || !h) return true;
+  const r = w / h;
+  return r >= 0.5 && r <= 2.5;
+}
+
+export function isBlacklistedUrl(url: string): boolean {
+  return URL_BLACKLIST_RE.test(url);
+}
+
+/**
+ * 评分模型 v3 (2026-05-17 第二轮):
+ *   user 反馈"放宽后一堆奥特曼/真熊猫照片/inside out", 又改 score-based 排序:
+ *
+ *   base (source weight)        = 0.7~1.0
+ *   + STRICT hint ("熊猫头"等) = +3.0   // 强 boost, top of list
+ *   + 普通 panda hint           = +0.5
+ *   + query hit hint            = +0.5
+ *   + src 含 panda              = +0.3
+ *   - 无 hint                   = -0.5
+ *   - 尺寸太小                  = -0.3
+ *   - 尺寸太大                  = -0.1
+ *
+ * 排序后切 PAGE_SIZE 顶部 N → 用户优先看 STRICT (绝对熊猫头),
+ *   不够再 fallback PANDA hit (可能熊猫头), 再 fallback 无 hint (兜底).
+ * NON_PANDA (cos/动漫/真人) 仍 hard drop.
+ */
+export function scoreItem(item: SearchResultItem, q: string): number {
+  let s = SOURCE_WEIGHTS[item.source] ?? 0.5;
+  const hint = item.hint || '';
+  const hintHasStrict = hint && STRICT_PANDA_HINT_RE.test(hint);
+  const hintHasPanda = hint && PANDA_HINT_RE.test(hint);
+  const hintHasQuery = q && hint && hint.toLowerCase().includes(q.toLowerCase());
+
+  if (hintHasStrict) s += 3.0;                                // 绝对优先
+  else if (hintHasPanda) s += 0.5;                            // 可能熊猫头
+  if (hintHasQuery) s += 0.5;
+
+  if (!hint) s -= 0.5;                                        // 无 hint 兜底排末尾
+
+  if (PANDA_HINT_RE.test(item.src)) s += 0.3;
+
+  if (item.w && item.h) {
+    const px = item.w * item.h;
+    if (px < 50_000) s -= 0.3;
+    else if (px > 4_000_000) s -= 0.1;
+  }
+  return s;
+}
+
+export function filterAndScore(items: SearchResultItem[], query: string): SearchResultItem[] {
+  const seen = new Set<string>();
+  const out: SearchResultItem[] = [];
+  for (const item of items) {
+    if (!item.src || seen.has(item.src)) continue;
+    seen.add(item.src);
+    if (!isValidImageUrl(item.src)) continue;
+    if (isBlacklistedUrl(item.src)) continue;
+    if (!isAspectRatioOk(item.w, item.h)) continue;
+
+    // hint 含 cos/动漫/美女/真人 等 + 不含 panda 关键词 → hard drop (这些视觉不可能是熊猫头)
+    if (item.hint && NON_PANDA_HINT_RE.test(item.hint) && !PANDA_HINT_RE.test(item.hint)) {
+      continue;
+    }
+
+    // 2026-05-17 v3 score-based:
+    //   不再 hard-drop 单凭 STRICT/PANDA hint (上轮放宽混入奥特曼+真熊猫, 收紧又量不够).
+    //   全 keep 进入 scoring, STRICT_PANDA +3 boost, PANDA +0.5, 无 hint -0.5.
+    //   排序后切 PAGE_SIZE 顶部 → 用户看到的优先是 STRICT 熊猫头.
+    //   前端 colorfulness 视觉过滤进一步砍真彩照片 (双重防线).
+    item._score = scoreItem(item, query);
+    out.push(item);
+  }
+  out.sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
+  return out.map(({ _score, ...rest }) => rest);
+}

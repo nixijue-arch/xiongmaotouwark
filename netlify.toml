@@ -2,6 +2,22 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# /api/search-pandas + /api/proxy-image 联网搜表情包后端
+# 必须在 SPA fallback 之前
+[[redirects]]
+  from = "/api/search-pandas"
+  to = "/.netlify/functions/search-pandas"
+  status = 200
+
+[[redirects]]
+  from = "/api/proxy-image"
+  to = "/.netlify/functions/proxy-image"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

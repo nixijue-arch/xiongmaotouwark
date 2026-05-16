@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync:dict": "node scripts/sync-emotion-dict.mjs",
+    "predev": "node scripts/sync-emotion-dict.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-emotion-dict.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

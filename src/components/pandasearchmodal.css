@@ -1,0 +1,142 @@
+/* PandaSearchModal — 全屏联网搜 modal
+   2026-05-17: editor sidebar 改按钮触发, modal 给 search panel 充足空间 */
+
+.psm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: psm-fade-in 0.18s ease;
+}
+@keyframes psm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.psm-frame {
+  width: min(1100px, 100%);
+  height: min(90vh, 900px);
+  background: #fafafa;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: psm-zoom-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.05);
+}
+@keyframes psm-zoom-in {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.psm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f3f7 100%);
+  border-bottom: 1px solid #d9dde3;
+  flex-shrink: 0;
+}
+
+.psm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0a356d;
+}
+.psm-title-icon { font-size: 18px; }
+
+.psm-close-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid #ccd2da;
+  border-radius: 8px;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  padding: 0;
+}
+@media (hover: hover) {
+  .psm-close-btn:hover {
+    background: #ff5e00;
+    color: #fff;
+    border-color: #c44a00;
+  }
+}
+
+.psm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* psp-root 在 modal 内填满, 自身 overflow-y auto 让用户滚 grid */
+.psm-body > .psp-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  width: 100%;
+}
+
+/* 在 modal 内, 卡片更大 */
+.psm-body .psp-grid { column-count: 3; column-gap: 12px; }
+@media (min-width: 1200px) {
+  .psm-body .psp-grid { column-count: 4; }
+}
+@media (max-width: 768px) {
+  .psm-body .psp-grid { column-count: 2; column-gap: 8px; }
+  .psm-frame { height: 100vh; max-height: 100vh; border-radius: 0; }
+  .psm-backdrop { padding: 0; }
+}
+.psm-body .psp-card { margin-bottom: 12px; }
+
+/* sidebar 入口按钮 — 醒目的"联网搜素材" CTA */
+.sidebar-network-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #88b8ff 0%, #4a82e0 100%);
+  border: 1px solid #1f4ea0;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(31, 78, 160, 0.3);
+}
+.sidebar-network-cta:hover {
+  background: linear-gradient(180deg, #99c3ff 0%, #5a92f0 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 9px rgba(31, 78, 160, 0.4);
+}
+.sidebar-network-cta:active { transform: scale(0.98); }
+.sidebar-network-cta-emoji { font-size: 15px; line-height: 1; }
+
+/* solo 模式 — sidebar 里独立放, 不套 win7-panel 框 */
+.sidebar-network-cta-solo {
+  margin: 6px 8px 8px;
+  width: calc(100% - 16px);
+  padding: 12px 12px;
+  font-size: 13px;
+}

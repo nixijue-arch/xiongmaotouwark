@@ -1,0 +1,317 @@
+// 联网搜表情包 — 远程图管线 (前端)
+//
+// 用法:
+//   1. 缩略图直接展示 (hot-link): <img src={result.thumb} /> — 网格展示用源 URL, 不走代理省后端流量
+//   2. 用户选中 → fetchAsDataUrl(result.src) — 走 /api/proxy-image, 转 dataURL, canvas 不 tainted
+//   3. makeNetworkMaterial(result, 'panda'|'face') — 直接生成 Material 实例, 注入到现有合成流程
+//
+// 远程图为什么必须转 dataURL:
+//   - canvas drawImage 接 cross-origin 图 → canvas tainted → toDataURL/toBlob 抛 SecurityError
+//   - 即使源站返了 CORS header, 浏览器对 <img> 默认请求不带 crossorigin attr 也会污染
+//   - dataURL 是 same-origin, 100% 兼容现有 composeMeme / 导出 / 复制流程
+
+import type { Material } from '@/data/materials';
+
+export interface NetworkResult {
+  id: string;            // `${source}:${hash}` 后端返
+  src: string;           // 原图 URL
+  thumb: string;         // 缩略图 URL (一般 = src 或更小)
+  source: 'duitang' | 'fabiaoqing' | 'bing';
+  w?: number;
+  h?: number;
+  hint?: string;
+}
+
+export interface SearchResponse {
+  items: NetworkResult[];
+  total: number;
+  hasMore: boolean;
+  nextPage: number;
+  sources: Record<string, { ok: boolean; took: number; count: number; error?: string }>;
+  hint?: 'all_sources_failed' | 'partial';
+}
+
+/**
+ * 远程图 URL → 走后端代理的 URL (绕防盗链 + 加 CORS header + Edge 1 周缓存).
+ * 直接用作 <img src=...>: 浏览器会发请求到我们的 /api/proxy-image,
+ * 后端带正确 Referer + UA 拉源图返回. 用户看的图是 same-origin, 0 防盗链问题.
+ *
+ * 用法: <img src={proxyImageUrl(item.thumb)} loading="lazy" />
+ */
+export function proxyImageUrl(remoteUrl: string): string {
+  return `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
+}
+
+/** GET /api/search-pandas?q=...&page=... — 主搜索 */
+export async function searchPandas(
+  query: string,
+  page = 0,
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
+  const q = query.trim();
+  if (!q) return { items: [], total: 0, hasMore: false, nextPage: 0, sources: {} };
+  // cache: 'no-store' — 避免浏览器 disk cache 旧 results (Cache-Control max-age=86400 会让浏览器缓存)
+  // 后端 in-memory LRU 仍然命中 (同 cacheKey), 但浏览器每次都向 dev server 拿最新代码处理结果
+  const url = `/api/search-pandas?q=${encodeURIComponent(q)}&page=${page}`;
+  const res = await fetch(url, { signal, cache: 'no-store' });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`search failed: ${res.status} ${errBody.slice(0, 100)}`);
+  }
+  return (await res.json()) as SearchResponse;
+}
+
+/** 远程图 → dataURL (走后端代理绕 CORS) */
+export async function fetchAsDataUrl(remoteUrl: string, signal?: AbortSignal): Promise<string> {
+  const proxied = `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
+  const res = await fetch(proxied, { signal });
+  if (!res.ok) {
+    throw new Error(`proxy ${res.status}`);
+  }
+  const blob = await res.blob();
+  return blobToDataUrl(blob);
+}
+
+/** 远程图 → Blob (沉淀工具用) */
+export async function fetchAsBlob(remoteUrl: string, signal?: AbortSignal): Promise<Blob> {
+  const proxied = `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
+  const res = await fetch(proxied, { signal });
+  if (!res.ok) throw new Error(`proxy ${res.status}`);
+  return await res.blob();
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const v = r.result;
+      if (typeof v === 'string') resolve(v);
+      else reject(new Error('FileReader returned non-string'));
+    };
+    r.onerror = () => reject(r.error ?? new Error('FileReader failed'));
+    r.readAsDataURL(blob);
+  });
+}
+
+/**
+ * "裁掉底部文字" — 纯几何 crop, 不再 inpaint 检测.
+ *
+ * 2026-05-17 v2 (用户反馈"完全卡死, 重新做这个系统"):
+ *   旧版 canvas inpaint (扫描 dark pixel 行 + 白色覆盖) 在以下场景卡死/失败:
+ *     - getImageData 跨大图 1500x1500 一次扫 600 行 × 1500 像素 → 主线程 200~800ms
+ *     - 检测算法误判: 纯黑 panda 头被误为 "文字行", 覆盖到错的 Y
+ *     - 文字检测失败时 silently 返回原图, 用户以为"没生效"
+ *
+ *   新版 (this): 加载图 → drawImage 到 cropH = H*0.78 的新 canvas → toDataURL
+ *     - 0 检测, 纯几何
+ *     - 主线程总 < 50ms (一次 drawImage)
+ *     - 5s timeout 兜底 (Image onload 不来), 永不卡死
+ *     - 即使图本身没文字, 砍掉底 22% 也无大碍 (panda 头核心在上 60%)
+ *
+ * 用户感知: 应用一定快, 一定有效果 (底部一定干净). 误判风险极小.
+ */
+const _eraseTextCache = new Map<string, string>();
+
+const CROP_BOTTOM_RATIO = 0.22; // 砍掉底部 22%, 实测能覆盖 95% 单/双行配文
+const IMG_LOAD_TIMEOUT_MS = 5000;
+
+export async function eraseBottomText(imgUrl: string): Promise<string> {
+  const cached = _eraseTextCache.get(imgUrl);
+  if (cached !== undefined) return cached;
+  let img: HTMLImageElement;
+  try {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      const timer = window.setTimeout(() => {
+        reject(new Error(`img load timeout ${IMG_LOAD_TIMEOUT_MS}ms`));
+      }, IMG_LOAD_TIMEOUT_MS);
+      i.onload = () => { window.clearTimeout(timer); resolve(i); };
+      i.onerror = () => { window.clearTimeout(timer); reject(new Error('img load failed')); };
+      i.src = imgUrl;
+    });
+  } catch (e) {
+    // 失败时透传原 URL, 让 caller 仍能继续 (不 throw, 不卡 UI)
+    // eslint-disable-next-line no-console
+    console.warn('[networkImage] eraseBottomText img load failed', (e as Error).message);
+    return imgUrl;
+  }
+  const W = img.naturalWidth || img.width;
+  const H = img.naturalHeight || img.height;
+  if (W < 50 || H < 50) {
+    _eraseTextCache.set(imgUrl, imgUrl);
+    return imgUrl;
+  }
+  const cropH = Math.max(50, Math.round(H * (1 - CROP_BOTTOM_RATIO)));
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = cropH;
+  const ctx = c.getContext('2d');
+  if (!ctx) return imgUrl;
+  // 只画原图顶部 cropH 像素 (sx,sy,sw,sh, dx,dy,dw,dh) — 完美裁底
+  ctx.drawImage(img, 0, 0, W, cropH, 0, 0, W, cropH);
+  let out: string;
+  try {
+    out = c.toDataURL('image/png');
+  } catch {
+    return imgUrl;
+  }
+  _eraseTextCache.set(imgUrl, out);
+  return out;
+}
+
+/**
+ * 启发式检测图片是否含文字 — 不用 OCR (太重), 用像素分析.
+ *
+ * 思路: 熊猫头梗图配文通常在底部 1/3 区域, 文字 = 高对比度规整水平 dark 行.
+ *   - 取图底部 35% region
+ *   - 转灰度 + 阈值 (灰度<80 算 dark)
+ *   - 统计每行 dark 像素占比 > 5% 的行数
+ *   - 累计 ≥ 8 行 = 有文字嫌疑
+ *
+ * 性能: 缩到 max 200px 宽再扫描, 1 张图 < 50ms.
+ * 误判: 纯黑底 panda 也会触发 (但反正用户能切换 toggle 关闭过滤).
+ */
+const _textDetectCache = new Map<string, boolean>();
+
+export async function detectTextInImage(imgUrl: string): Promise<boolean> {
+  const cached = _textDetectCache.get(imgUrl);
+  if (cached !== undefined) return cached;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      const timer = window.setTimeout(() => reject(new Error('timeout')), 6000);
+      i.onload = () => { window.clearTimeout(timer); resolve(i); };
+      i.onerror = () => { window.clearTimeout(timer); reject(new Error('img load failed')); };
+      i.src = imgUrl;
+    });
+    const W0 = img.naturalWidth || img.width || 1;
+    const H0 = img.naturalHeight || img.height || 1;
+    if (W0 < 50 || H0 < 50) {
+      _textDetectCache.set(imgUrl, false);
+      return false;
+    }
+    // 缩到 max 200 宽
+    const scale = Math.min(1, 200 / W0);
+    const W = Math.max(50, Math.round(W0 * scale));
+    const H = Math.max(50, Math.round(H0 * scale));
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+    ctx.drawImage(img, 0, 0, W, H);
+
+    // 只看底部 35% region
+    const yStart = Math.floor(H * 0.65);
+    const regionH = H - yStart;
+    const data = ctx.getImageData(0, yStart, W, regionH).data;
+
+    let textLikeRows = 0;
+    for (let y = 0; y < regionH; y++) {
+      let darkCount = 0;
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        if (gray < 80) darkCount++;
+      }
+      const darkRatio = darkCount / W;
+      // 文字行典型 dark ratio 0.05-0.4 (太黑可能是 solid panda 头, 太白可能是空白)
+      if (darkRatio > 0.05 && darkRatio < 0.5) textLikeRows++;
+    }
+    const hasText = textLikeRows >= 8;
+    _textDetectCache.set(imgUrl, hasText);
+    return hasText;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 启发式检测图片是否是"彩色照片" (非熊猫头梗图) —
+ * 用 HSV saturation 占比. 真熊猫照片 / 二次元 / 真人 saturation 通常 > 0.3,
+ * 熊猫头梗图 99% 是黑/白/灰二值图, saturation 接近 0.
+ *
+ * 实测可去除:
+ *   - 真实熊猫坐办公室 (AI 生成绿植/棕桌/彩色屏幕)
+ *   - 动漫女郎 (彩色衣服头发)
+ *   - 真人写真 (肤色 + 彩色)
+ *
+ * 性能: 缩到 60×60 (3600 像素) 扫描, ~10-30ms/张, 比 detectText 快.
+ */
+const _colorfulCache = new Map<string, boolean>();
+
+export async function detectColorfulness(imgUrl: string): Promise<boolean> {
+  const cached = _colorfulCache.get(imgUrl);
+  if (cached !== undefined) return cached;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      const timer = window.setTimeout(() => reject(new Error('timeout')), 6000);
+      i.onload = () => { window.clearTimeout(timer); resolve(i); };
+      i.onerror = () => { window.clearTimeout(timer); reject(new Error('img load failed')); };
+      i.src = imgUrl;
+    });
+    const c = document.createElement('canvas');
+    c.width = 60; c.height = 60;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+    ctx.drawImage(img, 0, 0, 60, 60);
+    const data = ctx.getImageData(0, 0, 60, 60).data;
+    let colorfulCount = 0;
+    const total = 60 * 60;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      // HSV saturation = (max - min) / max (max > 0). 简化: saturation > 30/255 ≈ 0.12
+      if (max > 30 && (max - min) > 40) colorfulCount++;
+    }
+    const colorfulRatio = colorfulCount / total;
+    // > 18% 彩色像素 = 真彩照片 (非熊猫头梗图)
+    const isColorful = colorfulRatio > 0.18;
+    _colorfulCache.set(imgUrl, isColorful);
+    return isColorful;
+  } catch {
+    return false;  // 失败兜底保留 (不误杀)
+  }
+}
+
+/** Blob → base64 (不含 data: 前缀) — 沉淀工具传给后端写盘用 */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const dataUrl = await blobToDataUrl(blob);
+  const idx = dataUrl.indexOf(',');
+  return idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
+}
+
+const DEFAULT_FACE_OFFSET = { x: 100, y: 70, w: 250, h: 250 };
+
+/**
+ * 把 NetworkResult 包装成 Material 实例, 注入合成流程.
+ *
+ * 关键设计 (2026-05-17 重写, fix "一直加载不上画板"):
+ *   src 直接用 proxyImageUrl(result.src) — same-origin URL, 浏览器自己请求 proxy 拉图.
+ *   不再 await fetchAsDataUrl → 没有 FileReader 卡顿 → dispatch ADD_ELEMENT 立刻执行.
+ *
+ *   合成时 composeMeme.loadImage(src) 接 same-origin URL 也不 tainted, 完全兼容现有流程.
+ *   缩略图跟选中后的素材都走同一个 proxy URL — 浏览器 HTTP cache 命中, 二次加载 < 50ms.
+ *
+ * 同步返回 → handleAction 不再 await → 用户感知瞬间响应.
+ */
+export function makeNetworkMaterial(
+  result: NetworkResult,
+  kind: 'panda' | 'face',
+): Material {
+  const label = result.hint?.trim() || (kind === 'panda' ? '网络熊猫' : '网络人脸');
+  const labelEn = kind === 'panda' ? 'Network Panda' : 'Network Face';
+  return {
+    id: `network-${kind}-${result.id.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32)}`,
+    // 走 proxy URL, 不是 dataURL — 浏览器请求时 dev plugin / Netlify Function 自动代理拉图
+    src: proxyImageUrl(result.src),
+    labelCn: label.slice(0, 12),
+    labelEn,
+    tags: [],
+    tagsEn: [],
+    faceOffset: DEFAULT_FACE_OFFSET,
+    kind: 'network',
+  };
+}

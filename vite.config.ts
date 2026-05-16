@@ -3,12 +3,22 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { inspectAttr } from 'kimi-plugin-inspect-react'
 import { devSyncPlugin } from './scripts/vite-plugin-dev-sync'
+import { searchProxyDevPlugin } from './scripts/vite-plugin-search-proxy'
+import { networkPoolSyncPlugin } from './scripts/vite-plugin-network-pool-sync'
 
 // https://vite.dev/config/
 export default defineConfig({
   base: '/',
   // devSyncPlugin: dev 文案管理 → POST /__sync/captions 直写 quickModeTexts.ts (apply: 'serve' 仅 dev)
-  plugins: [inspectAttr(), react(), devSyncPlugin()],
+  // searchProxyDevPlugin: dev 模拟 /api/search-pandas + /api/proxy-image (apply: 'serve' 仅 dev)
+  // networkPoolSyncPlugin: dev ⭐ 沉淀 → POST /__sync/network-pool 写盘到 src/data/network-pool.ts (apply: 'serve' 仅 dev)
+  plugins: [
+    inspectAttr(),
+    react(),
+    devSyncPlugin(),
+    searchProxyDevPlugin(),
+    networkPoolSyncPlugin(),
+  ],
   server: {
     port: 3000,
   },

@@ -1,0 +1,312 @@
+/* 联网搜熊猫头表情包 — 面板样式
+   v3 (2026-05-17): embedded mode + hint 中间随机按钮 + 去除底部文字 toggle */
+
+/* 2026-05-17 v5: root 自身做 scroll 容器, grid 自然撑高
+ *  根因: column-count 多列瀑布流 + flex 固定高度 grid + overflow:hidden
+ *    = 内容只能塞 N 列 × 容器高度的方块, 超出截断, 用户看到 "只 8 张无下滑".
+ *  方案: 把 overflow-y: auto 移到 root, grid 高度自然增长 = 真 Pinterest masonry.
+ *    column-fill 默认 balance 会均衡列高, 内容多列就高, root scroll 滚到底.
+ */
+.psp-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.psp-search { flex-shrink: 0; }
+.psp-chip-row { flex-shrink: 0; }
+.psp-toggle { flex-shrink: 0; }
+.psp-banner { flex-shrink: 0; }
+.psp-loading, .psp-empty, .psp-end, .psp-sentinel { flex-shrink: 0; }
+
+/* ===== chip 行 ===== */
+.psp-chip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #ccc transparent;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.psp-chip-row::-webkit-scrollbar { height: 4px; }
+.psp-chip-row::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+.psp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 9px;
+  background: #f3f4f6;
+  color: #333;
+  border: 1px solid #e2e4e8;
+  border-radius: 13px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .psp-chip:hover {
+    background: #e8eaee;
+    border-color: #c8cbd1;
+  }
+}
+.psp-chip-active {
+  background: #FF5E00;
+  color: white;
+  border-color: #FF5E00;
+}
+.psp-chip-emoji { font-size: 13px; line-height: 1; }
+.psp-chip-label { font-weight: 500; }
+
+/* ===== 去除底部文字 toggle ===== */
+.psp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: #444;
+  user-select: none;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.psp-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ===== banner ===== */
+.psp-banner {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.psp-banner-info { background: #fff8e1; color: #8a6300; border: 1px solid #ffe0a3; }
+.psp-banner-error { background: #fde2e1; color: #b00; border: 1px solid #ffaba8; }
+.psp-banner-retry {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  color: inherit;
+}
+@media (hover: hover) {
+  .psp-banner-retry:hover {
+    background: currentColor;
+    color: white;
+  }
+}
+
+/* ===== 网格 — column-based 瀑布流, 自然撑高让 root 滚 ===== */
+/* 不再用 flex / overflow / min-height (上版本 column-count + flex 高度限制导致 8 张截断) */
+.psp-grid {
+  column-count: 3;
+  column-gap: 8px;
+  padding: 2px;
+  width: 100%;
+  box-sizing: border-box;
+  flex-shrink: 0;  /* root 是 flex column, grid 不 shrink, 自然撑高 */
+}
+@media (max-width: 768px) {
+  .psp-grid { column-count: 2; }
+}
+
+/* ===== 卡片 — 整张可点击 ===== */
+.psp-card {
+  position: relative;
+  width: 100%;
+  display: inline-block;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 8px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .psp-card:hover {
+    border-color: #FF5E00;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(255, 94, 0, 0.2);
+  }
+}
+.psp-card:active { transform: scale(0.98); }
+.psp-card-busy { opacity: 0.85; pointer-events: none; }
+
+.psp-thumb {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  background: #fafafa;
+}
+
+.psp-thumb-fallback {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #92400e;
+  font-size: 11px;
+  user-select: none;
+}
+.psp-thumb-fallback > span { font-size: 24px; opacity: 0.7; }
+.psp-card-failed { border-color: #d4af00; }
+
+.psp-source-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: white;
+  font-size: 9px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  text-transform: lowercase;
+  letter-spacing: 0.3px;
+}
+
+.psp-card-busy-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.psp-save-corner {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(254, 243, 199, 0.95);
+  color: #92400e;
+  border: 1px solid rgba(146, 64, 14, 0.3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+@media (hover: hover) {
+  .psp-save-corner:hover:not(:disabled) {
+    background: #92400e;
+    color: white;
+    transform: scale(1.08);
+  }
+}
+.psp-save-corner:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.psp-spinner { animation: psp-spin 1s linear infinite; }
+@keyframes psp-spin { to { transform: rotate(360deg); } }
+
+/* ===== 状态文案 ===== */
+.psp-loading,
+.psp-empty,
+.psp-end {
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+  flex-shrink: 0;
+}
+.psp-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 8px;
+}
+.psp-empty {
+  padding: 24px 12px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.psp-end {
+  padding: 12px 8px;
+  color: #aaa;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+/* hint state — 文案居中 + 下方大 🎲 按钮 */
+.psp-hint {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px 12px;
+  color: #888;
+  line-height: 1.5;
+  text-align: center;
+}
+.psp-hint-text {
+  font-size: 13px;
+  color: #888;
+  line-height: 1.5;
+}
+.psp-random-big {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(180deg, #88b8ff 0%, #4a82e0 100%);
+  border: 1px solid #1f4ea0;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(31, 78, 160, 0.25);
+}
+@media (hover: hover) {
+  .psp-random-big:hover {
+    background: linear-gradient(180deg, #99c3ff 0%, #5a92f0 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(31, 78, 160, 0.35);
+  }
+}
+.psp-random-big:active { transform: scale(0.97); }
+
+.psp-sentinel {
+  height: 40px;
+  width: 100%;
+  flex-shrink: 0;
+}

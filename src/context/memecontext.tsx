@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import { translations, type Lang, type TranslationKey } from './translations';
 
@@ -393,6 +393,11 @@ interface MemeContextType {
   clearDraft: (slotId: string) => void;
   clearDrafts: (slotIds: string[]) => void;
   renameDraft: (slotId: string, name: string) => void;
+  // Undo / Redo (debounced history of elements + selectedId snapshots)
+  undo: () => boolean;
+  redo: () => boolean;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const MemeContext = createContext<MemeContextType | null>(null);
@@ -414,6 +419,67 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     });
     return () => { cancelled = true; };
   }, []);
+
+  // ===== Undo / Redo history (feat/network-search 引入) =====
+  // 用 ref 跟踪 elements/selectedId snapshot 栈, useEffect 监听 state 变化 debounce push.
+  // undo/redo 触发的 dispatch 不再 record (undoableRef 标志).
+  interface Snapshot { elements: MemeElement[]; selectedId: string | null; }
+  const historyRef = useRef<Snapshot[]>([{ elements: state.elements, selectedId: state.selectedId }]);
+  const futureRef = useRef<Snapshot[]>([]);
+  const undoableRef = useRef(true);
+  const historyDebounceRef = useRef<number | null>(null);
+  const [historyVersion, setHistoryVersion] = React.useState(0); // 强制 canUndo/canRedo re-render
+
+  useEffect(() => {
+    if (!undoableRef.current) return;
+    if (historyDebounceRef.current) window.clearTimeout(historyDebounceRef.current);
+    historyDebounceRef.current = window.setTimeout(() => {
+      const last = historyRef.current[historyRef.current.length - 1];
+      if (last && last.elements === state.elements && last.selectedId === state.selectedId) return;
+      historyRef.current.push({ elements: state.elements, selectedId: state.selectedId });
+      if (historyRef.current.length > 50) historyRef.current.shift();
+      futureRef.current = [];
+      setHistoryVersion((v) => v + 1);
+    }, 300);
+    return () => {
+      if (historyDebounceRef.current) window.clearTimeout(historyDebounceRef.current);
+    };
+  }, [state.elements, state.selectedId]);
+
+  const undo = useCallback((): boolean => {
+    if (historyRef.current.length < 2) return false;
+    const current = historyRef.current.pop();
+    if (!current) return false;
+    futureRef.current.unshift(current);
+    const target = historyRef.current[historyRef.current.length - 1];
+    undoableRef.current = false;
+    dispatch({
+      type: 'HYDRATE_STATE',
+      state: { ...state, elements: target.elements, selectedId: target.selectedId },
+    });
+    setHistoryVersion((v) => v + 1);
+    window.setTimeout(() => { undoableRef.current = true; }, 50);
+    return true;
+  }, [state]);
+
+  const redo = useCallback((): boolean => {
+    if (futureRef.current.length === 0) return false;
+    const target = futureRef.current.shift();
+    if (!target) return false;
+    historyRef.current.push(target);
+    undoableRef.current = false;
+    dispatch({
+      type: 'HYDRATE_STATE',
+      state: { ...state, elements: target.elements, selectedId: target.selectedId },
+    });
+    setHistoryVersion((v) => v + 1);
+    window.setTimeout(() => { undoableRef.current = true; }, 50);
+    return true;
+  }, [state]);
+
+  const canUndo = historyRef.current.length > 1;
+  const canRedo = futureRef.current.length > 0;
+  void historyVersion;
 
   const saveDraft = useCallback(async (slotId: string) => {
     const previewUrl = await renderDraftPreview(state.elements);
@@ -587,7 +653,7 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   }, [state.elements, state.selectedId, state.language]);
 
   return (
-    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, clearDrafts, renameDraft }}>
+    <MemeContext.Provider value={{ state, dispatch, t, generateId, draftSlots, saveDraft, saveDraftWithState, loadDraft, clearDraft, clearDrafts, renameDraft, undo, redo, canUndo, canRedo }}>
       {children}
     </MemeContext.Provider>
   );

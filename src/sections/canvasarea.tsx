@@ -3,7 +3,9 @@ import { useMeme } from '@/context/memecontext';
 import type { ImageElement, TextElement } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import Draggable from 'react-draggable';
-import { Eraser, RotateCcw, LogOut, Save, Undo2 } from 'lucide-react';
+import { Eraser, RotateCcw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { fetchAsDataUrl } from '@/lib/networkImage';
 
 // blendMode 直接读 element.blendMode (创建时已根据 shell 透明/不透明 决定)
 // 不再用硬编码 isPandaElement / isFaceElement 判定
@@ -15,6 +17,7 @@ interface DraggableImageProps {
   isSelected: boolean;
   onSelect: () => void;
   onStartEdit: () => void;
+  canvasScale: number;
 }
 
 type ResizeDir = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
@@ -130,26 +133,51 @@ async function getVisibleImageBounds(src: string): Promise<typeof DEFAULT_VISIBL
   }
 }
 
-function useResizeHandler(element: ImageElement, dir: ResizeDir) {
+function useResizeHandler(element: ImageElement, dir: ResizeDir, canvasScale: number) {
   const { dispatch } = useMeme();
+  // canvasScale ref 让 useCallback 不每次 scale 变都重建 handler (避免 mid-drag 丢失)
+  const scaleRef = useRef(canvasScale);
+  scaleRef.current = canvasScale;
   return useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     e.preventDefault();
     const startX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const startY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     const { x: startElX, y: startElY, width: startW, height: startH } = element;
+    const aspect = startW / Math.max(1, startH);
+    const isCornerDir = dir.length === 2;
 
     const onMove = (ev: MouseEvent | TouchEvent) => {
       const cx = 'touches' in ev ? ev.touches[0].clientX : ev.clientX;
       const cy = 'touches' in ev ? ev.touches[0].clientY : ev.clientY;
-      const dx = cx - startX;
-      const dy = cy - startY;
+      // ⭐ 关键修复 "不跟手": 屏幕像素 delta 除以 canvasScale 转回画板坐标
+      //    画板有 transform:scale(canvasScale), 用户拖 100px 屏幕 = 100/scale 画板距离
+      const scale = scaleRef.current || 1;
+      const dx = (cx - startX) / scale;
+      const dy = (cy - startY) / scale;
       let newW = startW, newH = startH, newX = startElX, newY = startElY;
 
       if (dir.includes('e')) newW = Math.max(20, startW + dx);
-      if (dir.includes('w')) { newW = Math.max(20, startW - dx); newX = startElX + dx; }
+      if (dir.includes('w')) {
+        newW = Math.max(20, startW - dx);
+        newX = startElX + (startW - newW);
+      }
       if (dir.includes('s')) newH = Math.max(20, startH + dy);
-      if (dir.includes('n')) { newH = Math.max(20, startH - dy); newY = startElY + dy; }
+      if (dir.includes('n')) {
+        newH = Math.max(20, startH - dy);
+        newY = startElY + (startH - newH);
+      }
+
+      // Shift = 锁 aspect ratio (仅 corner 4 方向, 取较大变化量决定主轴)
+      if (isCornerDir && (ev as MouseEvent).shiftKey) {
+        if (Math.abs(newW - startW) >= Math.abs(newH - startH)) {
+          newH = newW / aspect;
+          if (dir.includes('n')) newY = startElY + (startH - newH);
+        } else {
+          newW = newH * aspect;
+          if (dir.includes('w')) newX = startElX + (startW - newW);
+        }
+      }
 
       dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { width: newW, height: newH, x: newX, y: newY } });
     };
@@ -193,19 +221,19 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
   );
 }
 
-function DraggableImage({ element, isSelected, onSelect, onStartEdit }: DraggableImageProps) {
+function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScale }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const { dispatch, state } = useMeme();
   const lang = state.language;
   const [visibleBounds, setVisibleBounds] = useState(DEFAULT_VISIBLE_BOUNDS);
-  const rhNW = useResizeHandler(element, 'nw');
-  const rhN  = useResizeHandler(element, 'n');
-  const rhNE = useResizeHandler(element, 'ne');
-  const rhW  = useResizeHandler(element, 'w');
-  const rhE  = useResizeHandler(element, 'e');
-  const rhSW = useResizeHandler(element, 'sw');
-  const rhS  = useResizeHandler(element, 's');
-  const rhSE = useResizeHandler(element, 'se');
+  const rhNW = useResizeHandler(element, 'nw', canvasScale);
+  const rhN  = useResizeHandler(element, 'n', canvasScale);
+  const rhNE = useResizeHandler(element, 'ne', canvasScale);
+  const rhW  = useResizeHandler(element, 'w', canvasScale);
+  const rhE  = useResizeHandler(element, 'e', canvasScale);
+  const rhSW = useResizeHandler(element, 'sw', canvasScale);
+  const rhS  = useResizeHandler(element, 's', canvasScale);
+  const rhSE = useResizeHandler(element, 'se', canvasScale);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +267,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
       nodeRef={nodeRef}
       cancel="button, input, .resize-handle"
       position={{ x: element.x, y: element.y }}
+      scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
       onStart={onSelect}
     >
@@ -278,22 +307,25 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
               </div>
+              {/* 编辑/删除 action — 紧凑横向布局, 反向 scale 抵消 canvasScale 放大 (永远视觉小巧) */}
               <div
-                className="absolute flex items-center gap-2 pointer-events-auto"
+                className="absolute flex items-center gap-1 pointer-events-auto"
                 style={{
                   zIndex: 16,
                   left: (selectionStyle.left as number) + (selectionStyle.width as number) / 2,
-                  transform: 'translateX(-50%)',
-                  top: (selectionStyle.top as number) + (selectionStyle.height as number) + 8,
+                  top: (selectionStyle.top as number) + (selectionStyle.height as number) + 6,
+                  transform: `translateX(-50%) scale(${1 / Math.max(0.5, canvasScale)})`,
+                  transformOrigin: 'top center',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <button
                   onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
-                  style={{ backgroundColor: '#0080FF' }}
+                  className="inline-flex items-center gap-1 rounded font-semibold text-white"
+                  style={{ backgroundColor: '#0080FF', padding: '3px 7px', fontSize: 11, lineHeight: 1 }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  {lang === 'zh' ? '编辑' : 'Edit'}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  <span>{lang === 'zh' ? '编辑' : 'Edit'}</span>
                 </button>
                 <button
                   onClick={(e) => {
@@ -301,11 +333,11 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
                     dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
                     dispatch({ type: 'SELECT_ELEMENT', id: null });
                   }}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
-                  style={{ backgroundColor: '#EF4444' }}
+                  className="inline-flex items-center gap-1 rounded font-semibold text-white"
+                  style={{ backgroundColor: '#EF4444', padding: '3px 7px', fontSize: 11, lineHeight: 1 }}
                 >
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  {lang === 'zh' ? '删除' : 'Delete'}
+                  <span>{lang === 'zh' ? '删除' : 'Delete'}</span>
                 </button>
               </div>
             </>
@@ -317,8 +349,10 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit }: Draggabl
 }
 
 /* ========== DraggableText ========== */
-function useTextResizeHandler(element: TextElement) {
+function useTextResizeHandler(element: TextElement, canvasScale: number) {
   const { dispatch } = useMeme();
+  const scaleRef = useRef(canvasScale);
+  scaleRef.current = canvasScale;
   return useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -329,7 +363,9 @@ function useTextResizeHandler(element: TextElement) {
     const onMove = (ev: MouseEvent | TouchEvent) => {
       const clientX = 'touches' in ev ? ev.touches[0].clientX : ev.clientX;
       const clientY = 'touches' in ev ? ev.touches[0].clientY : ev.clientY;
-      const delta = Math.sqrt((clientX - startX) ** 2 + (clientY - startY) ** 2) * Math.sign(clientX - startX + clientY - startY);
+      const scale = scaleRef.current || 1;
+      // delta 也除以 scale (跟手)
+      const delta = Math.sqrt((clientX - startX) ** 2 + (clientY - startY) ** 2) * Math.sign(clientX - startX + clientY - startY) / scale;
       const newFontSize = Math.max(8, Math.round(startFontSize + delta * 0.3));
       dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { fontSize: newFontSize } });
     };
@@ -351,15 +387,16 @@ function useTextResizeHandler(element: TextElement) {
   }, [element, dispatch]);
 }
 
-function DraggableText({ element, isSelected, onSelect }: {
+function DraggableText({ element, isSelected, onSelect, canvasScale }: {
   element: TextElement;
   isSelected: boolean;
   onSelect: () => void;
+  canvasScale: number;
 }) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { state, dispatch } = useMeme();
-  const rh = useTextResizeHandler(element);
+  const rh = useTextResizeHandler(element, canvasScale);
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(element.text);
@@ -424,6 +461,7 @@ function DraggableText({ element, isSelected, onSelect }: {
       nodeRef={nodeRef}
       cancel="button, input, .resize-handle"
       position={{ x: element.x, y: element.y }}
+      scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
       onStart={onSelect}
     >
@@ -489,6 +527,9 @@ function DraggableText({ element, isSelected, onSelect }: {
                     backgroundColor: '#EF4444',
                     zIndex: 20,
                     border: '2px solid #fff',
+                    // 反向 scale 抵消 canvas 放大, button 视觉永远 18×18
+                    transform: `scale(${1 / Math.max(0.5, canvasScale)})`,
+                    transformOrigin: 'center',
                   }}
                   title={state.language === 'zh' ? '删除' : 'Delete'}
                 >
@@ -522,7 +563,7 @@ function buildCursorSVG(tool: 'brush' | 'eraser', size: number, color: string): 
 
 /* ========== CanvasArea ========== */
 export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
-  const { state, dispatch, generateId } = useMeme();
+  const { state, dispatch, generateId, undo, redo, canUndo, canRedo } = useMeme();
 
   // Image edit (eraser/brush) state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -541,6 +582,100 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   useEffect(() => {
     setCursorUrl(buildCursorSVG(editTool, editSize, editColor));
   }, [editTool, editSize, editColor]);
+
+  // 粘贴功能 — 全局 paste listener (在编辑器页面时生效, 文本输入框时让浏览器默认行为)
+  // 支持两种 case:
+  //  1. 剪贴板含图片二进制 (截图工具复制) → readFile → dataURL → 加到画板
+  //  2. 剪贴板含图片 URL (右键复制图片地址) → fetchAsDataUrl 走 proxy → dataURL → 加到画板
+  // 任意一种都居中 + 缩放到 maxSide 320 适应画板
+  const addPastedDataUrl = useCallback(async (dataUrl: string, name: string) => {
+    const image = await loadImage(dataUrl);
+    const maxSide = 320;
+    const nW = image.naturalWidth || 1;
+    const nH = image.naturalHeight || 1;
+    const scale = Math.min(1, maxSide / Math.max(nW, nH));
+    const width = Math.max(40, Math.round(nW * scale));
+    const height = Math.max(40, Math.round(nH * scale));
+    const x = Math.round((CANVAS_SIZE - width) / 2);
+    const y = Math.round((CANVAS_SIZE - height) / 2);
+    dispatch({
+      type: 'ADD_ELEMENT',
+      element: {
+        id: generateId(),
+        type: 'image',
+        src: dataUrl,
+        name,
+        x, y, width, height,
+        rotation: 0, opacity: 1, zIndex: 0,
+        flipX: false,
+      },
+    });
+  }, [dispatch, generateId]);
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      // 文本输入框时让浏览器默认行为, 不劫持
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      }
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+
+      const lang = state.language;
+
+      // 优先 image 二进制 (截图工具复制)
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          if (!blob) continue;
+          e.preventDefault();
+          const toastId = `paste-img-${Date.now()}`;
+          toast.loading(lang === 'zh' ? '粘贴图片中…' : 'Pasting image…', { id: toastId });
+          (async () => {
+            try {
+              const dataUrl = await readFileAsDataUrl(blob);
+              await addPastedDataUrl(dataUrl, `paste-img-${Date.now()}`);
+              toast.success(lang === 'zh' ? '图片已粘贴到画板' : 'Image pasted to canvas', { id: toastId });
+            } catch (err) {
+              toast.error(`${lang === 'zh' ? '粘贴失败' : 'Paste failed'}: ${(err as Error).message}`, { id: toastId });
+            }
+          })();
+          return;
+        }
+      }
+
+      // 没图片二进制 → 看文本是否为图片 URL
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'string' && item.type === 'text/plain') {
+          item.getAsString((rawStr) => {
+            const url = rawStr.trim();
+            if (!/^https?:\/\//i.test(url)) return;
+            // 必须看起来像图片 URL (扩展名 jpg/png/gif/webp), 否则不劫持
+            if (!/\.(jpe?g|png|gif|webp|bmp|avif)(\?|#|$)/i.test(url)) return;
+            const toastId = `paste-url-${Date.now()}`;
+            toast.loading(lang === 'zh' ? '下载链接图片中…' : 'Fetching image URL…', { id: toastId });
+            (async () => {
+              try {
+                const dataUrl = await fetchAsDataUrl(url);
+                await addPastedDataUrl(dataUrl, `paste-url-${Date.now()}`);
+                toast.success(lang === 'zh' ? '图片链接已粘贴到画板' : 'URL image pasted', { id: toastId });
+              } catch (err) {
+                toast.error(`${lang === 'zh' ? '粘贴失败' : 'Paste failed'}: ${(err as Error).message}`, { id: toastId });
+              }
+            })();
+          });
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [state.language, addPastedDataUrl]);
 
   const handleCanvasClick = (e: React.MouseEvent | React.TouchEvent) => {
     if ((e.target as HTMLElement).closest('.canvas-element')) return;
@@ -807,20 +942,35 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
     lastDrawPos.current = null;
   };
 
-  /* ===== Keyboard: Delete selected element ===== */
+  /* ===== Keyboard: Delete / Undo / Redo ===== */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement;
       const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable);
-      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId && !editingId && !isTyping) {
+      if (isTyping) return;
+      // Delete / Backspace 删选中元素
+      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId && !editingId) {
         e.preventDefault();
         dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId });
         dispatch({ type: 'SELECT_ELEMENT', id: null });
+        return;
+      }
+      // Ctrl+Z / Cmd+Z = undo
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      // Ctrl+Y or Ctrl+Shift+Z = redo
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+        e.preventDefault();
+        redo();
+        return;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [state.selectedId, editingId, dispatch]);
+  }, [state.selectedId, editingId, dispatch, undo, redo]);
 
   const editingEl = state.elements.find(e => e.id === editingId) as ImageElement | undefined;
   const isMobile = useIsMobile();
@@ -865,7 +1015,78 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
     <div
       ref={stageRef}
       className="flex flex-col items-center justify-start flex-1 overflow-y-auto p-3 md:p-4 gap-3"
-      style={isMobile ? { paddingBottom: '12px', paddingTop: '12px' } : { paddingTop: '12px' }}>
+      style={isMobile ? { paddingBottom: '12px', paddingTop: '12px', position: 'relative' } : { paddingTop: '12px', position: 'relative' }}>
+      {/* undo/redo 按钮 (feat/network-search 引入) — absolute top-left, mobile 隐藏 */}
+      {!isMobile && (
+        <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 4, zIndex: 50, pointerEvents: 'auto' }}>
+          <button
+            type="button"
+            onClick={() => undo()}
+            disabled={!canUndo}
+            aria-label="undo"
+            style={{
+              width: 30, height: 30,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: canUndo ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)',
+              border: '1px solid rgba(0,0,0,0.12)',
+              borderRadius: 6,
+              color: canUndo ? '#0a356d' : '#aaa',
+              cursor: canUndo ? 'pointer' : 'not-allowed',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              padding: 0,
+              transition: 'all 0.12s',
+            }}
+          >
+            <Undo2 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => redo()}
+            disabled={!canRedo}
+            aria-label="redo"
+            style={{
+              width: 30, height: 30,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: canRedo ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)',
+              border: '1px solid rgba(0,0,0,0.12)',
+              borderRadius: 6,
+              color: canRedo ? '#0a356d' : '#aaa',
+              cursor: canRedo ? 'pointer' : 'not-allowed',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              padding: 0,
+              transition: 'all 0.12s',
+            }}
+          >
+            <Redo2 size={14} />
+          </button>
+        </div>
+      )}
+      {/* 快捷键提示条 — undo/redo 下方, mobile 隐藏 */}
+      {!isMobile && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 42,
+            left: 8,
+            zIndex: 49,
+            pointerEvents: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            color: 'rgba(255,255,255,0.55)',
+            fontSize: 10,
+            lineHeight: 1.3,
+            fontFamily: 'monospace',
+            textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+            userSelect: 'none',
+          }}
+        >
+          <span>Ctrl+Z {state.language === 'zh' ? '撤回' : 'Undo'}</span>
+          <span>Ctrl+Y {state.language === 'zh' ? '重做' : 'Redo'}</span>
+          <span>Shift+{state.language === 'zh' ? '拖角=等比' : 'drag=lock ratio'}</span>
+          <span>Del {state.language === 'zh' ? '删除选中' : 'Delete'}</span>
+        </div>
+      )}
       <div
         ref={canvasWrapperRef}
         className="canvas-outer"
@@ -927,6 +1148,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                 key={el.id}
                 element={el as ImageElement}
                 isSelected={isSelected}
+                canvasScale={canvasScale}
                 onSelect={() => {
                   if (editingId) exitEdit();
                   dispatch({ type: 'SELECT_ELEMENT', id: el.id });
@@ -943,6 +1165,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
               key={el.id}
               element={el as TextElement}
               isSelected={isSelected}
+              canvasScale={canvasScale}
               onSelect={() => {
                 if (editingId) exitEdit();
                 dispatch({ type: 'SELECT_ELEMENT', id: el.id });

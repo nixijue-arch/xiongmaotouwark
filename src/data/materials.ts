@@ -9,6 +9,8 @@ export interface Material {
   // 字幕偏移 (px, 350-coord 空间): 正数 = panda 图片往下挪贴近 caption (缩小间距)
   // 由校准工具调好后 export 到 panda-manual-overrides.ts 永久生效
   captionOffset?: number;
+  // 素材分类: 'panda'/'face'/'scene' 沙雕动画分流 / 'general' 通用 / 'network' 联网搜沉淀来的
+  kind?: 'panda' | 'face' | 'scene' | 'general' | 'network';
 }
 
 const defaultOffset = { x: 100, y: 70, w: 250, h: 250 };
@@ -128,10 +130,13 @@ export function getPandaFaceOffset(pandaId: string): { x: number; y: number; w: 
 import { PANDAHEAD_PANDAS } from './panda-pandahead';
 import { PANDAHEAD_FACES } from './face-pandahead';
 
-/** 完整 panda 池：原 24 + PandaHead 贡献 46 = 70 */
-export const ALL_PANDAS: Material[] = [...PANDA_HEADS, ...PANDAHEAD_PANDAS];
-/** 完整 face 池：原 67 + PandaHead 贡献 65 = 132 */
-export const ALL_FACES: Material[] = [...FACES, ...PANDAHEAD_FACES];
+// ===== 联网搜沉淀池 (DEV 工具维护, 初始空) =====
+import { NETWORK_PANDAS, NETWORK_FACES } from './network-pool';
+
+/** 完整 panda 池：原 24 + PandaHead 贡献 46 + 网络沉淀 N = 70+N */
+export const ALL_PANDAS: Material[] = [...PANDA_HEADS, ...PANDAHEAD_PANDAS, ...NETWORK_PANDAS];
+/** 完整 face 池：原 67 + PandaHead 贡献 65 + 网络沉淀 N = 132+N */
+export const ALL_FACES: Material[] = [...FACES, ...PANDAHEAD_FACES, ...NETWORK_FACES];
 
 PANDAHEAD_PANDAS.forEach(p => { pandaOffsetMap[p.id] = p.faceOffset; });
 
