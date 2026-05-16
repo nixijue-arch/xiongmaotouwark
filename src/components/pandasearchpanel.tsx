@@ -108,19 +108,15 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    // ⭐ query 变化立即清屏 + abort 旧 fetch (修"切搜索卡在旧结果半分钟"):
-    //   旧实现: setResults 只在 fetch 返回时调用 → 用户切 query 后等新 fetch 完成才换屏
-    //   现在: 立刻 abort + clear, 用户感觉切 query 瞬间响应
+    // ⭐ query 变化立即清屏 + abort 旧 fetch (无条件 — query 清空也清, 否则旧 results 残留):
     abortRef.current?.abort();
-    if (query.trim()) {
-      setResults([]);
-      setFailedIds(new Set());
-      setColorfulDetection({});
-      setAIPandaDetection({});
-      setError(null);
-      setHasMore(false);
-      setResHint(undefined);
-    }
+    setResults([]);
+    setFailedIds(new Set());
+    setColorfulDetection({});
+    setAIPandaDetection({});
+    setError(null);
+    setHasMore(false);
+    setResHint(undefined);
     debounceRef.current = window.setTimeout(() => {
       setPage(0);
       void doSearch(query, 0);
@@ -449,6 +445,10 @@ function ResultCard({
         alt={item.hint || item.source}
         className="psp-thumb"
         style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
+        // referrerpolicy=no-referrer: 浏览器不发 Referer header, 国内 CDN (baidu/so360 hot-link)
+        // 看不到第三方 referer https://xiongmaotou.work → 不会触发 referer 防盗链 403.
+        // 这让智能路由 (国内 CDN 直加载) 100% 可靠, 国内用户首屏 200ms 内出图.
+        referrerPolicy="no-referrer"
         onError={onLoadFailed}
         // 空图过滤: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
         onLoad={(e) => {

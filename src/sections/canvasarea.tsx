@@ -285,6 +285,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
               panda 黑色 silhouette × face = black (廓盖 face)
               图层面板按 text > panda > face 排序 (符合 user 要求) */}
           <img src={element.src} alt="element" className="block max-w-none" draggable={false}
+            referrerPolicy="no-referrer"
             style={{
               width: element.width,
               height: element.height,
