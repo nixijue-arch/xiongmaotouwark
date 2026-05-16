@@ -32,13 +32,39 @@ export interface SearchResponse {
 }
 
 /**
- * 远程图 URL → 走后端代理的 URL (绕防盗链 + 加 CORS header + Edge 1 周缓存).
- * 直接用作 <img src=...>: 浏览器会发请求到我们的 /api/proxy-image,
- * 后端带正确 Referer + UA 拉源图返回. 用户看的图是 same-origin, 0 防盗链问题.
+ * 远程图 URL → 浏览器加载的 URL (智能路由).
  *
- * 用法: <img src={proxyImageUrl(item.thumb)} loading="lazy" />
+ * 2026-05-17 性能优化 v2: 生产端用户反馈搜索 30s+ (本地 3s).
+ *   根因: 每张缩略图都走 /api/proxy-image, 国内用户 → Netlify(海外) → 国内 CDN → Netlify → 用户
+ *   每张 ~1-2s 国际 round-trip × 60 张 ÷ 6 浏览器并发 ≈ 15-30s 真瓶颈.
+ *
+ * 优化策略: 只有真正防盗链的源走 proxy, 无防盗链的源直接 hot-link CDN (国内→国内 ~50ms).
+ *   - duitang / dtstatic    → 必须 proxy (实测有 Referer 检查 + 防盗链)
+ *   - fabiaoqing            → 必须 proxy (有防盗链)
+ *   - baidu (img*.baidu)    → 直接 hot-link (实测无 Referer 检查)
+ *   - so360 (qhimgs*)       → 直接 hot-link (实测无 Referer 检查)
+ *   - sogou (sogoucdn)      → 直接 hot-link
+ *
+ * 用于缩略图渲染 (<img src={...}>). detect 函数需要 canvas getImageData (CORS canvas), 不能用此函数,
+ * 必须固定走 proxy 拿 same-origin RGBA — 用 proxyForCanvasDetect.
  */
+const PROXY_REQUIRED_RE = /(?:^|\.)duitang\.com$|(?:^|\.)dtstatic\.com$|(?:^|\.)fabiaoqing\.com$/i;
+
 export function proxyImageUrl(remoteUrl: string): string {
+  try {
+    const u = new URL(remoteUrl);
+    if (PROXY_REQUIRED_RE.test(u.hostname)) {
+      return `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
+    }
+    // 国内 CDN 直接 hot-link (大幅减少 latency)
+    return remoteUrl;
+  } catch {
+    return `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
+  }
+}
+
+/** detect 用 — canvas getImageData 需要 same-origin, 固定走 proxy */
+export function proxyForCanvasDetect(remoteUrl: string): string {
   return `/api/proxy-image?url=${encodeURIComponent(remoteUrl)}`;
 }
 

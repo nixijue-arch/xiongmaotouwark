@@ -15,6 +15,7 @@ import {
   searchPandas,
   makeNetworkMaterial,
   proxyImageUrl,
+  proxyForCanvasDetect,
   detectColorfulness,
   detectAIPanda,
   type NetworkResult,
@@ -107,6 +108,19 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    // ⭐ query 变化立即清屏 + abort 旧 fetch (修"切搜索卡在旧结果半分钟"):
+    //   旧实现: setResults 只在 fetch 返回时调用 → 用户切 query 后等新 fetch 完成才换屏
+    //   现在: 立刻 abort + clear, 用户感觉切 query 瞬间响应
+    abortRef.current?.abort();
+    if (query.trim()) {
+      setResults([]);
+      setFailedIds(new Set());
+      setColorfulDetection({});
+      setAIPandaDetection({});
+      setError(null);
+      setHasMore(false);
+      setResHint(undefined);
+    }
     debounceRef.current = window.setTimeout(() => {
       setPage(0);
       void doSearch(query, 0);
@@ -118,24 +132,38 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
   // 视觉过滤: 后台 lazy 检测每个 result 是否是彩色照片 (非熊猫头梗图)
   // 默认开启 — 大多数 user 都希望搜出来 100% 是熊猫头梗图
+  // detect 并行化 (v2, 2026-05-17):
+  //   旧实现: for..of await 100 张串行 + setState/张 → 30s+ 卡顿 + 多次重排抖动
+  //   新实现: Promise.all 全部并行 (浏览器自己限 6 concurrent img load) → ~1-2s 全完
+  //           1 次 setState 合并入 prev → grid 只重排 1 次
   useEffect(() => {
     let cancelled = false;
     const todo = results.filter((r) => colorfulDetection[r.id] === undefined || aiPandaDetection[r.id] === undefined);
     if (todo.length === 0) return;
     (async () => {
-      for (const r of todo) {
-        if (cancelled || !mountedRef.current) return;
-        const url = proxyImageUrl(r.thumb || r.src);
-        // 并行跑 colorful + aiPanda (节省总时长, 共用 img load)
-        const [isColorful, isAIPanda] = await Promise.all([
-          detectColorfulness(url).catch(() => false),
-          detectAIPanda(url).catch(() => false),
-        ]);
-        if (cancelled || !mountedRef.current) return;
-        setColorfulDetection((prev) => ({ ...prev, [r.id]: isColorful }));
-        setAIPandaDetection((prev) => ({ ...prev, [r.id]: isAIPanda }));
-        await new Promise((res) => setTimeout(res, 20));
-      }
+      // detect 用 canvas getImageData 必须 same-origin, 固定走 proxy
+      const entries = await Promise.all(
+        todo.map(async (r) => {
+          const url = proxyForCanvasDetect(r.thumb || r.src);
+          const [isColorful, isAIPanda] = await Promise.all([
+            detectColorfulness(url).catch(() => false),
+            detectAIPanda(url).catch(() => false),
+          ]);
+          return { id: r.id, isColorful, isAIPanda };
+        }),
+      );
+      if (cancelled || !mountedRef.current) return;
+      // 1 次 setState 合并所有结果 → grid 单次重排, 视觉稳定
+      setColorfulDetection((prev) => {
+        const next = { ...prev };
+        for (const e of entries) next[e.id] = e.isColorful;
+        return next;
+      });
+      setAIPandaDetection((prev) => {
+        const next = { ...prev };
+        for (const e of entries) next[e.id] = e.isAIPanda;
+        return next;
+      });
     })();
     return () => { cancelled = true; };
   }, [results, colorfulDetection, aiPandaDetection]);
