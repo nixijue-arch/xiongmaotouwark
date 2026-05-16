@@ -18,6 +18,12 @@
   to = "/.netlify/functions/proxy-image"
   status = 200
 
+# /api/tts → netlify function (TTS proxy 中转有道/百度等)
+[[redirects]]
+  from = "/api/tts"
+  to = "/.netlify/functions/tts"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

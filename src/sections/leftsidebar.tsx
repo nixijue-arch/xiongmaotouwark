@@ -3,7 +3,7 @@ import { useMeme, DRAFT_SLOT_MAX } from '@/context/memecontext';
 import type { DraftSlot } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering } from '@/data/materials';
-import { calcEditorFaceLayout, bboxCropImage } from '@/lib/composeMeme';
+import { calcEditorFaceLayout, bboxCropImage, getEditorPandaBox } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
@@ -174,17 +174,21 @@ export function LeftSidebar() {
   // 如果没 panda 在画布上, 自动塞一个默认 panda (用 ALL_PANDAS[0] = panda-01, 有完整 anchor 数据)
   const handleAddFace = async (src: string, id: string) => {
     let pandaId: string;
+    let pandaElPos: { x: number; y: number; w: number; h: number } = { x: 75, y: 75, w: 350, h: 350 };
     const currentPanda = getTargetPanda(state.elements, state.selectedId);
     if (currentPanda) {
       pandaId = currentPanda.name;
+      pandaElPos = { x: currentPanda.x, y: currentPanda.y, w: currentPanda.width, h: currentPanda.height };
     } else {
-      // 没 panda → 自动加一个默认 (用第一个有 calibration 的 panda, anchor 数据齐全)
+      // 没 panda → 自动加一个默认 (居中到 500×500 画布, 用 getEditorPandaBox 跟 QuickMode 路径一致)
       const defaultPanda = ALL_PANDAS[0];
       pandaId = defaultPanda.id;
       const defaultLayering = getShellLayering(defaultPanda.id);
+      const pBox = await getEditorPandaBox(defaultPanda.src);
+      pandaElPos = { x: pBox.x, y: pBox.y, w: pBox.w, h: pBox.h };
       const pandaElement: ImageElement = {
-        id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
-        x: 75, y: 50, width: 350, height: 350,
+        id: generateId(), type: 'image', src: pBox.croppedSrc, name: defaultPanda.id,
+        x: pBox.x, y: pBox.y, width: pBox.w, height: pBox.h,
         rotation: 0, opacity: 1,
         zIndex: defaultLayering.pandaZ,
         blendMode: defaultLayering.pandaBlend,
@@ -208,19 +212,24 @@ export function LeftSidebar() {
     if (anchorPanda && croppedW > 0 && croppedH > 0) {
       const anchor = getLivePandaFaceOffset(anchorPanda);
       const faceFill = 0.95;
-      const fScale = Math.min(anchor.w / croppedW, anchor.h / croppedH) * faceFill;
+      // panda 实际显示 box scale (panda 元素可能非 1:1, 比如非方形 PNG)
+      const scaleX = pandaElPos.w / 350;
+      const scaleY = pandaElPos.h / 350;
+      const fScale = Math.min(anchor.w * scaleX / croppedW, anchor.h * scaleY / croppedH) * faceFill;
       const dispW = Math.round(croppedW * fScale);
       const dispH = Math.round(croppedH * fScale);
-      // panda 元素左上角 (75,50) + anchor 中心 - 元素中心 = 元素左上角
-      const elX = Math.round(75 + anchor.x + anchor.w / 2 - dispW / 2);
-      const elY = Math.round(50 + anchor.y + anchor.h / 2 - dispH / 2);
+      // panda 元素左上角 + anchor 中心(按 panda box scale 缩放) - 元素中心
+      const elX = Math.round(pandaElPos.x + (anchor.x + anchor.w / 2) * scaleX - dispW / 2);
+      const elY = Math.round(pandaElPos.y + (anchor.y + anchor.h / 2) * scaleY - dispH / 2);
       layout = { x: elX, y: elY, width: dispW, height: dispH };
     } else if (anchorPanda) {
-      // bbox crop 失败的兜底 — 用旧 calcEditorFaceLayout
+      // bbox crop 失败的兜底 — 用旧 calcEditorFaceLayout (传 panda 实际 pos)
       const fallback = await calcEditorFaceLayout({
         pandaSrc: anchorPanda.src,
         faceSrc: src,
         faceOffset350: getLivePandaFaceOffset(anchorPanda),
+        panda350OffsetX: pandaElPos.x, panda350OffsetY: pandaElPos.y,
+        panda350W: pandaElPos.w, panda350H: pandaElPos.h,
       });
       layout = fallback;
     }

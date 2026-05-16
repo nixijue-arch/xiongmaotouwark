@@ -16,3 +16,4 @@ CLAUDE.local.md
 .pr-body*.tmp
 .tmp-*.png
 
+.claude-design-dl/
