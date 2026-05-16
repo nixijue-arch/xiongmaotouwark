@@ -52,6 +52,16 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
   // 实测 350+ 张 0 误杀真黑白 meme.
   const [colorfulDetection, setColorfulDetection] = useState<Record<string, boolean>>({});
   const [aiPandaDetection, setAIPandaDetection] = useState<Record<string, boolean>>({});
+  // 加载失败的图: img onError 直接从 grid 移除 (so360 部分 thumb 偶尔 404, 不显示"加载失败"占位)
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
+  const markImgFailed = useCallback((id: string) => {
+    setFailedIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   const abortRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -297,7 +307,11 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
       <div className="psp-grid">
         {results
-          .filter((item) => colorfulDetection[item.id] !== true && aiPandaDetection[item.id] !== true)
+          .filter((item) =>
+            colorfulDetection[item.id] !== true &&
+            aiPandaDetection[item.id] !== true &&
+            !failedIds.has(item.id)  // 加载失败的图直接不渲染 (so360 thumb 偶尔 404)
+          )
           .map((item) => (
             <ResultCard
               key={item.id}
@@ -305,6 +319,7 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
               busy={busyId === item.id}
               disabled={Boolean(busyId)}
               showSaveBtn={showSaveBtn}
+              onLoadFailed={() => markImgFailed(item.id)}
               tFrom={t('networkSearchSourceFrom')}
               tSave={t('networkSearchSave')}
               onSelect={() => void handleSelect(item)}
@@ -360,6 +375,8 @@ interface ResultCardProps {
   tSave: string;
   onSelect: () => void;
   onSave: () => void;
+  /** img 加载失败时通知上层从 grid 移除 (so360 thumb 偶尔 404) */
+  onLoadFailed: () => void;
 }
 
 function ResultCard({
@@ -371,8 +388,8 @@ function ResultCard({
   tSave,
   onSelect,
   onSave,
+  onLoadFailed,
 }: ResultCardProps) {
-  const [imgFailed, setImgFailed] = useState(false);
   const thumbSrc = proxyImageUrl(item.thumb || item.src);
 
   return (
@@ -380,7 +397,6 @@ function ResultCard({
       className={[
         'psp-card',
         busy ? 'psp-card-busy' : '',
-        imgFailed ? 'psp-card-failed' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -394,25 +410,21 @@ function ResultCard({
         }
       }}
     >
-      {imgFailed ? (
-        <div className="psp-thumb-fallback">
-          <span aria-hidden="true">🖼️</span>
-          <small>加载失败</small>
-        </div>
-      ) : (
-        <img
-          src={thumbSrc}
-          loading="lazy"
-          alt={item.hint || item.source}
-          className="psp-thumb"
-          style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
-          onError={() => setImgFailed(true)}
-          draggable={false}
-        />
+      <img
+        src={thumbSrc}
+        loading="lazy"
+        alt={item.hint || item.source}
+        className="psp-thumb"
+        style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
+        onError={onLoadFailed}
+        draggable={false}
+      />
+      {/* source badge 仅 DEV 显示 — 生产端用户不需知道图源 */}
+      {import.meta.env.DEV && (
+        <span className="psp-source-badge" aria-hidden="true" title={`${tFrom} ${item.source}`}>
+          {item.source}
+        </span>
       )}
-      <span className="psp-source-badge" aria-hidden="true" title={`${tFrom} ${item.source}`}>
-        {item.source}
-      </span>
       {busy && (
         <div className="psp-card-busy-mask">
           <Loader2 size={20} className="psp-spinner" />

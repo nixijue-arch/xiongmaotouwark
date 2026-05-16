@@ -85,6 +85,35 @@ export function scoreItem(item: SearchResultItem, q: string): number {
   return s;
 }
 
+/**
+ * smart interleave by source — 防同源连续 + 保 score 优先
+ *
+ * 2026-05-17: score 排序后单源容易集中 (e.g. score 排前 30 全 so360 → 用户看 1 屏全 so360).
+ *   纯随机打乱失去相关度. 纯 round-robin 忽略 score 分布.
+ *   折中: greedy 算法 "下一张优先取 source != lastSource, 否则退而求其次取第一个".
+ *
+ * 实测 score 排序 [d,d,d,b,b,s,s] → interleaved [d,b,d,s,d,b,s]
+ *   高 score 仍优先 (d 出 3 次 b 出 2 次 s 出 2 次, 比例不变), 但 source 不连续.
+ */
+function interleaveBySource<T extends { source: string }>(items: T[]): T[] {
+  const remaining = items.slice();
+  const out: T[] = [];
+  let lastSource: string | null = null;
+  while (remaining.length > 0) {
+    let pickIdx = 0;
+    for (let i = 0; i < remaining.length; i++) {
+      if (remaining[i].source !== lastSource) {
+        pickIdx = i;
+        break;
+      }
+    }
+    const picked = remaining.splice(pickIdx, 1)[0];
+    out.push(picked);
+    lastSource = picked.source;
+  }
+  return out;
+}
+
 export function filterAndScore(items: SearchResultItem[], query: string): SearchResultItem[] {
   const seen = new Set<string>();
   const out: SearchResultItem[] = [];
@@ -113,5 +142,8 @@ export function filterAndScore(items: SearchResultItem[], query: string): Search
     out.push(item);
   }
   out.sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
-  return out.map(({ _score, ...rest }) => rest);
+  // 2026-05-17 interleave: 防单源集中 (so360 score 高时容易连占前 30, 用户体验单调)
+  //   greedy 算法保 score 优先 + 同源不连续
+  const interleaved = interleaveBySource(out);
+  return interleaved.map(({ _score, ...rest }) => rest);
 }
