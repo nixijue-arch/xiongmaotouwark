@@ -307,24 +307,34 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
               </div>
-              {/* 编辑/删除 action — 紧凑横向布局, 反向 scale 抵消 canvasScale 放大 (永远视觉小巧) */}
+              {/* 编辑/删除 action — base 调大 (font 14, padding 5/11, svg 13, gap 4)
+                 * scale 限 max(0.6, 1/canvasScale) → canvasScale 2.0 时 visual 仍 base*0.6 = font 8.4
+                 * (旧版 base font 11 + scale clamp 0.5 → canvasScale 2.0 时 visual 5.5px, 太小看不清) */}
               <div
-                className="absolute flex items-center gap-1 pointer-events-auto"
+                className="absolute flex items-center pointer-events-auto"
                 style={{
                   zIndex: 16,
                   left: (selectionStyle.left as number) + (selectionStyle.width as number) / 2,
-                  top: (selectionStyle.top as number) + (selectionStyle.height as number) + 6,
-                  transform: `translateX(-50%) scale(${1 / Math.max(0.5, canvasScale)})`,
+                  top: (selectionStyle.top as number) + (selectionStyle.height as number) + 8,
+                  gap: 6,
+                  transform: `translateX(-50%) scale(${Math.max(0.6, 1 / canvasScale)})`,
                   transformOrigin: 'top center',
                   whiteSpace: 'nowrap',
                 }}
               >
                 <button
                   onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
-                  className="inline-flex items-center gap-1 rounded font-semibold text-white"
-                  style={{ backgroundColor: '#0080FF', padding: '3px 7px', fontSize: 11, lineHeight: 1 }}
+                  className="inline-flex items-center rounded font-semibold text-white"
+                  style={{
+                    backgroundColor: '#0080FF',
+                    padding: '5px 11px',
+                    fontSize: 14,
+                    lineHeight: 1.2,
+                    gap: 4,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                  }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                   <span>{lang === 'zh' ? '编辑' : 'Edit'}</span>
                 </button>
                 <button
@@ -333,10 +343,17 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
                     dispatch({ type: 'REMOVE_ELEMENT', id: element.id });
                     dispatch({ type: 'SELECT_ELEMENT', id: null });
                   }}
-                  className="inline-flex items-center gap-1 rounded font-semibold text-white"
-                  style={{ backgroundColor: '#EF4444', padding: '3px 7px', fontSize: 11, lineHeight: 1 }}
+                  className="inline-flex items-center rounded font-semibold text-white"
+                  style={{
+                    backgroundColor: '#EF4444',
+                    padding: '5px 11px',
+                    fontSize: 14,
+                    lineHeight: 1.2,
+                    gap: 4,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                  }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                   <span>{lang === 'zh' ? '删除' : 'Delete'}</span>
                 </button>
               </div>
@@ -522,18 +539,19 @@ function DraggableText({ element, isSelected, onSelect, canvasScale }: {
                   }}
                   className="absolute flex items-center justify-center rounded-full pointer-events-auto hover:scale-110 transition-transform"
                   style={{
-                    width: 18, height: 18,
-                    top: -12, right: -12,
+                    width: 22, height: 22,
+                    top: -14, right: -14,
                     backgroundColor: '#EF4444',
                     zIndex: 20,
                     border: '2px solid #fff',
-                    // 反向 scale 抵消 canvas 放大, button 视觉永远 18×18
-                    transform: `scale(${1 / Math.max(0.5, canvasScale)})`,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                    // 反向 scale 抵消 canvas 放大, button visual ~base*max(0.6, 1/scale)
+                    transform: `scale(${Math.max(0.6, 1 / canvasScale)})`,
                     transformOrigin: 'center',
                   }}
                   title={state.language === 'zh' ? '删除' : 'Delete'}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
                 <ResizeHandle dir="nw" onStart={rh} />
                 <ResizeHandle dir="n"  onStart={rh} />
@@ -967,9 +985,19 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         redo();
         return;
       }
+      // === inline edit mode 快捷键 (画笔/橡皮/完成/退出) ===
+      if (editingId) {
+        if (e.key.toLowerCase() === 'b') { e.preventDefault(); setEditTool('brush'); return; }
+        if (e.key.toLowerCase() === 'e') { e.preventDefault(); setEditTool('eraser'); return; }
+        if (e.key === 'Enter') { e.preventDefault(); handleFinishEdit(); return; }
+        if (e.key === 'Escape') { e.preventDefault(); exitEdit(); return; }
+        if (e.key === '[') { e.preventDefault(); setEditSize((s) => Math.max(2, s - 2)); return; }
+        if (e.key === ']') { e.preventDefault(); setEditSize((s) => Math.min(40, s + 2)); return; }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.selectedId, editingId, dispatch, undo, redo]);
 
   const editingEl = state.elements.find(e => e.id === editingId) as ImageElement | undefined;
@@ -1061,30 +1089,36 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
           </button>
         </div>
       )}
-      {/* 快捷键提示条 — undo/redo 下方, mobile 隐藏 */}
+      {/* 快捷键提示条 — undo/redo 下方, mobile 隐藏. 加 bg + 高对比度 (上版本 rgba(255,255,255,0.55) 太弱) */}
       {!isMobile && (
         <div
           style={{
             position: 'absolute',
-            top: 42,
+            top: 44,
             left: 8,
             zIndex: 49,
             pointerEvents: 'none',
             display: 'flex',
             flexDirection: 'column',
-            gap: 2,
-            color: 'rgba(255,255,255,0.55)',
-            fontSize: 10,
-            lineHeight: 1.3,
-            fontFamily: 'monospace',
-            textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+            gap: 3,
+            color: 'rgba(255,255,255,0.95)',
+            fontSize: 11,
+            lineHeight: 1.35,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             userSelect: 'none',
+            background: 'rgba(15,25,45,0.78)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            padding: '7px 10px',
+            borderRadius: 7,
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
           }}
         >
-          <span>Ctrl+Z {state.language === 'zh' ? '撤回' : 'Undo'}</span>
-          <span>Ctrl+Y {state.language === 'zh' ? '重做' : 'Redo'}</span>
-          <span>Shift+{state.language === 'zh' ? '拖角=等比' : 'drag=lock ratio'}</span>
-          <span>Del {state.language === 'zh' ? '删除选中' : 'Delete'}</span>
+          <span><kbd style={{ fontFamily: 'inherit', color: '#88c8ff' }}>Ctrl+Z</kbd> {state.language === 'zh' ? '撤回' : 'Undo'}</span>
+          <span><kbd style={{ fontFamily: 'inherit', color: '#88c8ff' }}>Ctrl+Y</kbd> {state.language === 'zh' ? '重做' : 'Redo'}</span>
+          <span><kbd style={{ fontFamily: 'inherit', color: '#88c8ff' }}>Shift</kbd>+{state.language === 'zh' ? '拖角 等比' : 'drag = lock ratio'}</span>
+          <span><kbd style={{ fontFamily: 'inherit', color: '#88c8ff' }}>Del</kbd> {state.language === 'zh' ? '删除' : 'Delete'}</span>
         </div>
       )}
       <div
@@ -1199,87 +1233,164 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
               onPointerMove={onEditPointerMove}
               onPointerUp={onEditPointerUp}
             />
-            {/* Edit toolbar - two rows */}
-            <div
-              className="absolute -bottom-24 left-0 right-0 flex flex-col gap-1 rounded-lg edit-toolbar"
-              style={{ backgroundColor: '#1a1a1a', border: '1px solid #333', zIndex: 110, minWidth: 'max-content', padding: '4px' }}
-            >
-              {/* Row 1: tools */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setEditTool('brush')}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium"
-                  style={{ backgroundColor: editTool === 'brush' ? '#FF5E00' : '#2a2a2a', color: '#fff' }}
+            {/* Edit toolbar v2 — 优化 (2026-05-17):
+             *   1) color preset 6 个 (黑/白/红/橙/蓝/绿) + native picker fallback
+             *   2) brush size 加 -/+ button (mobile-friendly), 滑块旁
+             *   3) 撤回 vs 清空 color 区分 (撤回蓝, 清空深红)
+             *   4) 加快捷键 hint 行: B=画笔 E=橡皮 [/] 粗细 ↵完成 Esc 退出
+             *   5) 反向 scale 抵消 canvasScale (跟 编辑/删除 button 一致, 视觉永远合理)
+             */}
+            {(() => {
+              const COLOR_PRESETS = ['#000000', '#FFFFFF', '#EF4444', '#FF8C00', '#2563EB', '#10B981'];
+              const invScale = Math.max(0.6, 1 / canvasScale);
+              return (
+                <div
+                  className="absolute left-1/2 flex flex-col gap-1.5 rounded-lg edit-toolbar"
+                  style={{
+                    bottom: -110,
+                    transform: `translateX(-50%) scale(${invScale})`,
+                    transformOrigin: 'top center',
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #3a3a3a',
+                    zIndex: 110,
+                    minWidth: 'max-content',
+                    padding: '8px 10px',
+                    boxShadow: '0 6px 16px rgba(0,0,0,0.35)',
+                  }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  {state.language === 'zh' ? '画笔' : 'Brush'}
-                </button>
-                <button
-                  onClick={() => setEditTool('eraser')}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium"
-                  style={{ backgroundColor: editTool === 'eraser' ? '#EF4444' : '#2a2a2a', color: '#fff' }}
-                >
-                  <Eraser size={10} />{state.language === 'zh' ? '橡皮擦' : 'Eraser'}
-                </button>
-                <input
-                  type="color"
-                  value={editColor}
-                  onChange={e => setEditColor(e.target.value)}
-                  className="w-6 h-6 rounded cursor-pointer"
-                  style={{ padding: 0, border: 'none', background: 'none' }}
-                  disabled={editTool !== 'brush'}
-                />
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px]" style={{ color: '#888' }}>{state.language === 'zh' ? '粗细' : 'Size'}</span>
-                  <input
-                    type="range"
-                    min={2}
-                    max={40}
-                    step={1}
-                    value={editSize}
-                    onChange={e => setEditSize(Number(e.target.value))}
-                    className="w-14"
-                    style={{ accentColor: '#FF5E00' }}
-                  />
-                  <span className="text-[9px] font-mono" style={{ color: '#ccc' }}>{editSize}</span>
+                  {/* Row 1: 工具 + 颜色 + 粗细 */}
+                  <div className="flex items-center" style={{ gap: 8 }}>
+                    <button
+                      onClick={() => setEditTool('brush')}
+                      className="flex items-center font-semibold text-white"
+                      style={{ backgroundColor: editTool === 'brush' ? '#FF5E00' : '#2a2a2a', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6 }}
+                      title={state.language === 'zh' ? '画笔 (B)' : 'Brush (B)'}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                      {state.language === 'zh' ? '画笔' : 'Brush'}
+                    </button>
+                    <button
+                      onClick={() => setEditTool('eraser')}
+                      className="flex items-center font-semibold text-white"
+                      style={{ backgroundColor: editTool === 'eraser' ? '#EF4444' : '#2a2a2a', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6 }}
+                      title={state.language === 'zh' ? '橡皮 (E)' : 'Eraser (E)'}
+                    >
+                      <Eraser size={13} />
+                      {state.language === 'zh' ? '橡皮' : 'Eraser'}
+                    </button>
+                    {/* color preset row */}
+                    <div className="flex items-center" style={{ gap: 4, opacity: editTool === 'brush' ? 1 : 0.35 }}>
+                      {COLOR_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => { setEditColor(c); setEditTool('brush'); }}
+                          aria-label={c}
+                          style={{
+                            width: 22, height: 22,
+                            background: c,
+                            border: editColor === c ? '2px solid #FF5E00' : '2px solid #555',
+                            borderRadius: '50%',
+                            cursor: 'pointer',
+                            padding: 0,
+                            boxShadow: editColor === c ? '0 0 0 2px rgba(255,94,0,0.3)' : 'none',
+                          }}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={editColor}
+                        onChange={(e) => setEditColor(e.target.value)}
+                        title={state.language === 'zh' ? '自定义颜色' : 'Custom color'}
+                        style={{
+                          width: 22, height: 22,
+                          padding: 0,
+                          border: '2px dashed #888',
+                          borderRadius: '50%',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center" style={{ gap: 5, marginLeft: 4 }}>
+                      <span style={{ color: '#aaa', fontSize: 11 }}>{state.language === 'zh' ? '粗细' : 'Size'}</span>
+                      <button
+                        type="button"
+                        onClick={() => setEditSize((s) => Math.max(2, s - 2))}
+                        className="text-white"
+                        style={{ width: 22, height: 22, background: '#2a2a2a', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}
+                        title="["
+                      >−</button>
+                      <input
+                        type="range"
+                        min={2}
+                        max={40}
+                        step={1}
+                        value={editSize}
+                        onChange={(e) => setEditSize(Number(e.target.value))}
+                        style={{ accentColor: '#FF5E00', width: 80 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditSize((s) => Math.min(40, s + 2))}
+                        className="text-white"
+                        style={{ width: 22, height: 22, background: '#2a2a2a', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}
+                        title="]"
+                      >+</button>
+                      <span className="font-mono" style={{ color: '#fff', fontSize: 11, minWidth: 20, textAlign: 'right' }}>{editSize}</span>
+                    </div>
+                  </div>
+                  {/* Row 2: action group + 快捷键 hint */}
+                  <div className="flex items-center" style={{ gap: 8 }}>
+                    <button
+                      onClick={handleFinishEdit}
+                      className="flex items-center font-semibold text-white"
+                      style={{ backgroundColor: '#00B85C', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6 }}
+                      title={state.language === 'zh' ? '完成编辑 (Enter)' : 'Finish (Enter)'}
+                    >
+                      <Save size={13} />
+                      {state.language === 'zh' ? '完成' : 'Done'}
+                    </button>
+                    <button
+                      onClick={handleUndoEdit}
+                      disabled={editHistory.length <= 1}
+                      className="flex items-center font-semibold text-white disabled:opacity-30"
+                      style={{ backgroundColor: '#2563EB', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6 }}
+                      title={state.language === 'zh' ? '撤回上一步' : 'Undo step'}
+                    >
+                      <Undo2 size={13} />
+                      {state.language === 'zh' ? '撤回' : 'Undo'}
+                    </button>
+                    <button
+                      onClick={handleClearEdit}
+                      className="flex items-center font-medium text-white"
+                      style={{ backgroundColor: '#7a2020', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6 }}
+                      title={state.language === 'zh' ? '清空所有编辑' : 'Clear all'}
+                    >
+                      <RotateCcw size={13} />
+                      {state.language === 'zh' ? '清空' : 'Clear'}
+                    </button>
+                    <button
+                      onClick={exitEdit}
+                      className="flex items-center font-semibold text-white"
+                      style={{ backgroundColor: '#555', padding: '5px 11px', fontSize: 13, gap: 5, borderRadius: 6, marginLeft: 'auto' }}
+                      title={state.language === 'zh' ? '退出 (Esc) — 丢弃改动' : 'Exit (Esc) — discard'}
+                    >
+                      <LogOut size={13} />
+                      {state.language === 'zh' ? '退出' : 'Exit'}
+                    </button>
+                  </div>
+                  {/* Row 3: 快捷键 hint */}
+                  <div style={{ display: 'flex', gap: 12, color: '#7a8390', fontSize: 10, fontFamily: 'ui-monospace, monospace', paddingTop: 1 }}>
+                    <span><span style={{ color: '#88c8ff' }}>B</span> {state.language === 'zh' ? '画笔' : 'Brush'}</span>
+                    <span><span style={{ color: '#88c8ff' }}>E</span> {state.language === 'zh' ? '橡皮' : 'Eraser'}</span>
+                    <span><span style={{ color: '#88c8ff' }}>[ ]</span> {state.language === 'zh' ? '粗细' : 'Size'}</span>
+                    <span><span style={{ color: '#88c8ff' }}>↵</span> {state.language === 'zh' ? '完成' : 'Done'}</span>
+                    <span><span style={{ color: '#88c8ff' }}>Esc</span> {state.language === 'zh' ? '退出' : 'Exit'}</span>
+                  </div>
                 </div>
-              </div>
-              {/* Row 2: actions */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={handleFinishEdit}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
-                  style={{ backgroundColor: '#00CC66' }}
-                  title={state.language === 'zh' ? '完成编辑' : 'Finish'}
-                >
-                  <Save size={10} />{state.language === 'zh' ? '完成' : 'Done'}
-                </button>
-                <button
-                  onClick={handleUndoEdit}
-                  disabled={editHistory.length <= 1}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white disabled:opacity-30"
-                  style={{ backgroundColor: '#0080FF' }}
-                  title={state.language === 'zh' ? '撤回上一步' : 'Undo'}
-                >
-                  <Undo2 size={10} />{state.language === 'zh' ? '撤回' : 'Undo'}
-                </button>
-                <button
-                  onClick={exitEdit}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white"
-                  style={{ backgroundColor: '#888' }}
-                >
-                  <LogOut size={10} />{state.language === 'zh' ? '退出' : 'Exit'}
-                </button>
-                <button
-                  onClick={handleClearEdit}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-white"
-                  style={{ backgroundColor: '#2a2a2a' }}
-                  title={state.language === 'zh' ? '清空所有编辑' : 'Clear all'}
-                >
-                  <RotateCcw size={10} />{state.language === 'zh' ? '清空' : 'Clear'}
-                </button>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         )}
       </div>

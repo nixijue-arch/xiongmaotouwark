@@ -270,9 +270,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
        *   且用户感知度低 (砍 22% 看不出明显差异).
        *   eraseBottomText 函数保留在 networkImage.ts 备用 (未来 OCR 方案可能复用). */}
 
-      {resHint === 'partial' && (
-        <div className="psp-banner psp-banner-info">{t('networkSearchPartial')}</div>
-      )}
+      {/* partial banner 删除 — sogou 经常返 0 (备用源), partial 几乎总是触发 → 视觉噪音过大.
+       *   只保留 all_sources_failed (下面 error 已覆盖) 跟用户真正 error 反馈. */}
 
       {error && (
         <div className="psp-banner psp-banner-error">
