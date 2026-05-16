@@ -974,12 +974,18 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         return;
       }
       // Ctrl+Z / Cmd+Z = undo
+      // ⭐ 编辑模式优先: brush stroke 走本地 editHistory (粒度=单笔). editHistory 用尽 fallback main undo
+      //   (画板级 — undo 整个 element src 替换前的状态)
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        undo();
+        if (editingId && editHistory.length > 1) {
+          handleUndoEdit();  // 编辑模式: 撤回最后一笔 stroke
+        } else {
+          undo();  // 全局: 撤回画板状态
+        }
         return;
       }
-      // Ctrl+Y or Ctrl+Shift+Z = redo
+      // Ctrl+Y or Ctrl+Shift+Z = redo (编辑模式暂不支持 stroke-level redo)
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
         e.preventDefault();
         redo();
@@ -997,8 +1003,9 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // editHistory.length 加入 deps: 编辑模式 Ctrl+Z 路径切换 (本地 stroke undo vs 全局 undo) 依赖它
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.selectedId, editingId, dispatch, undo, redo]);
+  }, [state.selectedId, editingId, dispatch, undo, redo, editHistory.length]);
 
   const editingEl = state.elements.find(e => e.id === editingId) as ImageElement | undefined;
   const isMobile = useIsMobile();

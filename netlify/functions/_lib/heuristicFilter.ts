@@ -12,8 +12,13 @@ const PANDA_HINT_RE = /熊猫|panda|表情|biaoqing|meme|沙雕/i;
 // 严格 panda hint: 必须有"熊猫头"三字或"沙雕熊猫"组合, 单独"表情"/"meme" 都不够
 // 用于 filterAndScore 的 hard filter, 大幅提升命中率
 const STRICT_PANDA_HINT_RE = /熊猫头|沙雕熊猫|panda.head/i;
-// hint 含这些词 + 无 panda 关键词 → 高概率非熊猫头梗图, drop
-const NON_PANDA_HINT_RE = /(?:cos(?:er|play)|二次元|动漫|偶像|明星|帅哥|美女|真人|写真|coser)/i;
+// hint 含这些词 + 无 panda 关键词 → 高概率非熊猫头梗图, drop (软筛 — 含 panda 优先 keep)
+const NON_PANDA_HINT_RE = /(?:cos(?:er|play)|二次元|动漫|偶像|明星|帅哥|美女|真人|写真|coser|卡通|插画|插图|手绘|绘画|素描|水彩|油画|国画|工笔|矢量|vector|illustration|摄影|照片|高清|壁纸|wallpaper)/i;
+
+// 2026-05-17: 极强 NON_PANDA markers — 即使 hint 含"熊猫头"也直接 drop
+// 实测发现"愤怒的熊猫头脸素材图片免费下载-千库网" 之类图库 AI 图 hint 同时含 panda + 非梗图标记,
+// 软筛 (NON_PANDA_HINT_RE + !PANDA_HINT_RE) 漏过. 此正则匹配商用图库 / AI 生成 hint, 强制丢.
+const STRONG_NON_PANDA_RE = /千库网|图库|素材网|素材库|premium|shutterstock|istockphoto|gettyimages|adobestock|ai\s*生成|ai-generated|ai绘画|ai作画|midjourney|stable\s*diffusion|dalle|chatgpt|文心一格|stock\s*photo|stockphoto|免费下载/i;
 
 const SOURCE_WEIGHTS: Record<SourceName, number> = {
   duitang: 1.0,
@@ -89,7 +94,11 @@ export function filterAndScore(items: SearchResultItem[], query: string): Search
     if (isBlacklistedUrl(item.src)) continue;
     if (!isAspectRatioOk(item.w, item.h)) continue;
 
-    // hint 含 cos/动漫/美女/真人 等 + 不含 panda 关键词 → hard drop (这些视觉不可能是熊猫头)
+    // STRONG NON_PANDA — 商用图库 / AI 生成 hint, 即使含"熊猫头"也直接 drop
+    if (item.hint && STRONG_NON_PANDA_RE.test(item.hint)) {
+      continue;
+    }
+    // 软筛 NON_PANDA — 含 cos/动漫/卡通 等 + 不含 panda 关键词 → drop
     if (item.hint && NON_PANDA_HINT_RE.test(item.hint) && !PANDA_HINT_RE.test(item.hint)) {
       continue;
     }
