@@ -213,7 +213,12 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
       const toastId = 'psp-action';
       toast.dismiss(toastId);
 
-      const finalSrc = proxyImageUrl(result.src);
+      // ⭐ 编辑器/QuickMode 用 mat.src 必须走 proxy (不能走智能路由):
+      //   - 编辑器 ImageElement <img src={element.src}>: 浏览器加载时带 Referer=xiongmaotou.work,
+      //     baidu/so360 部分 thumb 看到第三方 referer 会 403 → 画板上图不显示
+      //   - composeMeme.loadImage 用 crossOrigin='anonymous' 抓 dataURL: 跨域无 CORS header → tainted
+      //   PSP 缩略图渲染用 proxyImageUrl 智能路由 (国内 CDN hot-link 快), 是另一回事.
+      const finalSrc = proxyForCanvasDetect(result.src);
       const mat: Material = {
         id: `network-panda-${result.id.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32)}`,
         src: finalSrc,
@@ -445,6 +450,13 @@ function ResultCard({
         className="psp-thumb"
         style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
         onError={onLoadFailed}
+        // 空图过滤: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+            onLoadFailed();
+          }
+        }}
         draggable={false}
       />
       {/* source badge 仅 DEV 显示 — 生产端用户不需知道图源 */}

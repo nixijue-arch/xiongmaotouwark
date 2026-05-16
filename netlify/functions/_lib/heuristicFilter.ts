@@ -15,7 +15,7 @@ const STRICT_PANDA_HINT_RE = /熊猫头|沙雕熊猫|panda.head/i;
 // hint 含这些词 + 无 panda 关键词 → 高概率非熊猫头梗图, drop (软筛 — 含 panda 优先 keep)
 // 2026-05-17 加宝可梦/动漫角色: user 反馈杰尼龟/妙蛙种子混入. 长尾词列表难穷尽,
 //   核心策略仍是 colorfulness 视觉过滤兜底, 这里硬砍最常见误入角色.
-const NON_PANDA_HINT_RE = /(?:cos(?:er|play)|二次元|动漫|偶像|明星|帅哥|美女|真人|写真|coser|卡通|插画|插图|手绘|绘画|素描|水彩|油画|国画|工笔|矢量|vector|illustration|摄影|照片|高清|壁纸|wallpaper|宝可梦|pokemon|皮卡丘|杰尼龟|妙蛙|小火龙|皮神|喵喵|哆啦a?梦|蜡笔小新|海绵宝宝|柯南|奥特曼|蜘蛛侠|超人|蝙蝠侠|海贼王|火影|naruto|fate|银魂|龙珠|进击的巨人|鬼灭|EVA|高达|gundam)/i;
+const NON_PANDA_HINT_RE = /(?:cos(?:er|play)|二次元|动漫|偶像|明星|帅哥|美女|真人|写真|coser|卡通|插画|插图|手绘|绘画|素描|水彩|油画|国画|工笔|矢量|vector|illustration|摄影|照片|高清|壁纸|wallpaper|宝可梦|pokemon|皮卡丘|杰尼龟|妙蛙|小火龙|皮神|喵喵|哆啦a?梦|蜡笔小新|海绵宝宝|柯南|奥特曼|蜘蛛侠|超人|蝙蝠侠|海贼王|火影|naruto|fate|银魂|龙珠|进击的巨人|鬼灭|EVA|高达|gundam|宝宝|萌娃|小朋友|小孩|儿童|baby|风景|风光|桌面|教程|tutorial|课件|ppt|背景图|背景|背景墙|MATH|数学|英语|语文|笑着活下去|姐姐|小哥|小姐|老人|大叔|阿姨)/i;
 
 // 2026-05-17: 极强 NON_PANDA markers — 即使 hint 含"熊猫头"也直接 drop
 // 实测发现"愤怒的熊猫头脸素材图片免费下载-千库网" 之类图库 AI 图 hint 同时含 panda + 非梗图标记,

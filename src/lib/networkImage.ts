@@ -371,14 +371,13 @@ const DEFAULT_FACE_OFFSET = { x: 100, y: 70, w: 250, h: 250 };
 /**
  * 把 NetworkResult 包装成 Material 实例, 注入合成流程.
  *
- * 关键设计 (2026-05-17 重写, fix "一直加载不上画板"):
- *   src 直接用 proxyImageUrl(result.src) — same-origin URL, 浏览器自己请求 proxy 拉图.
- *   不再 await fetchAsDataUrl → 没有 FileReader 卡顿 → dispatch ADD_ELEMENT 立刻执行.
- *
- *   合成时 composeMeme.loadImage(src) 接 same-origin URL 也不 tainted, 完全兼容现有流程.
- *   缩略图跟选中后的素材都走同一个 proxy URL — 浏览器 HTTP cache 命中, 二次加载 < 50ms.
- *
- * 同步返回 → handleAction 不再 await → 用户感知瞬间响应.
+ * src 走 proxyForCanvasDetect (固定 proxy) 而非智能路由 proxyImageUrl:
+ *   - 编辑器 <img src={element.src}>: 用户浏览器 Referer=xiongmaotou.work, baidu/so360 部分 thumb
+ *     看到第三方 referer 会 403 → 画板上图不显示. proxy 内部带正确 Referer 绕过.
+ *   - composeMeme.loadImage 用 crossOrigin='anonymous': 跨域无 CORS header 会 tainted, proxy 返
+ *     same-origin URL 不 tainted.
+ *   - 用户感知: 缩略图 (PSP grid) 用 proxyImageUrl 智能路由 (国内 CDN hot-link 快);
+ *     编辑器画板 (sidebar 点击后) 用 proxyForCanvasDetect (proxy 稳).
  */
 export function makeNetworkMaterial(
   result: NetworkResult,
@@ -388,8 +387,7 @@ export function makeNetworkMaterial(
   const labelEn = kind === 'panda' ? 'Network Panda' : 'Network Face';
   return {
     id: `network-${kind}-${result.id.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32)}`,
-    // 走 proxy URL, 不是 dataURL — 浏览器请求时 dev plugin / Netlify Function 自动代理拉图
-    src: proxyImageUrl(result.src),
+    src: proxyForCanvasDetect(result.src),  // 编辑器用, 必须 proxy
     labelCn: label.slice(0, 12),
     labelEn,
     tags: [],
