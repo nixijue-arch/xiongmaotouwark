@@ -102,8 +102,17 @@
 }
 @media (max-width: 768px) {
   .psm-body .psp-grid { column-count: 2; column-gap: 8px; }
-  .psm-frame { height: 100vh; max-height: 100vh; border-radius: 0; }
+  .psm-frame {
+    /* 100vh 兜底 (老浏览器), 100dvh 优先 (iOS Safari URL bar 自适应不遮挡) */
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
   .psm-backdrop { padding: 0; }
+  /* close button 触摸目标加大到 40 (Apple HIG 推 44+) */
+  .psm-close-btn { width: 40px; height: 40px; }
 }
 .psm-body .psp-card { margin-bottom: 12px; }
 
