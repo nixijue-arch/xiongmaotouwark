@@ -135,13 +135,16 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
       for (let i = 0; i < slotsToPack.length; i++) {
         const slot = slotsToPack[i];
         const info = extractSlotInfo(slot);
-        if (!info.panda || !info.face) continue;
-        const composedDataUrl = await composeMeme({
-          pandaSrc: info.panda.src,
-          faceSrc: info.face.src,
-          faceOffset: info.panda.faceOffset,
-          size: 1024,
-        });
+        if (!info.panda) continue;  // panda 必有 (face 可选, customPanda 路径无 face)
+        // face 可选: 有 face 走 composeMeme 合成, 无 face 直接用 panda.src 整图
+        const composedDataUrl = info.face
+          ? await composeMeme({
+              pandaSrc: info.panda.src,
+              faceSrc: info.face.src,
+              faceOffset: info.panda.faceOffset,
+              size: 1024,
+            })
+          : info.panda.src;  // 整图直接用 (customPanda / 上传整图)
         const node = document.createElement('div');
         node.style.cssText =
           'position:absolute;left:-99999px;top:0;width:400px;background:#fff;display:flex;flex-direction:column;align-items:center;padding:25px 25px 30px;';
@@ -378,8 +381,9 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
     return ((h % 7) - 3) * 0.8;
   }, [slot.id]);
 
-  // broken card (素材丢了)
-  if (!info.panda || !info.face) {
+  // broken card (素材丢了) — 只要 panda 不存在就 broken (face 可有可无)
+  // customPanda / 联网搜 整图 是 panda-only 路径 (无 face), 不能算 broken
+  if (!info.panda) {
     return (
       <div
         className={'draft-card draft-card-broken ' + (isSelected ? 'draft-card-selected' : '')}
@@ -415,7 +419,11 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
   const onDownload = async () => {
     if (!previewRef.current) return;
     try {
-      await downloadImage(previewRef.current, `panda-${info.panda!.id}-${info.face!.id}-${Date.now()}.png`);
+      // face 可选 (customPanda 整图无 face)
+      const filename = info.face
+        ? `panda-${info.panda!.id}-${info.face.id}-${Date.now()}.png`
+        : `panda-${info.panda!.id}-${Date.now()}.png`;
+      await downloadImage(previewRef.current, filename);
     } catch {
       toast.error(lang === 'zh' ? '下载失败' : 'Download failed');
     }
@@ -430,18 +438,29 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
     >
       <div ref={previewRef} className="draft-preview">
         <div className="draft-panda-frame">
-          <PandaCanvas
-            pandaSrc={info.panda.src}
-            pandaId={info.panda.id}
-            faceSrc={info.face.src}
-            faceOffset={info.panda.faceOffset}
-            alt={info.panda.id}
-            className="draft-panda-img"
-            size={512}
-            // 校准: panda 图片上下移, caption 位置不动 (用 350-coord ratio 缩到 draft 尺寸)
-            // draft-panda-frame 184px / qm-panda-frame 350px, 比例 ≈ 0.526
-            style={{ transform: `translateY(${Math.round(getLiveCaptionOffset(info.panda.id) * 0.526)}px)` }}
-          />
+          {info.face ? (
+            // panda + face 合成路径 (内置素材 / 上传 panda+face)
+            <PandaCanvas
+              pandaSrc={info.panda.src}
+              pandaId={info.panda.id}
+              faceSrc={info.face.src}
+              faceOffset={info.panda.faceOffset}
+              alt={info.panda.id}
+              className="draft-panda-img"
+              size={512}
+              style={{ transform: `translateY(${Math.round(getLiveCaptionOffset(info.panda.id) * 0.526)}px)` }}
+            />
+          ) : (
+            // 整图路径 (联网搜 customPanda / 用户上传整图) — 无 face, 直接 <img>
+            <img
+              src={info.panda.src}
+              alt={info.panda.id}
+              className="draft-panda-img"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              draggable={false}
+              referrerPolicy="no-referrer"
+            />
+          )}
         </div>
         {info.text && <div className="draft-caption">{info.text}</div>}
       </div>
