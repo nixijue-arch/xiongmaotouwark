@@ -25,9 +25,11 @@ import { calcEditorFaceLayout, composeMeme, getContentBbox, getEditorPandaBox } 
 import { Camera } from 'lucide-react';
 import {
   Sparkles, Copy, Download, Heart, Wand2, ArrowRight, Type,
-  RotateCcw, FlipHorizontal, Check, X, RefreshCw,
+  RotateCcw, FlipHorizontal, Check, X, RefreshCw, Globe,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { PandaSearchModal } from '@/components/pandasearchmodal';
+import Draggable from 'react-draggable';
 import './quickmode.css';
 
 const FONT_OPTIONS = [
@@ -111,13 +113,29 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   const [faceFlipX, setFaceFlipX] = useState(false);
   const [customFaceModalOpen, setCustomFaceModalOpen] = useState(false);
   const [smartModalOpen, setSmartModalOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [customFace, setCustomFace] = useState<Material | null>(null);
+  // 联网搜素材作为画板中间 (覆盖整版) — 取代 panda + face 整体
+  const [customPanda, setCustomPanda] = useState<Material | null>(null);
   // 注意: 之前用 useDeferredValue 防滚轮拖 rotation 频闪
   // 但发现 random combo 时 deferred 滞后会让 PandaCanvas 双渲染 → 双 compose → 双慢
   // 现在 composeMeme 已加 LRU 缓存 + 异步 toBlob, drag 也不会卡, 不再需要 deferred
   // PandaCanvas 内部用 reqRef 中断陈旧请求, drag 期间也只显示最新结果
   const [namePopoverOpen, setNamePopoverOpen] = useState(false);
   const [pendingFavName, setPendingFavName] = useState('');
+
+  // 简易编辑 — preview 内可拖 panda + caption 位置, 双击 caption 行内改文本
+  // 仅 move, 不 resize/rotate. 拖动范围限制在 preview frame 内 (±100px)
+  const [offsetPanda, setOffsetPanda] = useState({ x: 0, y: 0 });
+  const [offsetCaption, setOffsetCaption] = useState({ x: 0, y: 0 });
+  const [isEditingCaption, setIsEditingCaption] = useState(false);
+  const pandaDragRef = useRef<HTMLDivElement>(null);
+  const captionDragRef = useRef<HTMLDivElement>(null);
+  // panda/face 切换时重置位置, 但 text 编辑不重置
+  const resetLayout = useCallback(() => {
+    setOffsetPanda({ x: 0, y: 0 });
+    setOffsetCaption({ x: 0, y: 0 });
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem('pmw-quick-textlang', textLang); } catch { /* ignore */ }
@@ -239,15 +257,21 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   // 用 composeMeme bbox-cropped 合成 + 临时 DOM 节点 → 复制/下载得到紧凑的图
   // 之前直接 captureNode(previewRef) = 拍 .quickmode-preview (400x480 含白边/留白) 太大
   // 现在拍一个临时构造的 tight 节点 (跟 Collection 批量打 ZIP 同款做法)
+  // customPanda 也作为 deps 让 useCallback 重建 (避免拿到 stale customPanda)
+  // 以下行只为标记 dep 顺序, 不改 build logic
+  void customPanda;
   const buildTightExportNode = useCallback(async (): Promise<HTMLDivElement> => {
-    const composedDataUrl = await composeMeme({
-      pandaSrc: panda.src,
-      faceSrc: face.src,
-      faceOffset: getLivePandaFaceOffset(panda),
-      rotation: faceRotation,
-      flipX: faceFlipX,
-      size: 1024,
-    });
+    // customPanda 时直接用网图当主体 (不合成 face), 复制/下载得到的就是网图 + caption
+    const composedDataUrl = customPanda
+      ? customPanda.src
+      : await composeMeme({
+          pandaSrc: panda.src,
+          faceSrc: face.src,
+          faceOffset: getLivePandaFaceOffset(panda),
+          rotation: faceRotation,
+          flipX: faceFlipX,
+          size: 1024,
+        });
     const capOff = getLiveCaptionOffset(panda);
     // 紧凑节点 — 不再用固定 frame, 让 IMG 按自然 bbox 渲染 (无额外上下留白)
     // composeMeme 输出已经是 bbox-tight, 所以 IMG 自身就是紧凑的
@@ -263,17 +287,19 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       'text-align:center',
     ].join(';');
     const escapedText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // 导出时不用 translateY (会撑出多余空间); 用 caption marginTop 直接控制间距
-    // 最终图像里"谁动谁不动"无所谓 — 只看最终的 panda 内容底 ↔ caption 顶 间距
     const captionMargin = Math.max(2, 12 - capOff);
+    // ⭐ 简易编辑: 应用 offset (panda 上下左右 translate, caption 同) 到 export
+    //   preview 里拖出来的位置, export 时也按同 offset 渲染
+    const pandaTransform = `translate(${offsetPanda.x}px, ${offsetPanda.y}px)`;
+    const captionTransform = `translate(${offsetCaption.x}px, ${offsetCaption.y}px)`;
     node.innerHTML = `
-      <img src="${composedDataUrl}" style="display:block;max-width:380px;max-height:380px;width:auto;height:auto;margin:0 auto;" />
-      ${escapedText ? `<div style="margin:${captionMargin}px auto 0;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;line-height:1.15;word-break:break-word;white-space:pre-line;font-family:${fontStack};">${escapedText}</div>` : ''}
+      <img src="${composedDataUrl}" style="display:block;max-width:380px;max-height:380px;width:auto;height:auto;margin:0 auto;transform:${pandaTransform};" />
+      ${escapedText ? `<div style="margin:${captionMargin}px auto 0;max-width:360px;text-align:center;font-size:30px;font-weight:700;color:#000;line-height:1.15;word-break:break-word;white-space:pre-line;font-family:${fontStack};transform:${captionTransform};">${escapedText}</div>` : ''}
     `;
     document.body.appendChild(node);
     await new Promise((r) => setTimeout(r, 80));
     return node;
-  }, [panda, face, faceRotation, faceFlipX, text, fontStack]);
+  }, [panda, face, faceRotation, faceFlipX, text, fontStack, customPanda, offsetPanda, offsetCaption]);
 
   const onCopy = useCallback(async () => {
     let node: HTMLDivElement | null = null;
@@ -362,6 +388,41 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
   }, [favSlotId, renameDraft]);
 
   const onToEditor = useCallback(async () => {
+    // customPanda 路径 — 直接整图当 panda 元素加进画板, 不合成 face
+    if (customPanda) {
+      dispatch({ type: 'CLEAR_CANVAS' });
+      dispatch({
+        type: 'ADD_ELEMENT',
+        element: {
+          id: generateId(),
+          type: 'image' as const,
+          src: customPanda.src,
+          name: customPanda.id,
+          x: 75, y: 75, width: 350, height: 350,
+          rotation: 0, opacity: 1, zIndex: 1, blendMode: 'normal',
+          flipX: false,
+        },
+      });
+      if (text.trim()) {
+        dispatch({
+          type: 'ADD_ELEMENT',
+          element: {
+            id: generateId(),
+            type: 'text' as const,
+            text,
+            x: 60, y: 410, width: 380, height: 56,
+            rotation: 0, opacity: 1, zIndex: 100,
+            fontFamily: fontStack,
+            fontSize: 32, fontWeight: 'bold' as const,
+            textAlign: 'center' as const,
+            fillColor: '#000000', strokeColor: '#ffffff',
+            strokeWidth: 0,
+          },
+        });
+      }
+      onOpenEditor();
+      return;
+    }
     // v3: panda bbox-crop + 实际 box → 跟 QuickMode 预览 100% 一致
     const offset350 = getLivePandaFaceOffset(panda);
     const pandaBox = await getEditorPandaBox(panda.src);
@@ -412,7 +473,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       }
       onOpenEditor();
     }, 30);
-  }, [dispatch, generateId, panda, face, text, faceRotation, faceFlipX, fontStack, onOpenEditor]);
+  }, [dispatch, generateId, panda, face, text, faceRotation, faceFlipX, fontStack, onOpenEditor, customPanda]);
 
   // (键盘快捷键 R/C/D 已删 — 用户反馈干扰 form 输入和浏览器原生快捷键)
 
@@ -471,38 +532,113 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                 alignItems: 'center',
                 width: '100%',
                 maxWidth: 460,
+                position: 'relative',  // 让 reset button absolute 锚定 preview 卡
               }}
             >
-              <div className="qm-panda-frame">
-                <PandaCanvas
-                  pandaSrc={panda.src}
-                  pandaId={panda.id}
-                  faceSrc={face.src}
-                  faceOffset={getLivePandaFaceOffset(panda)}
-                  rotation={faceRotation}
-                  flipX={faceFlipX}
-                  alt={panda.id}
-                  className="qm-panda-img"
-                  size={384}
-                  // v2 同步切换: onRendered = panda 实际显示 (img onLoad) 后才触发
-                  // 一起切 displayed* (caption + transform), 旧版本完整保持到这一刻
-                  onRendered={() => {
-                    setDisplayedText(text);
-                    setDisplayCaptionOffset(getLiveCaptionOffset(panda));
+              {/* panda 容器 — 可拖 (range ±100), 内部 translateY 仍生效 (caption offset 校准) */}
+              <Draggable
+                nodeRef={pandaDragRef}
+                position={offsetPanda}
+                bounds={{ top: -100, left: -120, right: 120, bottom: 100 }}
+                onStop={(_, d) => setOffsetPanda({ x: d.x, y: d.y })}
+              >
+                <div ref={pandaDragRef} className="qm-panda-frame" style={{ cursor: 'move' }} title={lang === 'zh' ? '拖动调整位置' : 'Drag to move'}>
+                  {customPanda ? (
+                    <img
+                      src={customPanda.src}
+                      alt={customPanda.labelCn}
+                      className="qm-panda-img"
+                      style={{
+                        width: 384,
+                        height: 384,
+                        objectFit: 'contain',
+                        // px → % (吸收 upstream mobile 校准修复): displayCaptionOffset 是 350-coord 绝对值,
+                        //   mobile frame ~225px 跟 desktop 350px 大小不同, 同 px 相对偏移不一致.
+                        //   用 % 相对 img 自身高度, 等比缩放, mobile/desktop 视觉一致.
+                        transform: `translateY(${(displayCaptionOffset / 350 * 100).toFixed(3)}%)`,
+                        pointerEvents: 'none',
+                      }}
+                      draggable={false}
+                    />
+                  ) : (
+                    <PandaCanvas
+                      pandaSrc={panda.src}
+                      pandaId={panda.id}
+                      faceSrc={face.src}
+                      faceOffset={getLivePandaFaceOffset(panda)}
+                      rotation={faceRotation}
+                      flipX={faceFlipX}
+                      alt={panda.id}
+                      className="qm-panda-img"
+                      size={384}
+                      onRendered={() => {
+                        setDisplayedText(text);
+                        setDisplayCaptionOffset(getLiveCaptionOffset(panda));
+                      }}
+                      style={{ transform: `translateY(${(displayCaptionOffset / 350 * 100).toFixed(3)}%)`, pointerEvents: 'none' }}
+                    />
+                  )}
+                </div>
+              </Draggable>
+              {/* caption 容器 — 可拖 + 双击行内编辑文本 */}
+              {(displayedText || isEditingCaption) && (
+                <Draggable
+                  nodeRef={captionDragRef}
+                  position={offsetCaption}
+                  bounds={{ top: -50, left: -120, right: 120, bottom: 50 }}
+                  cancel="input, textarea"
+                  onStop={(_, d) => setOffsetCaption({ x: d.x, y: d.y })}
+                >
+                  <div
+                    ref={captionDragRef}
+                    onDoubleClick={() => setIsEditingCaption(true)}
+                    title={lang === 'zh' ? '拖动 · 双击编辑' : 'Drag · double-click to edit'}
+                    style={{ cursor: isEditingCaption ? 'text' : 'move', display: 'inline-block' }}
+                  >
+                    {isEditingCaption ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={text}
+                        onChange={(e) => setTextSynced(e.target.value)}
+                        onBlur={() => setIsEditingCaption(false)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') {
+                            e.preventDefault();
+                            setIsEditingCaption(false);
+                          }
+                        }}
+                        className="qm-caption"
+                        style={{
+                          fontFamily: fontStack,
+                          background: '#fff',
+                          border: '2px dashed #0a4e97',
+                          borderRadius: 8,
+                          outline: 'none',
+                          padding: '4px 8px',
+                          minWidth: 200,
+                        }}
+                      />
+                    ) : (
+                      <div className="qm-caption" style={{ fontFamily: fontStack }}>{displayedText}</div>
+                    )}
+                  </div>
+                </Draggable>
+              )}
+              {/* 位置非默认时显示重置按钮 (隐于角落, 不干扰) */}
+              {(offsetPanda.x !== 0 || offsetPanda.y !== 0 || offsetCaption.x !== 0 || offsetCaption.y !== 0) && (
+                <button
+                  onClick={resetLayout}
+                  style={{
+                    position: 'absolute', top: 8, right: 8,
+                    padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                    background: 'rgba(255,255,255,0.9)', border: '1px solid #c8d2e0',
+                    color: '#0a356d', cursor: 'pointer',
                   }}
-                  // transform 用 displayCaptionOffset (旧值保持到 onRendered 才切)
-                  // 不再加 opacity 抖动 → 旧 panda 始终 1.0 直到新 panda 真出现
-                  // px → % 修 mobile 校准: displayCaptionOffset 是 350-coord 绝对值, mobile
-                  // frame ~225px 跟 desktop 350px 大小不同 → 同 px 相对偏移不一致 ("校准错位").
-                  // 用 % 相对 img 自身高度, 等比缩放, mobile/desktop 视觉一致.
-                  style={{ transform: `translateY(${(displayCaptionOffset / 350 * 100).toFixed(3)}%)` }}
-                />
-              </div>
-              {displayedText && (
-                <div
-                  className="qm-caption"
-                  style={{ fontFamily: fontStack }}
-                >{displayedText}</div>
+                  title={lang === 'zh' ? '重置位置' : 'Reset position'}
+                >
+                  ↺ {lang === 'zh' ? '重置' : 'Reset'}
+                </button>
               )}
             </div>
           </div>
@@ -720,6 +856,42 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </div>
           </section>
 
+          {/* 联网搜素材 — 独立 section, 一键打开搜索 modal */}
+          <section className="about-panel">
+            <div className="about-panel-title">
+              <span className="about-panel-badge"><Globe size={18} /></span>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#0a356d' }}>{t('networkSearch')}</h3>
+            </div>
+            <button
+              onClick={() => {
+                setCustomFaceModalOpen(false);
+                setSmartModalOpen(false);
+                setSearchModalOpen(true);
+              }}
+              className="about-arcade-btn"
+              style={{
+                width: '100%',
+                background: 'linear-gradient(180deg, #88b8ff 0%, #4a82e0 100%)',
+                borderColor: '#1f4ea0',
+              }}
+            >
+              <Globe size={14} /> {lang === 'zh' ? '打开搜索 →' : 'Open Search →'}
+            </button>
+            {/* 清除联网素材 — 应在本 section 内 (上版本错放在"上传/提取" section) */}
+            {customPanda && (
+              <button
+                onClick={() => setCustomPanda(null)}
+                className="about-arcade-btn"
+                style={{ width: '100%', marginTop: 8, background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)', borderColor: '#888', color: '#0a356d', fontSize: 12, padding: '8px 14px' }}
+              >
+                <X size={12} /> {lang === 'zh' ? '清除联网素材' : 'Clear network image'}
+              </button>
+            )}
+            <p style={{ margin: '8px 0 0', fontSize: 11, color: '#666', textAlign: 'center' }}>
+              {t('networkSearchHint')}
+            </p>
+          </section>
+
           {/* 上传 / 智能提取人脸 — 输出后直接套到 Quick 当前 panda 上 */}
           <section className="about-panel">
             <div className="about-panel-title">
@@ -738,6 +910,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
                   <X size={12} /> {lang === 'zh' ? '清除自制人脸' : 'Clear custom face'}
                 </button>
               )}
+              {/* "清除联网素材" 按钮已移到联网搜素材 section 内 (上版本错放这里) */}
             </div>
           </section>
 
@@ -748,29 +921,77 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {/* v4: textarea 支持多行 — 回车换行, 预览/导出走 white-space: pre-line */}
-              <textarea
-                value={text}
-                onChange={(e) => setTextSynced(e.target.value)}
-                placeholder={t('quickTextPlaceholder')}
-                rows={2}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  border: '2px solid #0a4e97',
-                  background: '#fff',
-                  color: '#0a356d',
-                  fontSize: 14,
-                  fontFamily: 'inherit',
-                  outline: 'none',
-                  resize: 'vertical',
-                  minHeight: 44,
-                  lineHeight: 1.4,
-                }}
-              />
+              {/* v5 2026-05-17: 右上角 X 清除按钮 (文字非空时显示) */}
+              <div style={{ position: 'relative' }}>
+                <textarea
+                  value={text}
+                  onChange={(e) => setTextSynced(e.target.value)}
+                  placeholder={t('quickTextPlaceholder')}
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px 38px 10px 12px',
+                    borderRadius: 10,
+                    border: '2px solid #0a4e97',
+                    background: '#fff',
+                    color: '#0a356d',
+                    fontSize: 14,
+                    fontFamily: 'inherit',
+                    outline: 'none',
+                    resize: 'vertical',
+                    minHeight: 44,
+                    lineHeight: 1.4,
+                  }}
+                />
+                {text.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTextSynced('')}
+                    title={lang === 'zh' ? '清除文字' : 'Clear text'}
+                    aria-label={lang === 'zh' ? '清除文字' : 'Clear text'}
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      right: 8,
+                      width: 22,
+                      height: 22,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 6,
+                      border: '1px solid #c8d2e0',
+                      background: '#f6f8fc',
+                      color: '#0a356d',
+                      cursor: 'pointer',
+                      padding: 0,
+                      lineHeight: 0,
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <button onClick={onRandomText} className="about-arcade-btn" style={{ padding: '6px 12px', fontSize: 12, flex: 1 }} title={t('quickRandomText')}>
                   <Wand2 size={12} /> {lang === 'zh' ? '换文字' : 'Reroll'}
                 </button>
+                {text.length > 0 && (
+                  <button
+                    onClick={() => setTextSynced('')}
+                    className="about-arcade-btn"
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      background: 'linear-gradient(180deg, #fff 0%, #e8e8e8 100%)',
+                      borderColor: '#888',
+                      color: '#0a356d',
+                    }}
+                    title={lang === 'zh' ? '清除文字' : 'Clear text'}
+                  >
+                    <X size={12} /> {lang === 'zh' ? '清除' : 'Clear'}
+                  </button>
+                )}
                 <div style={{ display: 'inline-flex', gap: 0, borderRadius: 10, overflow: 'hidden', border: '2px solid #0a4e97' }}>
                   {TEXT_LANG_OPTIONS.map((opt) => (
                     <button
@@ -930,6 +1151,31 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
         onClose={() => setSmartModalOpen(false)}
         onConfirm={onCustomFaceConfirm}
         language={lang}
+      />
+      {/* 联网搜表情包 — 用统一 PandaSearchModal (1100x900 / mobile 全屏)
+       * 旧自定义 modal maxHeight: 85vh 没 height → flex column 算 0 → PSP grid 不渲染.
+       * v6 改 PandaSearchModal 统一实现, 跟编辑器一致. */}
+      <PandaSearchModal
+        open={searchModalOpen}
+        lang={lang}
+        onSelect={(mat) => {
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[QuickMode.onSelect] setCustomPanda', {
+              matId: mat.id,
+              srcPrefix: mat.src.slice(0, 60),
+            });
+            setCustomPanda(mat);
+            setCustomFace(null);
+            setSearchModalOpen(false);
+            toast.success(lang === 'zh' ? '已应用到画板中间' : 'Applied as canvas center');
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('[QuickMode.onSelect] failed', e);
+            toast.error(`${lang === 'zh' ? '应用失败' : 'Apply failed'}: ${(e as Error).message ?? 'unknown'}`);
+          }
+        }}
+        onClose={() => setSearchModalOpen(false)}
       />
     </div>
   );

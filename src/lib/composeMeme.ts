@@ -24,19 +24,25 @@
 const _imgCache = new Map<string, Promise<HTMLImageElement>>();
 
 export function loadImage(src: string): Promise<HTMLImageElement> {
-  const hit = _imgCache.get(src);
-  if (hit) return hit;
+  // dataURL (data:image/...;base64,...) src 跳过 cache 避免内存膨胀:
+  // 联网搜的 face 经 proxy → dataURL, 单 key 可达 200-500KB string,
+  // 而且每张图唯一 (URL hash 不会复用), 缓存命中率 = 0, 缓存就是泄漏.
+  const skipCache = src.startsWith('data:');
+  if (!skipCache) {
+    const hit = _imgCache.get(src);
+    if (hit) return hit;
+  }
   const p = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => {
-      _imgCache.delete(src);
+      if (!skipCache) _imgCache.delete(src);
       reject(new Error(`loadImage fail: ${src}`));
     };
     img.src = src;
   });
-  _imgCache.set(src, p);
+  if (!skipCache) _imgCache.set(src, p);
   return p;
 }
 

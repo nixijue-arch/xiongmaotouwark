@@ -9,6 +9,9 @@ import { toast } from 'sonner';
 import type { ImageElement, MemeElement } from '@/context/memecontext';
 import { X, Search } from 'lucide-react';
 import type { Material } from '@/data/materials';
+import { PandaSearchModal } from '@/components/pandasearchmodal';
+import { PandaSearchSaveModal } from '@/components/pandasearchsavemodal';
+import type { NetworkResult } from '@/lib/networkImage';
 
 function isElementActive(elements: MemeElement[], itemId: string): boolean {
   return elements.some(e => e.type === 'image' && (e as ImageElement).name === itemId);
@@ -94,6 +97,10 @@ export function LeftSidebar() {
   }, []);
   const [pandaSearch, setPandaSearch] = useState('');
   const [faceSearch, setFaceSearch] = useState('');
+  // 联网搜 modal (sidebar 入口按钮触发, 全屏 modal)
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  // DEV: 沉淀 modal (network search 用户点 ⭐ 后弹)
+  const [savePromptResult, setSavePromptResult] = useState<NetworkResult | null>(null);
 
   const lang = state.language;
   // 编辑器素材池跟 QuickMode / Collection 一致 — 用 ALL_* (70 panda + 132 face)
@@ -226,6 +233,46 @@ export function LeftSidebar() {
     if (isMobile) setSheetOpen(false);
   };
 
+  // 联网搜 modal 应用回调 — desktop / mobile 共用
+  const handleNetworkApply = (mat: Material) => {
+    try {
+      const currentPanda = state.elements.find(
+        (e) =>
+          e.type === 'image' &&
+          ((e as ImageElement).name === 'panda-head' ||
+            ALL_PANDAS.some((p) => p.id === (e as ImageElement).name) ||
+            (e as ImageElement).name.startsWith('upload-panda-') ||
+            (e as ImageElement).name.startsWith('network-panda-')),
+      );
+      // eslint-disable-next-line no-console
+      console.log('[leftsidebar.handleNetworkApply]', {
+        mat: { id: mat.id, srcPrefix: mat.src.slice(0, 60) },
+        path: currentPanda ? `UPDATE_ELEMENT id=${currentPanda.id}` : 'ADD_ELEMENT new panda',
+        elementsCount: state.elements.length,
+      });
+      if (currentPanda) {
+        dispatch({
+          type: 'UPDATE_ELEMENT',
+          id: currentPanda.id,
+          updates: { src: mat.src, name: mat.id },
+        });
+      } else {
+        handleAddPandaHead(mat.src, mat.id);
+      }
+      setSearchModalOpen(false);
+      toast.success(lang === 'zh' ? '已应用到画板' : 'Applied to canvas');
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[leftsidebar.handleNetworkApply] failed', e);
+      toast.error(`${lang === 'zh' ? '应用失败' : 'Apply failed'}: ${(e as Error).message ?? 'unknown'}`);
+    }
+  };
+
+  // 沉淀回调 — 严格 DEV gate, prod build 完全无 (import.meta.env.DEV 被 tree-shake 为 false)
+  const handleSaveToPool = import.meta.env.DEV
+    ? (result: NetworkResult) => setSavePromptResult(result)
+    : undefined;
+
   const renderSearchBox = (value: string, onChange: (v: string) => void, placeholder: string) => (
     <div className="material-search-box">
       <Search size={12} color="#888" />
@@ -295,6 +342,16 @@ export function LeftSidebar() {
               style={{ backgroundColor: activeTab === 'face' ? 'rgba(255,94,0,0.1)' : 'transparent', color: activeTab === 'face' ? '#FF5E00' : '#888', borderBottom: activeTab === 'face' ? '2px solid #FF5E00' : '2px solid transparent' }}>{faceTabLabel}</button>
           </div>
           <div className="bottom-sheet-body">
+            {/* 联网搜 CTA 按钮 — 触发全屏 modal */}
+            <button
+              type="button"
+              className="sidebar-network-cta"
+              style={{ marginBottom: 12 }}
+              onClick={() => { setSheetOpen(false); setSearchModalOpen(true); }}
+            >
+              <span className="sidebar-network-cta-emoji" aria-hidden="true">🌐</span>
+              <span>{lang === 'zh' ? '联网搜素材 (海量熊猫头)' : 'Search Online (lots of memes)'}</span>
+            </button>
             {activeTab === 'panda' && (
               <>
                 {renderSearchBox(pandaSearch, setPandaSearch, searchPh)}
@@ -311,6 +368,41 @@ export function LeftSidebar() {
             )}
           </div>
         </div>
+        {/* 联网搜 modal — mobile + desktop 共用一个组件实例 */}
+        <PandaSearchModal
+          open={searchModalOpen}
+          lang={lang}
+          onSelect={handleNetworkApply}
+          onSaveToPool={handleSaveToPool}
+          onClose={() => setSearchModalOpen(false)}
+        />
+        <PandaSearchSaveModal
+          result={savePromptResult}
+          lang={lang}
+          onClose={() => setSavePromptResult(null)}
+          onSaved={(kind) => {
+            setSavePromptResult(null);
+            toast.success(lang === 'zh' ? '已沉淀到本地素材池' : 'Saved to local pool');
+            if (kind === 'face' || kind === 'panda') {
+              window.setTimeout(() => {
+                toast.info(
+                  lang === 'zh' ? '建议立即校准 face 锚点' : 'Tip: calibrate face anchor now',
+                  {
+                    duration: 8000,
+                    action: {
+                      label: lang === 'zh' ? '立即校准' : 'Calibrate',
+                      onClick: () => {
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('page', 'calibrate');
+                        window.location.href = url.toString();
+                      },
+                    },
+                  },
+                );
+              }, 500);
+            }
+          }}
+        />
       </>
     );
   }
@@ -451,9 +543,56 @@ export function LeftSidebar() {
         </div>
       </div>
 
+      {/* 联网搜入口 — 单按钮独立放 sidebar, 不套 win7-panel 框 (user feedback "只有一个按钮就不用矩形框了") */}
+      <button
+        type="button"
+        className="sidebar-network-cta sidebar-network-cta-solo"
+        onClick={() => setSearchModalOpen(true)}
+      >
+        <span className="sidebar-network-cta-emoji" aria-hidden="true">🌐</span>
+        <span>{lang === 'zh' ? '联网搜素材' : 'Search Online'}</span>
+      </button>
+
       <div className="sidebar-hint">
         {lang === 'zh' ? '点击素材 · 拖拽调整位置 · Delete删除' : 'Click to add · Drag to move · Delete to remove'}
       </div>
+      {/* 联网搜 modal — desktop sidebar 按钮触发, 跟 mobile sheet 同款 */}
+      <PandaSearchModal
+        open={searchModalOpen}
+        lang={lang}
+        onSelect={handleNetworkApply}
+        onSaveToPool={handleSaveToPool}
+        onClose={() => setSearchModalOpen(false)}
+      />
+      {/* DEV: 沉淀 modal — prod tree-shake */}
+      <PandaSearchSaveModal
+        result={savePromptResult}
+        lang={lang}
+        onClose={() => setSavePromptResult(null)}
+        onSaved={(kind, _id) => {
+          setSavePromptResult(null);
+          toast.success(lang === 'zh' ? '已沉淀到本地素材池' : 'Saved to local pool');
+          // face/panda 类素材建议立即去校准锚点
+          if (kind === 'face' || kind === 'panda') {
+            window.setTimeout(() => {
+              toast.info(
+                lang === 'zh' ? '建议立即校准 face 锚点' : 'Tip: calibrate face anchor now',
+                {
+                  duration: 8000,
+                  action: {
+                    label: lang === 'zh' ? '立即校准' : 'Calibrate',
+                    onClick: () => {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set('page', 'calibrate');
+                      window.location.href = url.toString();
+                    },
+                  },
+                },
+              );
+            }, 500);
+          }
+        }}
+      />
     </aside>
   );
 }

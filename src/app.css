@@ -251,6 +251,9 @@
   border-right: 1px solid #2a2a2a;
   background-color: #0f0f0f;
   height: 100%;
+  /* 整体可滚 — 联网搜 section embedded mode 自然撑开, 用户在 sidebar 任意位置滚轮都能滚下来看完 */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .draft-card {
