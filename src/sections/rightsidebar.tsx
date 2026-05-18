@@ -218,13 +218,19 @@ function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
   // 用 ALL_PANDAS (70 = 24 native + 46 ph) 不是只 PANDA_HEADS
-  return ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return ALL_PANDAS.some(p => p.id === name)
+    || name.startsWith('upload-panda-')
+    || name.startsWith('network-panda-')
+    || name.startsWith('custom-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-')
+    || name.startsWith('network-face-');
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {

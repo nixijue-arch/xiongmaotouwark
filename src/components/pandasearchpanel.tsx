@@ -16,6 +16,7 @@ import {
   makeNetworkMaterial,
   proxyImageUrl,
   proxyForCanvasDetect,
+  fetchAsDataUrl,
   detectColorfulness,
   detectAIPanda,
   type NetworkResult,
@@ -200,27 +201,53 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
     if (c?.terms[0]) setQuery(c.terms[0]);
   }, [featuredChips]);
 
-  // 极简化 handleSelect (2026-05-17 v6):
-  //   user 反馈"修了十几次裁底都不能用" + "点击图片后不会加载到画板".
-  //   决定砍掉所有可能卡死的逻辑 — 0 await race / 0 Promise.race / 0 timer.
-  //   流程: 构造 mat (同步) → onSelect (可能 sync 也可能 async, await 兼容) → toast.
-  //   加 console.log 让 user F12 console 看实际调用链, 报 bug 直接粘.
+  // handleSelect v7 (2026-05-19 大改): fetch dataURL 一次 → 后续全秒响应
+  //   旧实现 mat.src = /api/proxy-image?url=... (proxy URL string)
+  //   → 编辑器画板 <img src=proxy URL> 每次加载都跨海 fetch 1-3s
+  //   → 草图保存时 snapshotElementsForDraft 再 fetch 转 dataURL (~1-3s)
+  //   → 草图加载时 element.src 是 proxy URL → 又 fetch (慢)
+  //   → 用户感知所有操作都卡, 反复跨海
+  //
+  //   新实现 mat.src = dataURL (一次 fetch 转换, 之后永不再 fetch)
+  //   → 编辑器画板 <img src=dataURL> **秒 paint** (0 网络)
+  //   → 草图保存 src 已是 dataURL, snapshotElementsForDraft 直接 return
+  //   → 草图加载 element.src 仍 dataURL, 秒 paint
+  //   → 跨 query 切 keyword/重新搜也保留 (state.elements 内 dataURL)
+  //
+  //   trade-off: 点 PSP 图等 1-3s (loading toast 明确进度) vs 旧版每次画板/草图加载都等
+  //   净时间省 (only once vs many times), UX 也更好 (toast 比破图等待友好)
   const handleSelect = useCallback(
     async (result: NetworkResult) => {
       if (busyId) return;
       setBusyId(result.id);
       const toastId = 'psp-action';
       toast.dismiss(toastId);
+      toast.loading(
+        props.lang === 'zh' ? '加载素材中…' : 'Loading…',
+        { id: toastId, duration: 12000 },
+      );
 
-      // ⭐ 编辑器/QuickMode 用 mat.src 必须走 proxy (不能走智能路由):
-      //   - 编辑器 ImageElement <img src={element.src}>: 浏览器加载时带 Referer=xiongmaotou.work,
-      //     baidu/so360 部分 thumb 看到第三方 referer 会 403 → 画板上图不显示
-      //   - composeMeme.loadImage 用 crossOrigin='anonymous' 抓 dataURL: 跨域无 CORS header → tainted
-      //   PSP 缩略图渲染用 proxyImageUrl 智能路由 (国内 CDN hot-link 快), 是另一回事.
-      const finalSrc = proxyForCanvasDetect(result.src);
+      let finalSrc: string;
+      try {
+        // fetch /api/proxy-image → blob → dataURL (一次过 ~1-3s)
+        finalSrc = await fetchAsDataUrl(result.src);
+      } catch (e) {
+        toast.error(
+          `${props.lang === 'zh' ? '素材加载失败' : 'Load failed'}: ${(e as Error).message ?? 'unknown'}`,
+          { id: toastId, duration: 4000 },
+        );
+        if (mountedRef.current) setBusyId(null);
+        return;
+      }
+
+      if (!mountedRef.current) {
+        toast.dismiss(toastId);
+        return;
+      }
+
       const mat: Material = {
         id: `network-panda-${result.id.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32)}`,
-        src: finalSrc,
+        src: finalSrc,  // dataURL — same-origin, 0 网络, 后续秒响应
         labelCn: (result.hint?.trim() || '网络熊猫').slice(0, 12),
         labelEn: 'Network Panda',
         tags: [],
@@ -235,13 +262,11 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
       // eslint-disable-next-line no-console
       console.log('[PSP] handleSelect →', {
         result: { id: result.id, source: result.source, hint: result.hint?.slice(0, 30) },
-        mat: { id: mat.id, srcPrefix: mat.src.slice(0, 60), srcLen: mat.src.length },
+        mat: { id: mat.id, srcType: 'dataURL', srcLen: mat.src.length },
       });
 
       try {
         await onSelect(mat, result);
-        // eslint-disable-next-line no-console
-        console.log('[PSP] onSelect resolved ✓ (caller dispatched / setCustomPanda done)');
         toast.success(
           props.lang === 'zh' ? '已应用' : 'Applied',
           { id: toastId, duration: 2000 },

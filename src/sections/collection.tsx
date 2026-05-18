@@ -31,14 +31,17 @@ function isPanda(e: MemeElement): boolean {
   const name = (e as ImageElement).name;
   return name === 'panda-head'
     || ALL_PANDAS.some(p => p.id === name)
-    || name.startsWith('upload-panda-');
+    || name.startsWith('upload-panda-')
+    || name.startsWith('network-panda-')   // ⭐ 联网搜的 panda
+    || name.startsWith('custom-panda-');    // ⭐ 用户上传的 panda
 }
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
   return ALL_FACES.some(f => f.id === name)
     || name.startsWith('upload-face-')
-    || name.startsWith('custom-face-');
+    || name.startsWith('custom-face-')
+    || name.startsWith('network-face-');    // ⭐ 联网搜的 face
 }
 
 // 从 slot 抽出 panda / face / text 信息, 给预览渲染 + ZIP 打包用

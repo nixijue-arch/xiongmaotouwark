@@ -21,13 +21,20 @@ function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
   // 也认 'panda-head' fallback name（handleAddFace 兜底用）
-  return name === 'panda-head' || ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return name === 'panda-head'
+    || ALL_PANDAS.some(p => p.id === name)
+    || name.startsWith('upload-panda-')
+    || name.startsWith('network-panda-')   // ⭐ 联网搜的 panda
+    || name.startsWith('custom-panda-');    // ⭐ 用户上传的 panda
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-')
+    || name.startsWith('network-face-');    // ⭐ 联网搜的 face
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
