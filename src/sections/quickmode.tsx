@@ -336,31 +336,42 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
       return;
     }
     try {
-      const offset350 = getLivePandaFaceOffset(panda);
-      // v3: panda bbox-crop + 实际 box → face anchor 跟 QuickMode 预览 100% 对齐
-      const pandaBox = await getEditorPandaBox(panda.src);
-      const faceLayout = await calcEditorFaceLayout({
-        pandaSrc: panda.src,
-        faceSrc: face.src,
-        faceOffset350: offset350,
-        panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
-        panda350W: pandaBox.w, panda350H: pandaBox.h,
-      });
-      const layering = getShellLayering(panda.id);
-      const elements: any[] = [
-        {
-          id: generateId(), type: 'image', src: face.src, name: face.id,
-          x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
-          rotation: faceRotation, opacity: 1,
-          zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: faceFlipX,
-        },
-        {
-          id: generateId(), type: 'image', src: pandaBox.croppedSrc, name: panda.id,
-          x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h,
-          rotation: 0, opacity: 1,
-          zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
-        },
-      ];
+      let elements: any[];
+      // ⭐ customPanda 路径 — 整图当 panda 元素 (跟 onToEditor 一致), 修"草图保存的是默认 panda 不是网图" bug
+      // saveDraftWithState 内 snapshotElementsForDraft 会把 customPanda.src (/api/proxy-image?...) 转 dataURL
+      if (customPanda) {
+        elements = [{
+          id: generateId(), type: 'image', src: customPanda.src, name: customPanda.id,
+          x: 75, y: 75, width: 350, height: 350,
+          rotation: 0, opacity: 1, zIndex: 1, blendMode: 'normal',
+          flipX: false,
+        }];
+      } else {
+        const offset350 = getLivePandaFaceOffset(panda);
+        const pandaBox = await getEditorPandaBox(panda.src);
+        const faceLayout = await calcEditorFaceLayout({
+          pandaSrc: panda.src,
+          faceSrc: face.src,
+          faceOffset350: offset350,
+          panda350OffsetX: pandaBox.x, panda350OffsetY: pandaBox.y,
+          panda350W: pandaBox.w, panda350H: pandaBox.h,
+        });
+        const layering = getShellLayering(panda.id);
+        elements = [
+          {
+            id: generateId(), type: 'image', src: face.src, name: face.id,
+            x: faceLayout.x, y: faceLayout.y, width: faceLayout.width, height: faceLayout.height,
+            rotation: faceRotation, opacity: 1,
+            zIndex: layering.faceZ, blendMode: layering.faceBlend, flipX: faceFlipX,
+          },
+          {
+            id: generateId(), type: 'image', src: pandaBox.croppedSrc, name: panda.id,
+            x: pandaBox.x, y: pandaBox.y, width: pandaBox.w, height: pandaBox.h,
+            rotation: 0, opacity: 1,
+            zIndex: layering.pandaZ, blendMode: layering.pandaBlend, flipX: false,
+          },
+        ];
+      }
       if (text.trim()) {
         elements.push({
           id: generateId(), type: 'text', text,
@@ -371,7 +382,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
           strokeWidth: 0,
         });
       }
-      const slotName = text.trim() || `快速·${panda.labelCn}`;
+      const slotName = text.trim() || (customPanda ? `快速·网图` : `快速·${panda.labelCn}`);
       await saveDraftWithState(favSlotId, { elements, selectedId: null, language: lang }, slotName);
       setPendingFavName(text || '');
       setNamePopoverOpen(true);
@@ -379,7 +390,7 @@ export function QuickMode({ onOpenEditor }: QuickModeProps) {
     } catch (e) {
       toast.error(`${t('quickCopyFail')}: ${e instanceof Error ? e.message : 'unknown'}`);
     }
-  }, [isFavored, favSlotId, panda, face, faceRotation, faceFlipX, text, fontStack, lang, generateId, saveDraftWithState, clearDraft, t]);
+  }, [isFavored, favSlotId, panda, face, faceRotation, faceFlipX, text, fontStack, lang, generateId, saveDraftWithState, clearDraft, t, customPanda]);
 
   // 改名 — 直接改 draftSlot 的 name (Collection 也会同步显示)
   const onSaveName = useCallback((name: string) => {
