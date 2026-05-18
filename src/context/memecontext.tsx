@@ -280,6 +280,41 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// ⭐ 网图 proxy URL → dataURL 转换 (草图保存时用)
+//   element.src = "/api/proxy-image?url=..." 在加载草图时仍要 fetch proxy → 跨海冷启 5-9s 慢
+//   存进 IDB 时转 dataURL → 草图加载 0 网络 paint, 秒返
+//   只对 network-* 类 element 转 (本地素材 src 已是 /assets/... 同源, 不需转)
+async function networkSrcToDataUrl(src: string): Promise<string> {
+  // 已是 dataURL 直接返
+  if (src.startsWith('data:')) return src;
+  // 不是 proxy URL (本地素材 /assets/...) 直接返
+  if (!src.startsWith('/api/proxy-image')) return src;
+  try {
+    const res = await fetch(src);
+    if (!res.ok) return src;  // fetch fail fallback 原 URL
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(typeof r.result === 'string' ? r.result : src);
+      r.onerror = () => reject(new Error('FileReader failed'));
+      r.readAsDataURL(blob);
+    });
+  } catch {
+    return src;  // 失败兜底返 proxy URL
+  }
+}
+
+async function snapshotElementsForDraft(elements: MemeElement[]): Promise<MemeElement[]> {
+  // 把 elements 内的 network proxy URL 转 dataURL (草图 IDB 持久前)
+  return Promise.all(elements.map(async (el) => {
+    if (el.type === 'image' && el.src.startsWith('/api/proxy-image')) {
+      const dataUrl = await networkSrcToDataUrl(el.src);
+      return { ...el, src: dataUrl };
+    }
+    return el;
+  }));
+}
+
 async function renderDraftPreview(elements: MemeElement[]): Promise<string> {
   if (typeof window === 'undefined' || elements.length === 0) return '';
 
@@ -482,9 +517,12 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
   void historyVersion;
 
   const saveDraft = useCallback(async (slotId: string) => {
-    const previewUrl = await renderDraftPreview(state.elements);
+    // ⭐ 网图 src 转 dataURL (网络素材 /api/proxy-image?url=... → data:image/...)
+    //   加载草图时 0 网络 paint 秒返, 修"网图存草图后破图" bug
+    const snapshotElements = await snapshotElementsForDraft(state.elements);
+    const previewUrl = await renderDraftPreview(snapshotElements);
     const savedState = {
-      elements: state.elements,
+      elements: snapshotElements,
       selectedId: state.selectedId,
       language: state.language,
     } satisfies Pick<AppState, 'elements' | 'selectedId' | 'language'>;
@@ -534,8 +572,10 @@ export function MemeProvider({ children }: { children: React.ReactNode }) {
     snapshot: Pick<AppState, 'elements' | 'selectedId' | 'language'>,
     name?: string,
   ) => {
-    const previewUrl = await renderDraftPreview(snapshot.elements);
-    const safe = sanitizeStoredState(snapshot);
+    // ⭐ 网图转 dataURL (同 saveDraft)
+    const snapshotElements = await snapshotElementsForDraft(snapshot.elements);
+    const previewUrl = await renderDraftPreview(snapshotElements);
+    const safe = sanitizeStoredState({ ...snapshot, elements: snapshotElements });
     if (!safe) return;
 
     setDraftSlots(prev => {

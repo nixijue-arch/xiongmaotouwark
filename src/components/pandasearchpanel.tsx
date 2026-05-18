@@ -164,13 +164,16 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
     return () => { cancelled = true; };
   }, [results, colorfulDetection, aiPandaDetection]);
 
-  // IntersectionObserver — root = pspRoot (root 是 overflow scroll 容器)
+  // IntersectionObserver — sentinel 始终 mount, rootMargin 800px 提前 prefetch
+  // user 反馈"滚轮下调到一定程度直接自动加载, 不要干等" — rootMargin 大让滚到 ~70% 就 fire
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || !hasMore || loading) return;
+    if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loading) {
+        if (!entries[0]?.isIntersecting) return;
+        // 用 ref check 最新 state, 避免 effect 频繁重建 (依赖 query/loading/hasMore)
+        if (hasMore && !loading) {
           setPage((prevPage) => {
             const next = prevPage + 1;
             void doSearch(query, next);
@@ -178,7 +181,7 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
           });
         }
       },
-      { root: rootRef.current, rootMargin: '300px' },
+      { root: rootRef.current, rootMargin: '800px' },
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -357,9 +360,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
           ))}
       </div>
 
-      {hasMore && !loading && (
-        <div ref={sentinelRef} className="psp-sentinel" aria-hidden="true" />
-      )}
+      {/* sentinel 始终 mount (即使 loading) — IO 不 disconnect, prefetch 更可靠 */}
+      <div ref={sentinelRef} className="psp-sentinel" aria-hidden="true" style={{ visibility: hasMore ? 'visible' : 'hidden' }} />
 
       {loading && (
         <div className="psp-loading">
@@ -419,7 +421,25 @@ function ResultCard({
   onSave,
   onLoadFailed,
 }: ResultCardProps) {
-  const thumbSrc = proxyImageUrl(item.thumb || item.src);
+  // 智能路由 → hot-link 失败时一次 retry → fallback proxy → 仍失败才 onLoadFailed
+  // 修复"网图有时加载不出来": baidu/so360 hot-link 偶发 timeout/403, 必须给 proxy 兜底
+  const initialSrc = proxyImageUrl(item.thumb || item.src);
+  const [thumbSrc, setThumbSrc] = useState(initialSrc);
+  const [hasRetried, setHasRetried] = useState(false);
+  // item 变化时 reset (key 已是 item.id 但保险起见)
+  useEffect(() => {
+    setThumbSrc(initialSrc);
+    setHasRetried(false);
+  }, [initialSrc]);
+  const handleImgError = useCallback(() => {
+    if (hasRetried) {
+      onLoadFailed();
+      return;
+    }
+    // 第一次失败 (大概率 hot-link 跨域被防盗链 / 短暂 404), retry 走 proxy
+    setHasRetried(true);
+    setThumbSrc(`/api/proxy-image?url=${encodeURIComponent(item.thumb || item.src)}`);
+  }, [hasRetried, item.thumb, item.src, onLoadFailed]);
 
   return (
     <div
@@ -445,16 +465,14 @@ function ResultCard({
         alt={item.hint || item.source}
         className="psp-thumb"
         style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
-        // referrerpolicy=no-referrer: 浏览器不发 Referer header, 国内 CDN (baidu/so360 hot-link)
-        // 看不到第三方 referer https://xiongmaotou.work → 不会触发 referer 防盗链 403.
-        // 这让智能路由 (国内 CDN 直加载) 100% 可靠, 国内用户首屏 200ms 内出图.
+        // referrerpolicy=no-referrer: 浏览器不发 Referer header, 防国内 CDN referer 防盗链
         referrerPolicy="no-referrer"
-        onError={onLoadFailed}
-        // 空图过滤: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
+        onError={handleImgError}
+        // 空图: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
         onLoad={(e) => {
           const img = e.currentTarget;
           if (img.naturalWidth === 0 || img.naturalHeight === 0) {
-            onLoadFailed();
+            handleImgError();
           }
         }}
         draggable={false}

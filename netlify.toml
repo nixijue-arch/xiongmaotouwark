@@ -22,3 +22,11 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ⭐ Permissions-Policy header — 允许 clipboard-write (Chrome 122+ 默认 block, 需明确 allow)
+# 修 "Copy failed: Clipboard API has been blocked because of a permissions policy" 错误.
+# clipboard-write=(self) 仅允许 same-origin, 不开放给第三方 iframe.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Permissions-Policy = "clipboard-write=(self), clipboard-read=(self)"
