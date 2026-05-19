@@ -12,6 +12,7 @@ import { QuickMode } from '@/sections/quickmode';
 import { Collection } from '@/sections/collection';
 import { AnimateMode } from '@/sections/animatemode';
 import { Toaster } from 'sonner';
+import { AppDialogHost } from '@/components/appdialog';
 import './app.css';
 import './sections/mobile.css';
 
@@ -88,6 +89,7 @@ function App() {
           <AboutPanda onBack={() => setPage('editor')} />
         )}
         <Toaster position="top-right" theme="dark" richColors closeButton />
+        <AppDialogHost />
       </div>
     </MemeProvider>
   );

@@ -10,6 +10,7 @@ import { calcEditorFaceLayout, getEditorPandaBox } from '@/lib/composeMeme';
 // 编辑器推荐文字 / 随机文案 ← 与 QuickMode 共享同一个池
 import { RECOMMEND_TEXTS_ZH as ZH_TEXTS, RECOMMEND_TEXTS_EN as EN_TEXTS } from '@/data/quickModeTexts';
 import { fmtShortcut } from '@/lib/keyboard';
+import { showDialog } from '@/components/appdialog';
 import { toast } from 'sonner';
 
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
@@ -358,7 +359,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleExport = async () => {
     if (state.elements.length === 0) {
-      alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+      await showDialog({
+        title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+        message: state.language === 'zh' ? '请先添加内容再导出.' : 'Please add content before exporting.',
+        variant: 'info',
+        confirmText: state.language === 'zh' ? '知道了' : 'OK',
+      });
       return;
     }
     setIsExporting(true);
@@ -377,7 +383,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
       console.error('Export failed:', err);
-      alert(state.language === 'zh' ? '导出失败' : 'Export failed');
+      toast.error(state.language === 'zh' ? '导出失败' : 'Export failed');
     } finally {
       setIsExporting(false);
     }
@@ -512,12 +518,25 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   // bind recommendText after definition
   editorRpcRef.current.recommendText = handleRecommendText;
 
-  const handleAddText = () => {
+  const handleAddText = async () => {
     const promptText = state.language === 'zh' ? '输入文字内容' : 'Enter text content';
     const defaultText = state.language === 'zh' ? '点击输入文字' : 'Click to enter text';
-    const text = window.prompt(promptText, defaultText);
-    if (!text || text.trim() === '') return;
-    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    const res = await showDialog({
+      title: state.language === 'zh' ? '添加文字' : 'Add Text',
+      input: {
+        key: 'text',
+        label: promptText,
+        defaultValue: defaultText,
+        placeholder: defaultText,
+        required: true,
+      },
+      confirmText: state.language === 'zh' ? '添加' : 'Add',
+      cancelText: state.language === 'zh' ? '取消' : 'Cancel',
+    });
+    if (!res.confirmed) return;
+    const text = (res.input ?? '').trim();
+    if (!text) return;
+    const textEl: TextElement = { id: generateId(), type: 'text', text, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     dispatch({ type: 'SELECT_ELEMENT', id: textEl.id });
   };
@@ -526,7 +545,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (platform === 'x') {
       // Copy canvas image then open X intent
       if (state.elements.length === 0) {
-        alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+        await showDialog({
+          title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+          message: state.language === 'zh' ? '请先添加内容再分享.' : 'Please add content before sharing.',
+          variant: 'info',
+          confirmText: state.language === 'zh' ? '知道了' : 'OK',
+        });
         return;
       }
       try {
@@ -555,7 +579,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleCopyPreview = async () => {
     if (state.elements.length === 0) {
-      alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+      await showDialog({
+        title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+        message: state.language === 'zh' ? '请先添加内容再复制.' : 'Please add content before copying.',
+        variant: 'info',
+        confirmText: state.language === 'zh' ? '知道了' : 'OK',
+      });
       return;
     }
 
@@ -584,7 +613,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (!file) return;
     const error = validateImageFile(file, state.language);
     if (error) {
-      alert(error);
+      toast.error(error);
       return;
     }
     try {
@@ -612,7 +641,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element });
     } catch (err) {
       console.error('Upload asset failed:', err);
-      alert(state.language === 'zh' ? '图片读取失败，请重试' : 'Failed to read image, please try again');
+      toast.error(state.language === 'zh' ? '图片读取失败，请重试' : 'Failed to read image, please try again');
     }
   };
 

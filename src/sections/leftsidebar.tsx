@@ -11,6 +11,7 @@ import { X, Search } from 'lucide-react';
 import type { Material } from '@/data/materials';
 import { PandaSearchModal } from '@/components/pandasearchmodal';
 import { PandaSearchSaveModal } from '@/components/pandasearchsavemodal';
+import { showDialog } from '@/components/appdialog';
 import type { NetworkResult } from '@/lib/networkImage';
 
 function isElementActive(elements: MemeElement[], itemId: string): boolean {
@@ -131,23 +132,31 @@ export function LeftSidebar() {
 
   // 已不需要单独"存到草图本"逻辑 — saveDraft 写入的 draftSlot 就是 Collection 的数据源
 
-  const handleUseDraft = (slotId: string, slotName: string) => {
-    const confirmed = window.confirm(
-      lang === 'zh'
+  const handleUseDraft = async (slotId: string, slotName: string) => {
+    const res = await showDialog({
+      title: lang === 'zh' ? '使用草稿' : 'Use Draft',
+      message: lang === 'zh'
         ? `使用 ${slotName} 会覆盖当前画布内容，确定继续吗？`
-        : `Using ${slotName.replace('草稿', 'Draft ')} will overwrite the current canvas. Continue?`
-    );
-    if (!confirmed) return;
+        : `Using ${slotName.replace('草稿', 'Draft ')} will overwrite the current canvas. Continue?`,
+      variant: 'warning',
+      confirmText: lang === 'zh' ? '使用' : 'Use',
+      cancelText: lang === 'zh' ? '取消' : 'Cancel',
+    });
+    if (!res.confirmed) return;
     loadDraft(slotId);
   };
 
-  const handleDeleteDraft = (slotId: string, slotName: string) => {
-    const confirmed = window.confirm(
-      lang === 'zh'
+  const handleDeleteDraft = async (slotId: string, slotName: string) => {
+    const res = await showDialog({
+      title: lang === 'zh' ? '删除草稿' : 'Delete Draft',
+      message: lang === 'zh'
         ? `确定删除 ${slotName} 吗？删除后无法恢复。`
-        : `Delete ${slotName.replace('草稿', 'Draft ')}? This cannot be undone.`
-    );
-    if (!confirmed) return;
+        : `Delete ${slotName.replace('草稿', 'Draft ')}? This cannot be undone.`,
+      destructive: true,
+      confirmText: lang === 'zh' ? '删除' : 'Delete',
+      cancelText: lang === 'zh' ? '取消' : 'Cancel',
+    });
+    if (!res.confirmed) return;
     clearDraft(slotId);
   };
 

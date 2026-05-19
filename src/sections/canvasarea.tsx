@@ -7,6 +7,7 @@ import { Eraser, RotateCcw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchAsDataUrl } from '@/lib/networkImage';
 import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
+import { showDialog } from '@/components/appdialog';
 import { fmtShortcut, isMetaOrCtrl, isTypingTarget, matchShortcut } from '@/lib/keyboard';
 
 // blendMode 直接读 element.blendMode (创建时已根据 shell 透明/不透明 决定)
@@ -726,7 +727,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const handleDroppedImage = useCallback(async (file: File, clientX: number, clientY: number) => {
     const validationError = validateDroppedImage(file, state.language);
     if (validationError) {
-      alert(validationError);
+      toast.error(validationError);
       return;
     }
 
@@ -764,7 +765,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
       });
     } catch (error) {
       console.error('Drop image failed:', error);
-      alert(state.language === 'zh' ? '拖拽图片失败，请重试' : 'Failed to drop image, please try again');
+      toast.error(state.language === 'zh' ? '拖拽图片失败，请重试' : 'Failed to drop image, please try again');
     }
   }, [dispatch, generateId, getCanvasPoint, state.language]);
 
@@ -1097,9 +1098,15 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         if (last) dispatch({ type: 'SELECT_ELEMENT', id: last.id });
       } },
       { id: 'sep1', label: '', separator: true },
-      { id: 'clear', label: state.language === 'zh' ? '清空画布' : 'Clear Canvas', danger: true, disabled: state.elements.length === 0, onClick: () => {
-        const ok = typeof window === 'undefined' ? true : window.confirm(state.language === 'zh' ? '确定清空画布？' : 'Clear the canvas?');
-        if (ok) dispatch({ type: 'CLEAR_CANVAS' });
+      { id: 'clear', label: state.language === 'zh' ? '清空画布' : 'Clear Canvas', danger: true, disabled: state.elements.length === 0, onClick: async () => {
+        const res = await showDialog({
+          title: state.language === 'zh' ? '清空画布' : 'Clear Canvas',
+          message: state.language === 'zh' ? '确定清空画布？' : 'Clear the canvas?',
+          destructive: true,
+          confirmText: state.language === 'zh' ? '清空' : 'Clear',
+          cancelText: state.language === 'zh' ? '取消' : 'Cancel',
+        });
+        if (res.confirmed) dispatch({ type: 'CLEAR_CANVAS' });
       } },
     ];
   }, [dispatch, pasteFromClipboard, state.elements, state.language]);

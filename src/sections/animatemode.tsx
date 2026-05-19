@@ -35,6 +35,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/
 import { IS_MAC, fmtShortcut, isMetaOrCtrl, matchShortcut, isTypingTarget } from '@/lib/keyboard';
 import { ANIMATE_TEMPLATES, type AnimateTemplate } from '@/data/animateTemplates';
 import { useIsMobile } from '@/hooks/usemediaquery';
+import { showDialog } from '@/components/appdialog';
 import './animatemode.css';
 
 // ============================================================
@@ -94,8 +95,9 @@ type LaneCount = Record<TrackType, number>;
 // v23-l: 项目模式 — 视频 (有声 + 长时长 + MP4) / GIF (无声 + 短时长 + 直出 GIF + 社媒尺寸预设)
 export type ProjectMode = 'video' | 'gif';
 
-// GIF 社媒预设 (尺寸 + 时长). 微信表情 ≤500KB, X 内联 ≤15MB ≤30s, TG sticker ≤512KB 512×512.
-export type GifPresetId = 'wechat' | 'x' | 'tg' | 'custom';
+// v24: GIF 社媒预设 (尺寸 + 时长 + fps). 业界标准化 — 微信表情严格 ≤500KB ≤3s, TG ≤256KB,
+// 朋友圈 ≤2MB, X ≤15MB. 全局上限 15s (业界通用 GIF 最长). 老 ID 'wechat'/'x'/'tg'/'custom' 保留向后兼容.
+export type GifPresetId = 'wechat' | 'moments' | 'tg' | 'quick-share' | 'x' | 'custom';
 export interface GifPreset {
   id: GifPresetId;
   label: string;
@@ -107,12 +109,14 @@ export interface GifPreset {
   note: string;
 }
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat', label: '微信表情', width: 240, height: 240, fps: 15, defaultDuration: 4, maxDuration: 6, note: '240×240 · 15fps · ≤500KB' },
-  { id: 'x',      label: 'X (推特)',  width: 480, height: 480, fps: 18, defaultDuration: 6, maxDuration: 15, note: '480×480 · 18fps · ≤15MB' },
-  { id: 'tg',     label: 'TG 贴纸',   width: 480, height: 480, fps: 15, defaultDuration: 5, maxDuration: 10, note: '480×480 · 15fps · ≤512KB 推荐' },
-  { id: 'custom', label: '自定义',    width: 480, height: 360, fps: 15, defaultDuration: 6, maxDuration: 30, note: '480×360 · 15fps · 自由' },
+  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 12, defaultDuration: 2.5, maxDuration: 3,  note: '微信表情 · ≤500KB · 240×240 · 12fps · 严格' },
+  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 12, defaultDuration: 4,   maxDuration: 5,  note: '朋友圈微博 · ≤2MB · 400×400 · 12fps' },
+  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 3,  note: 'Telegram · ≤256KB · 512×512 · 24fps' },
+  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 15, defaultDuration: 4,   maxDuration: 6,  note: '通用 · ≤1MB · 360×360 · 15fps' },
+  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 18, defaultDuration: 6,   maxDuration: 12, note: 'X/Twitter · ≤15MB · 480×480 · 18fps' },
+  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 15, defaultDuration: 6,   maxDuration: 15, note: '自由 · 上限 15s · 480×360 · 15fps' },
 ];
-export const GIF_MAX_DURATION = 30; // s, 总上限
+export const GIF_MAX_DURATION = 15; // s, 总上限 (业界 GIF 通常 ≤15s, 微信/Telegram 表情 ≤3s, 见 GIF_PRESETS)
 export const GIF_MIN_DURATION = 1;
 
 interface ProjectState {
@@ -572,7 +576,14 @@ const HISTORY_MAX = 50;
 const AM_DRAFT_IDB_KEY = 'xiongmaotou.animate-drafts.v1';
 const AM_DRAFT_MAX = 10;
 // 当前 project 自动持久化 — 切走/刷新不丢操作
+// v24: 双缓存 — video / gif 各自一份 IDB 记录, 切 mode 不互相破坏.
+// AM_CURRENT_IDB_KEY 是 v23-l 之前的单 key, 仍读它做一次性迁移.
 const AM_CURRENT_IDB_KEY = 'xiongmaotou.animate-current.v1';
+const AM_VIDEO_CURRENT_IDB_KEY = 'xiongmaotou.animate-current.video.v1';
+const AM_GIF_CURRENT_IDB_KEY = 'xiongmaotou.animate-current.gif.v1';
+function getCurrentIdbKey(mode: ProjectMode | undefined): string {
+  return mode === 'gif' ? AM_GIF_CURRENT_IDB_KEY : AM_VIDEO_CURRENT_IDB_KEY;
+}
 const AM_UPLOADS_IDB_KEY = 'xiongmaotou.animate-uploads.v1';
 // v23-b: 大幅放宽 — IDB 单库容量浏览器普遍 >1GB, 不写服务器
 // 限制只是防 base64 dataURL 内存爆炸 (单图 30MB → dataURL ≈ 40MB string)
@@ -1179,7 +1190,8 @@ function hydrateProject(raw: unknown): { project: ProjectState; cleanedInvalidIm
       bgm: r.lanes?.bgm ?? 1,
     },
     mode: r.mode === 'gif' ? 'gif' : 'video',
-    gifPresetId: r.gifPresetId,
+    // v24: gif mode 时 gifPresetId 必须有 (ExportModal 等下游依赖). 老 project 没字段时兜底 'wechat'.
+    gifPresetId: r.mode === 'gif' ? (r.gifPresetId ?? 'wechat') : r.gifPresetId,
   };
   return { project, cleanedInvalidImages: before - cleanClips.length };
 }
@@ -2027,7 +2039,8 @@ export async function exportGIF(
 ): Promise<{ ext: string; size: number; width: number; height: number; fps: number; frameCount: number; durationSec: number }> {
   const preset = GIF_PRESETS.find(p => p.id === presetId) ?? GIF_PRESETS[0];
   const { width: W, height: H, fps } = preset;
-  const durationSec = Math.min(project.duration, GIF_MAX_DURATION);
+  // v24: cap 在三方 min (项目时长 / 全局上限 / preset.maxDuration). 防止微信 preset (≤3s) 但 project=5s 实际导出 5s 上传被拒.
+  const durationSec = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -2142,31 +2155,63 @@ export function AnimateMode() {
   useEffect(() => { if (mobileSheet === null && sheetTranslateY !== 0) setSheetTranslateY(0); }, [mobileSheet, sheetTranslateY]);
 
   // mount: 从 IDB 恢复上次的 project (静态站, 用户跨刷新/切走不丢工作)
+  // v24 双缓存策略:
+  //   优先读 video / gif 任一新双 key, 没数据时一次性从老单 key 迁移按 project.mode 拆分.
   // schema migrate:
   //   1. 旧 v9 project 没 fx lane → 补默认 1, 否则 totalLanes 算出 NaN
   //   2. ImageClip.src 是 blob: URL (v10 之前 ComboTab 用) → 失效 → 自动清理
   useEffect(() => {
     let cancelled = false;
-    idbGet<ProjectState>(AM_CURRENT_IDB_KEY).then(loaded => {
-      if (cancelled) return;
-      const hydrated = hydrateProject(loaded);
-      if (hydrated) {
-        setProject(hydrated.project);
-        if (hydrated.cleanedInvalidImages > 0) {
-          toast.warning(`检测到 ${hydrated.cleanedInvalidImages} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`);
+    (async () => {
+      try {
+        // 1) 优先读两个新 key — 取最近一次有效的
+        const [vRaw, gRaw] = await Promise.all([
+          idbGet<ProjectState>(AM_VIDEO_CURRENT_IDB_KEY).catch(() => undefined),
+          idbGet<ProjectState>(AM_GIF_CURRENT_IDB_KEY).catch(() => undefined),
+        ]);
+        // 默认起 video (即使 gif 缓存存在也优先 video, 因为新建/常用都在视频)
+        let pickRaw: ProjectState | undefined = vRaw;
+        if (!pickRaw && gRaw) pickRaw = gRaw;
+
+        // 2) 都没有 → 试老单 key 一次性迁移
+        if (!pickRaw) {
+          const oldRaw = await idbGet<ProjectState>(AM_CURRENT_IDB_KEY).catch(() => undefined);
+          if (oldRaw) {
+            const oldHydrated = hydrateProject(oldRaw);
+            if (oldHydrated) {
+              const splitMode: ProjectMode = oldHydrated.project.mode ?? 'video';
+              const targetKey = splitMode === 'gif' ? AM_GIF_CURRENT_IDB_KEY : AM_VIDEO_CURRENT_IDB_KEY;
+              await idbSet(targetKey, oldHydrated.project).catch(() => {});
+              await idbDel(AM_CURRENT_IDB_KEY).catch(() => {});
+              pickRaw = oldHydrated.project;
+            }
+          }
         }
+
+        if (cancelled) return;
+        if (pickRaw) {
+          const hydrated = hydrateProject(pickRaw);
+          if (hydrated) {
+            setProject(hydrated.project);
+            if (hydrated.cleanedInvalidImages > 0) {
+              toast.warning(`检测到 ${hydrated.cleanedInvalidImages} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`);
+            }
+          }
+        }
+      } finally {
+        if (!cancelled) setProjectHydrated(true);
       }
-      setProjectHydrated(true);
-    }).catch(() => setProjectHydrated(true));
+    })();
     return () => { cancelled = true; };
   }, []);
 
   // project 变 → debounced 写 IDB (hydrate 完了才开始, 防初次 default project 覆盖 IDB)
-  // 600ms → 250ms: 用户改完立即刷新, 旧值更小窗口 (但仍 debounce 防 auto-gen TTS 高频写)
+  // v24: 写当前 mode 对应的 IDB key — video 和 gif 各自独立持久化, 切 mode 互不破坏.
   useEffect(() => {
     if (!projectHydrated) return;
     const t = window.setTimeout(() => {
-      void idbSet(AM_CURRENT_IDB_KEY, project).catch(() => {});
+      const key = getCurrentIdbKey(project.mode);
+      void idbSet(key, project).catch(() => {});
     }, 250);
     return () => window.clearTimeout(t);
   }, [project, projectHydrated]);
@@ -2219,16 +2264,25 @@ export function AnimateMode() {
   const canUndo = historyRef.current.past.length > 0;
   const canRedo = historyRef.current.future.length > 0;
 
-  // 新建项目 — 清当前 project (用户能"另起一个")
+  // 新建项目 — 清当前 mode 的 project (另一个 mode 的缓存保留)
   const resetProject = useCallback(() => {
-    const fresh = makeBlankProject();
-    setProject(fresh);
+    setProject(prev => {
+      const fresh = makeBlankProject();
+      // 保留 mode + gifPresetId, 让用户在当前 mode 继续工作
+      fresh.mode = prev.mode ?? 'video';
+      if (fresh.mode === 'gif') {
+        fresh.gifPresetId = prev.gifPresetId ?? 'wechat';
+        fresh.duration = Math.min(fresh.duration, GIF_MAX_DURATION);
+      }
+      // 同步清空当前 mode 对应 IDB key
+      void idbDel(getCurrentIdbKey(fresh.mode)).catch(() => {});
+      return fresh;
+    });
     setPlayhead(0);
     setSelectedId(null);
     historyRef.current = { past: [], future: [] };
     setHistoryTick(t => t + 1);
     audioEngine.destroyAll();
-    void idbDel(AM_CURRENT_IDB_KEY).catch(() => {});
     toast.success('已新建空白项目');
   }, []);
 
@@ -2275,7 +2329,13 @@ export function AnimateMode() {
           toast.error('不是有效 .amjson 文件');
           return;
         }
-        if (!window.confirm(`导入会替换当前工作 · 当前 ${project.clips.length} 片段会清空 (已存草稿不影响). 确认?`)) return;
+        const importRes = await showDialog({
+          title: '导入项目',
+          message: `导入会替换当前工作 · 当前 ${project.clips.length} 个片段会清空 (已存草稿不影响). 继续?`,
+          variant: 'warning',
+          confirmText: '导入',
+        });
+        if (!importRes.confirmed) return;
         setProject(hydrated.project);
         setPlayhead(0);
         setSelectedId(null);
@@ -3043,8 +3103,8 @@ export function AnimateMode() {
       commit(() => newProject);
       // 清旧 audio players Map (避免 stale clipId 的 player 残留 + 内存 leak)
       audioEngine.destroyAll();
-      // 立即写 IDB — 不等 debounce, 防"用户立即刷新"丢数据
-      void idbSet(AM_CURRENT_IDB_KEY, newProject).catch(() => {});
+      // 立即写 IDB — 不等 debounce, 防"用户立即刷新"丢数据 (v24: 按当前 mode 写对应 key)
+      void idbSet(getCurrentIdbKey(newProject.mode), newProject).catch(() => {});
       setSelectedId(null);
       setPlayhead(0);
       toast.dismiss(tid);
@@ -3283,8 +3343,8 @@ export function AnimateMode() {
     }
     audioEngine.destroyAll(); // upgrade cancelAll → destroyAll, 释放旧 clipId 的 player Map
     commit(() => hydrated.project);
-    // 立即写 IDB — 防"载入草稿后立即刷新"丢
-    void idbSet(AM_CURRENT_IDB_KEY, hydrated.project).catch(() => {});
+    // 立即写 IDB — 防"载入草稿后立即刷新"丢 (v24: 按草稿 mode 写对应 key)
+    void idbSet(getCurrentIdbKey(hydrated.project.mode), hydrated.project).catch(() => {});
     setSelectedId(null);
     setPlayhead(0);
     toast.success(`已读入 ${slot.name}${hydrated.cleanedInvalidImages > 0 ? ` · 自动清理 ${hydrated.cleanedInvalidImages} 失效图` : ''}`);
@@ -3407,9 +3467,15 @@ export function AnimateMode() {
     setSelectedId(project.clips[0].id);
     toast(`本编辑器单选, 删全部请 Ctrl+A → Delete (将循环删 ${project.clips.length} 个)`);
   }, [project.clips]);
-  const deleteAllClips = useCallback(() => {
+  const deleteAllClips = useCallback(async () => {
     if (project.clips.length === 0) return;
-    if (!window.confirm(`确认删除全部 ${project.clips.length} 个片段?`)) return;
+    const res = await showDialog({
+      title: '删除全部片段',
+      message: `确认删除全部 ${project.clips.length} 个片段?`,
+      destructive: true,
+      confirmText: '删除全部',
+    });
+    if (!res.confirmed) return;
     commit(p => ({ ...p, clips: [] }));
     setSelectedId(null);
   }, [commit, project.clips.length]);
@@ -3655,51 +3721,116 @@ export function AnimateMode() {
         onExportJSON={exportProjectJSON}
         onImportJSON={importProjectJSON}
         mode={project.mode ?? 'video'}
-        onModeChange={(m) => {
-          // FIX: confirm + audio side-effect 必须在 commit() 外. React 18 StrictMode dev 下
-          // setState updater 跑 2 次, 把 window.confirm() 放 updater 内会弹 2 次 dialog → user 觉得"点啥都没用".
-          // 跟 importProjectJSON 同模式: side-effect 先, commit 纯 reducer 后.
-          if (m === 'gif') {
-            const hasAudioClips = project.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
-            const overTimeClips = project.clips.filter(c => c.start >= GIF_MAX_DURATION);
-            if (hasAudioClips || overTimeClips.length > 0) {
-              const msgParts = [
-                hasAudioClips && 'GIF 无声音 → 配音 + 背景音乐 clip 会被移除',
-                overTimeClips.length > 0 && `${overTimeClips.length} 个 ${GIF_MAX_DURATION}s 后片段会被裁掉`,
-              ].filter(Boolean) as string[];
-              const ok = typeof window === 'undefined' ? true : window.confirm(`${msgParts.join(' · ')}. 继续?`);
-              if (!ok) return;
+        onModeChange={async (m) => {
+          // v24 双缓存切 mode 流程:
+          //   1) 先保存当前 state 到当前 mode 对应的 IDB key (避免 debounce 漏)
+          //   2) 读取目标 mode 缓存
+          //   3) AppDialog 弹"复制时间轴"checkbox (video→gif 默认勾, gif→video 默认不勾)
+          //   4) 勾选: 复制当前 state 到目标 mode (v→g 自动裁/删 TTS/BGM)
+          //      不勾: 用目标 mode 已有缓存; 若无 → 新建空白
+          //   5) commit + idbSet 目标 key + (仅切 gif 时) 清 audio player
+          if (m === (project.mode ?? 'video')) return;
+          const currentMode: ProjectMode = project.mode ?? 'video';
+          const isV2G = currentMode === 'video' && m === 'gif';
+
+          // 1) 保存当前 state 到当前 mode 对应 key
+          await idbSet(getCurrentIdbKey(currentMode), project).catch(() => {});
+
+          // 2) 读取目标 mode 缓存
+          const targetRaw = await idbGet<ProjectState>(getCurrentIdbKey(m)).catch(() => undefined);
+          const targetHydrated = targetRaw ? hydrateProject(targetRaw) : null;
+          const hasTargetCache = !!targetHydrated && targetHydrated.project.clips.length > 0;
+
+          // 3) summary
+          const tts = project.clips.filter(c => c.trackId === 'tts').length;
+          const bgm = project.clips.filter(c => c.trackId === 'bgm').length;
+          const imgs = project.clips.filter(c => c.trackId === 'image').length;
+          const captions = project.clips.filter(c => c.trackId === 'caption').length;
+          const summaryLines: string[] = [];
+          if (imgs > 0 || captions > 0) summaryLines.push(`${imgs} 张图片 · ${captions} 条字幕`);
+          if (tts > 0 || bgm > 0) summaryLines.push(`${tts} 个配音 + ${bgm} 个 BGM`);
+
+          const checkboxKey = 'copyTimeline';
+          const checkboxLabel = isV2G
+            ? `复制视频时间轴到 GIF (自动裁 ${GIF_MAX_DURATION}s 后片段并移除配音/BGM)`
+            : '复制 GIF 时间轴到视频';
+          const targetLabel = m === 'gif' ? `GIF (≤${GIF_MAX_DURATION}s, 无声音)` : '视频';
+
+          const res = await showDialog({
+            title: `切换到 ${m === 'gif' ? 'GIF' : '视频'} 模式`,
+            message: (
+              <>
+                <p>当前 <strong>{currentMode === 'gif' ? 'GIF' : '视频'}</strong> 工作区:</p>
+                <ul>
+                  {summaryLines.length > 0
+                    ? summaryLines.map((l, i) => <li key={i}>{l}</li>)
+                    : <li>(空)</li>}
+                </ul>
+                {hasTargetCache ? (
+                  <p>💡 目标 <strong>{targetLabel}</strong> 已有 {targetHydrated!.project.clips.length} 个片段, 切回会保留它.</p>
+                ) : (
+                  <p>目标 <strong>{targetLabel}</strong> 工作区为空.</p>
+                )}
+              </>
+            ),
+            confirmText: '切换',
+            checkboxes: [{
+              key: checkboxKey,
+              label: checkboxLabel,
+              defaultChecked: isV2G,
+              description: isV2G
+                ? '勾选: 复制当前视频时间轴到 GIF 工作区 (会裁剪) · 不勾: 用 GIF 已有缓存或空白'
+                : '勾选: 复制当前 GIF 时间轴到视频工作区 · 不勾: 用视频已有缓存或空白',
+            }],
+          });
+
+          if (!res.confirmed) return;
+          const shouldCopy = !!res.checkboxes[checkboxKey];
+
+          // 4) commit functional updater — 读 fresh prev 而非 closure project
+          //    (修 H2: showDialog open 期间, TTS auto-gen 可能写 setProjectLive 更新 project state;
+          //     如果用 closure project 构造 nextProject 会丢这些中间改动 — 用 prev 让最新 state 入合并)
+          let committedProject: ProjectState = project; // 闭包外暴露给后续 idbSet
+          commit((prev) => {
+            let next: ProjectState;
+            if (shouldCopy) {
+              if (m === 'gif') {
+                // video → gif: 裁 ≥GIF_MAX_DURATION + 删 TTS/BGM + 清 orphan linkedTTSId
+                const ttsIds = new Set(prev.clips.filter(c => c.trackId === 'tts').map(c => c.id));
+                next = {
+                  ...prev,
+                  mode: 'gif',
+                  duration: Math.min(prev.duration, GIF_MAX_DURATION),
+                  gifPresetId: prev.gifPresetId ?? 'wechat',
+                  clips: prev.clips
+                    .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
+                    .filter(c => c.start < GIF_MAX_DURATION)
+                    .map(c => {
+                      if (c.trackId === 'caption' && (c as CaptionClip).linkedTTSId && ttsIds.has((c as CaptionClip).linkedTTSId!)) {
+                        const cleaned = { ...c } as CaptionClip;
+                        delete cleaned.linkedTTSId;
+                        return cleaned as Clip;
+                      }
+                      return c;
+                    }),
+                };
+              } else {
+                // gif → video: 直接 copy + mode 切到 video
+                next = { ...prev, mode: 'video' };
+              }
+            } else if (targetHydrated) {
+              next = targetHydrated.project;
+            } else {
+              next = m === 'gif'
+                ? { duration: 6, mode: 'gif', gifPresetId: 'wechat', lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 }, clips: [] }
+                : { duration: 12, mode: 'video', lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 }, clips: [] };
             }
-          }
-          // commit 纯 reducer — 在 StrictMode 下被双调也只是冗余计算, 无副作用
-          commit(p => {
-            const next: ProjectState = { ...p, mode: m };
-            if (m === 'gif') {
-              next.duration = Math.min(p.duration, GIF_MAX_DURATION);
-              if (!next.gifPresetId) next.gifPresetId = 'wechat';
-              const ttsIdsToRemove = new Set(
-                p.clips.filter(c => c.trackId === 'tts').map(c => c.id)
-              );
-              next.clips = p.clips
-                .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
-                .filter(c => c.start < GIF_MAX_DURATION)
-                .map(c => {
-                  // 清 caption.linkedTTSId orphan (指向已删 TTS)
-                  if (
-                    c.trackId === 'caption' &&
-                    (c as CaptionClip).linkedTTSId &&
-                    ttsIdsToRemove.has((c as CaptionClip).linkedTTSId!)
-                  ) {
-                    const cleaned = { ...c } as CaptionClip;
-                    delete cleaned.linkedTTSId;
-                    return cleaned as Clip;
-                  }
-                  return c;
-                });
-            }
+            committedProject = next;
             return next;
           });
-          // 释放 audioEngine 内部 player Map (audit-recent MED-2d) — side effect 在 commit 后, setState 外
+
+          // 5) 立即 IDB write + audio cleanup (仅 gif 时)
+          await idbSet(getCurrentIdbKey(m), committedProject).catch(() => {});
           if (m === 'gif') {
             audioEngine.destroyAllTTSPlayers();
             audioEngine.destroyAllUserBGMPlayers();
@@ -4132,13 +4263,33 @@ function AnimateToolbar({
       <div className="am-tb-sep" />
       <button
         className="am-tb-btn"
-        onClick={() => { if (window.confirm('新建空白项目? 当前工作会清空 (草稿已存的不影响)')) onReset(); }}
+        onClick={async () => {
+          const res = await showDialog({
+            title: '新建空白项目',
+            message: '新建会清空当前工作 (草稿已存的不影响). 继续?',
+            variant: 'warning',
+            confirmText: '新建',
+          });
+          if (res.confirmed) onReset();
+        }}
         title="新建空白项目 (会清空当前)"
         data-mobile-hide
       ><Plus size={13} /> <span>新建</span></button>
       <button className="am-tb-btn" onClick={onRandomize} title="随机生成"><Shuffle size={13} /> <span>随机</span></button>
       <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)" data-mobile-hide><Trash2 size={13} /> <span>清空</span></button>
-      <button className="am-tb-btn" onClick={() => { if (window.confirm('整理: 把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.')) onFlatten(); }} title="把多轨压回主轨 (剪映主轨模式)" data-mobile-hide>
+      <button
+        className="am-tb-btn"
+        onClick={async () => {
+          const res = await showDialog({
+            title: '整理时间轴',
+            message: '把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.',
+            confirmText: '整理',
+          });
+          if (res.confirmed) onFlatten();
+        }}
+        title="把多轨压回主轨 (剪映主轨模式)"
+        data-mobile-hide
+      >
         ⤓ <span>整理</span>
       </button>
       <div className="am-tb-sep" />
@@ -4362,8 +4513,14 @@ function LeftPane({
     else if (rejected > 0) toast.error('全部上传失败');
   };
   const handleDeleteUpload = (id: string) => setUploads(prev => prev.filter(m => m.id !== id));
-  const handleClearUploads = () => {
-    if (window.confirm(`清空全部 ${uploads.length} 张上传素材?`)) {
+  const handleClearUploads = async () => {
+    const res = await showDialog({
+      title: '清空上传素材',
+      message: `清空全部 ${uploads.length} 张上传素材?`,
+      destructive: true,
+      confirmText: '清空',
+    });
+    if (res.confirmed) {
       setUploads([]);
       toast.success('已清空');
     }
@@ -7645,7 +7802,15 @@ function DraftPopover({
                         <button
                           className="am-draft-icon-btn am-draft-icon-btn-danger"
                           type="button"
-                          onClick={() => { if (window.confirm(`删除 "${d.name}"?`)) onDelete(d.id); }}
+                          onClick={async () => {
+                            const res = await showDialog({
+                              title: '删除草稿',
+                              message: `删除 "${d.name}"?`,
+                              destructive: true,
+                              confirmText: '删除',
+                            });
+                            if (res.confirmed) onDelete(d.id);
+                          }}
                           title="删除"
                         >
                           <Trash2 size={12} strokeWidth={2} />
@@ -7971,7 +8136,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
             <>
               <div className="am-export-status">
                 <strong>导出 GIF 动图</strong>
-                <span className="am-export-sub">{gifPreset.width}×{gifPreset.height} · {gifPreset.fps}fps · 时长 {Math.min(project.duration, GIF_MAX_DURATION).toFixed(1)}s · 预估 ~{gifEstSize}KB</span>
+                <span className="am-export-sub">{gifPreset.width}×{gifPreset.height} · {gifPreset.fps}fps · 时长 {Math.min(project.duration, GIF_MAX_DURATION, gifPreset.maxDuration).toFixed(1)}s · 预估 ~{gifEstSize}KB</span>
               </div>
               <div className="am-export-format-row">
                 <div className="am-field-sublabel" style={{ marginBottom: 4 }}>社媒预设 (尺寸 + 帧率)</div>
@@ -8215,9 +8380,14 @@ function Timeline({
   const [resizeTip, setResizeTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const [snapLine, setSnapLine] = useState<number | null>(null);
 
+  // v24: GIF 模式隐藏 TTS/BGM 轨道 (GIF 无声音)
+  const isGifMode = project.mode === 'gif';
   const totalWidth = project.duration * pxPerSec;
   // 防御 NaN: 旧 IDB project 缺 fx lane 字段时, undefined 累加 = NaN
-  const totalLanes = TRACK_ORDER.reduce((sum, type) => sum + (project.lanes[type] ?? 0), 0);
+  const totalLanes = TRACK_ORDER.reduce((sum, type) => {
+    if (isGifMode && (type === 'tts' || type === 'bgm')) return sum;
+    return sum + (project.lanes[type] ?? 0);
+  }, 0);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (labelsRef.current) labelsRef.current.scrollTop = e.currentTarget.scrollTop;
   };
@@ -8242,7 +8412,7 @@ function Timeline({
     window.addEventListener('pointerup', onUp);
   };
   const startPlayheadDrag = (e: React.PointerEvent) => { e.preventDefault(); e.stopPropagation(); startScrub(e); };
-  // 拖 ruler 右端调 project.duration — 上限 60s, 下限 max(clip.end, 1s)
+  // 拖 ruler 右端调 project.duration — video 上限 60s, gif 上限 GIF_MAX_DURATION (15s), 下限 max(clip.end, 1s)
   const startDurationDrag = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -8250,9 +8420,10 @@ function Timeline({
     const startX = e.clientX;
     const startDur = project.duration;
     const minDur = Math.max(1, ...project.clips.map(c => c.end));
+    const maxDur = isGifMode ? GIF_MAX_DURATION : 60;
     const onMove = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSec;
-      const next = Math.max(minDur, Math.min(60, startDur + delta));
+      const next = Math.max(minDur, Math.min(maxDur, startDur + delta));
       // round to 0.5s
       onSetDuration(Math.round(next * 2) / 2);
     };
@@ -8508,9 +8679,13 @@ function Timeline({
   };
   const flatLanes = useMemo(() => {
     const arr: { type: TrackType; lane: number }[] = [];
-    for (const type of customTrackOrder) for (let i = 0; i < project.lanes[type]; i++) arr.push({ type, lane: i });
+    for (const type of customTrackOrder) {
+      // v24: GIF 模式隐藏 TTS/BGM 轨道
+      if (isGifMode && (type === 'tts' || type === 'bgm')) continue;
+      for (let i = 0; i < project.lanes[type]; i++) arr.push({ type, lane: i });
+    }
     return arr;
-  }, [project.lanes, customTrackOrder]);
+  }, [project.lanes, customTrackOrder, isGifMode]);
   const timelineBodyHeight = totalLanes * LANE_ROW_H;
 
   return (
@@ -8572,7 +8747,7 @@ function Timeline({
                 className="am-tl-duration-handle"
                 style={{ left: project.duration * pxPerSec }}
                 onPointerDown={startDurationDrag}
-                title={`拖动改总时长 (当前 ${project.duration.toFixed(1)}s · 上限 60s)`}
+                title={`拖动改总时长 (当前 ${project.duration.toFixed(1)}s · 上限 ${isGifMode ? GIF_MAX_DURATION : 60}s)`}
               >
                 <span className="am-tl-duration-handle-bar" />
                 <span className="am-tl-duration-handle-lbl">{project.duration.toFixed(1)}s</span>
@@ -8694,7 +8869,13 @@ function TemplatesModal({
     if (!name.trim()) { toast.error('填模板名'); return; }
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `tpl-${Date.now()}`;
     if (templates.some(t => t.id === id)) {
-      if (!window.confirm(`模板 id "${id}" 已存在, 覆盖?`)) return;
+      const overwriteRes = await showDialog({
+        title: '模板已存在',
+        message: `模板 id "${id}" 已存在, 覆盖?`,
+        variant: 'warning',
+        confirmText: '覆盖',
+      });
+      if (!overwriteRes.confirmed) return;
     }
     setSaving(true);
     const next: AnimateTemplate[] = [
@@ -8719,7 +8900,13 @@ function TemplatesModal({
     } finally { setSaving(false); }
   };
   const remove = async (id: string) => {
-    if (!window.confirm(`删除模板 "${id}"?`)) return;
+    const removeRes = await showDialog({
+      title: '删除模板',
+      message: `删除模板 "${id}"?`,
+      destructive: true,
+      confirmText: '删除',
+    });
+    if (!removeRes.confirmed) return;
     const next = templates.filter(t => t.id !== id);
     if (next.length === 0) { toast.error('至少留 1 个模板 (防误删)'); return; }
     try {
