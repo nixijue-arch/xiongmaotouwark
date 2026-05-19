@@ -90,7 +90,37 @@ interface FXClip extends BaseClip {
 }
 type Clip = ImageClip | CaptionClip | TTSClip | BGMClip | FXClip;
 type LaneCount = Record<TrackType, number>;
-interface ProjectState { clips: Clip[]; lanes: LaneCount; duration: number; }
+// v23-l: 项目模式 — 视频 (有声 + 长时长 + MP4) / GIF (无声 + 短时长 + 直出 GIF + 社媒尺寸预设)
+export type ProjectMode = 'video' | 'gif';
+
+// GIF 社媒预设 (尺寸 + 时长). 微信表情 ≤500KB, X 内联 ≤15MB ≤30s, TG sticker ≤512KB 512×512.
+export type GifPresetId = 'wechat' | 'x' | 'tg' | 'custom';
+export interface GifPreset {
+  id: GifPresetId;
+  label: string;
+  width: number;
+  height: number;
+  fps: number;
+  defaultDuration: number; // s
+  maxDuration: number;
+  note: string;
+}
+export const GIF_PRESETS: GifPreset[] = [
+  { id: 'wechat', label: '微信表情', width: 240, height: 240, fps: 15, defaultDuration: 4, maxDuration: 6, note: '240×240 · 15fps · ≤500KB' },
+  { id: 'x',      label: 'X (推特)',  width: 480, height: 480, fps: 18, defaultDuration: 6, maxDuration: 15, note: '480×480 · 18fps · ≤15MB' },
+  { id: 'tg',     label: 'TG 贴纸',   width: 480, height: 480, fps: 15, defaultDuration: 5, maxDuration: 10, note: '480×480 · 15fps · ≤512KB 推荐' },
+  { id: 'custom', label: '自定义',    width: 480, height: 360, fps: 15, defaultDuration: 6, maxDuration: 30, note: '480×360 · 15fps · 自由' },
+];
+export const GIF_MAX_DURATION = 30; // s, 总上限
+export const GIF_MIN_DURATION = 1;
+
+interface ProjectState {
+  clips: Clip[];
+  lanes: LaneCount;
+  duration: number;
+  mode?: ProjectMode;       // 'video' (默认) / 'gif'. optional 兼容旧 project
+  gifPresetId?: GifPresetId; // 仅 gif 模式有效
+}
 interface DragPayload {
   type: TrackType;
   src?: string; label?: string;
@@ -1131,6 +1161,7 @@ function makeInitialProject(): ProjectState {
   const dur = 12;
   return {
     duration: dur,
+    mode: 'video',
     lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
     clips: [
       { id: 'c1', trackId: 'image', lane: 0, start: 0,  end: 3,  src: pickPanda(7).src,  label: pickPanda(7).labelCn,  fx: 'none', transform: { ...DEFAULT_TRANSFORM } },
@@ -1387,6 +1418,118 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// ============ GIF 真动画支持 (v23-l) ============
+// 用 gifuct-js decode .gif → 多帧 canvas, render 时按 (t-clipStart) % gifDur 算当前帧.
+// PreviewPane / PreviewModal 用 <img src> DOM 渲染 GIF 自带动画, 不需要 decoder.
+// 仅 export pipeline (canvas-based drawImage) 需要 — 否则只画首帧.
+
+export interface GifFrames {
+  type: 'gif';
+  width: number;
+  height: number;
+  frames: { canvas: HTMLCanvasElement; delayMs: number }[];
+  totalDurMs: number;
+}
+
+export type MediaAsset = HTMLImageElement | GifFrames;
+
+export function isGifFrames(m: MediaAsset | undefined | null): m is GifFrames {
+  return !!m && (m as GifFrames).type === 'gif';
+}
+
+export function isGifSrc(src: string): boolean {
+  if (!src) return false;
+  if (src.startsWith('data:image/gif')) return true;
+  const lower = src.toLowerCase();
+  return lower.endsWith('.gif') || lower.includes('.gif?');
+}
+
+async function loadGifFrames(src: string): Promise<GifFrames> {
+  const { parseGIF, decompressFrames } = await import('gifuct-js');
+  const resp = await fetch(src);
+  if (!resp.ok) throw new Error(`gif fetch failed: ${resp.status}`);
+  const buf = await resp.arrayBuffer();
+  const parsed = parseGIF(buf);
+  const decoded = decompressFrames(parsed, true);
+  if (decoded.length === 0) throw new Error('gif empty');
+
+  const W = parsed.lsd.width;
+  const H = parsed.lsd.height;
+  const composed: { canvas: HTMLCanvasElement; delayMs: number }[] = [];
+
+  // gifuct-js 帧数据是 patch (局部更新), 需按 disposalType 累积合成完整帧.
+  // disposal: 0/1=保留前帧, 2=clear to bg, 3=restore prev (罕见, 简化 = 视为 1)
+  const prev = document.createElement('canvas');
+  prev.width = W; prev.height = H;
+  const prevCtx = prev.getContext('2d');
+  if (!prevCtx) throw new Error('canvas 2d unavailable');
+
+  for (const f of decoded) {
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d unavailable');
+    ctx.drawImage(prev, 0, 0);
+
+    // f.patch 是 RGBA Uint8ClampedArray, dims 是局部 bbox
+    const patchData = new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height);
+    const tmp = document.createElement('canvas');
+    tmp.width = f.dims.width; tmp.height = f.dims.height;
+    const tmpCtx = tmp.getContext('2d');
+    if (!tmpCtx) throw new Error('canvas 2d unavailable');
+    tmpCtx.putImageData(patchData, 0, 0);
+    ctx.drawImage(tmp, f.dims.left, f.dims.top);
+
+    composed.push({ canvas, delayMs: Math.max(20, f.delay || 100) });
+
+    // 更新 prev
+    if (f.disposalType === 2) {
+      prevCtx.clearRect(0, 0, W, H);
+    } else {
+      prevCtx.clearRect(0, 0, W, H);
+      prevCtx.drawImage(canvas, 0, 0);
+    }
+  }
+
+  const totalDurMs = composed.reduce((s, f) => s + f.delayMs, 0);
+  return { type: 'gif', width: W, height: H, frames: composed, totalDurMs };
+}
+
+async function loadMedia(src: string): Promise<MediaAsset> {
+  if (isGifSrc(src)) {
+    try {
+      return await loadGifFrames(src);
+    } catch (e) {
+      // gif decode 失败 fallback 走 <img> 加载 (至少首帧能显)
+      // eslint-disable-next-line no-console
+      console.warn('[gif] decode failed, fallback to <img>:', e);
+      return await loadImage(src);
+    }
+  }
+  return await loadImage(src);
+}
+
+export function gifFrameAt(g: GifFrames, t: number, clipStart: number): HTMLCanvasElement {
+  if (g.frames.length === 1 || g.totalDurMs <= 0) return g.frames[0].canvas;
+  const localMs = (((t - clipStart) * 1000) % g.totalDurMs + g.totalDurMs) % g.totalDurMs;
+  let acc = 0;
+  for (const f of g.frames) {
+    acc += f.delayMs;
+    if (localMs < acc) return f.canvas;
+  }
+  return g.frames[g.frames.length - 1].canvas;
+}
+
+export function mediaWH(m: MediaAsset): { w: number; h: number } {
+  if (isGifFrames(m)) return { w: m.width, h: m.height };
+  return { w: m.naturalWidth || m.width, h: m.naturalHeight || m.height };
+}
+
+export function drawableAt(m: MediaAsset, t: number, clipStart: number): CanvasImageSource {
+  if (isGifFrames(m)) return gifFrameAt(m, t, clipStart);
+  return m;
+}
+
 // 决定某 image clip 在时间 t 实际应用的 fx 名:
 // FX track 优先 — 找 active 的 FXClip, 若 targetClipId 匹配 / 为空 (全局) 都生效, 否则用 image.fx
 function effectiveFxFor(clip: ImageClip, t: number, allClips: Clip[]): { fx: ImageFx; fxStart: number; fxDur: number; fxClip: FXClip | null } {
@@ -1501,7 +1644,7 @@ function renderExportFrame(
   project: ProjectState,
   W: number,
   H: number,
-  imgCache: Map<string, HTMLImageElement>,
+  imgCache: Map<string, MediaAsset>,
 ) {
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, W, H);
@@ -1512,23 +1655,24 @@ function renderExportFrame(
 
   for (let idx = 0; idx < active.length; idx++) {
     const c = active[idx];
-    const img = imgCache.get(c.src);
-    if (!img) continue;
+    const media = imgCache.get(c.src);
+    if (!media) continue;
+    const { w: naturalW, h: naturalH } = mediaWH(media);
     const eff = effectiveFxFor(c, t, project.clips);
     const tr = computeLiveTransform(c, t, eff);
     const isScene = c.kind === 'scene';
     let iw: number, ih: number;
     if (isScene) {
-      const coverR = Math.max(W / img.width, H / img.height);
-      iw = img.width * coverR * tr.scale;
-      ih = img.height * coverR * tr.scale;
+      const coverR = Math.max(W / naturalW, H / naturalH);
+      iw = naturalW * coverR * tr.scale;
+      ih = naturalH * coverR * tr.scale;
     } else {
       // 删"副图自动缩"baseScale 机制 — 永远 1.0. 多 image 叠加时用户自己 transform.scale 调
       const baseSize = Math.min(W, H) * 0.6;
-      const r = baseSize / img.width;
+      const r = baseSize / naturalW;
       const maxRenderH = H * 0.85;
-      iw = img.width * r * tr.scale;
-      ih = img.height * r * tr.scale;
+      iw = naturalW * r * tr.scale;
+      ih = naturalH * r * tr.scale;
       if (ih > maxRenderH) {
         const shrink = maxRenderH / ih;
         iw *= shrink;
@@ -1548,7 +1692,8 @@ function renderExportFrame(
     ctx.translate(cx + fxA.offsetX, cy + fxA.offsetY);
     ctx.rotate((tr.rotation + fxA.rotateAdd) * Math.PI / 180);
     ctx.scale(tr.flipX ? -1 : 1, 1);
-    ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);
+    // GIF: 按 (t-clipStart) % gifDur 取当前帧; 静图: HTMLImageElement 自身
+    ctx.drawImage(drawableAt(media, t, c.start), -iw / 2, -ih / 2, iw, ih);
     ctx.restore();
   }
 
@@ -1713,11 +1858,11 @@ async function exportVideo(
   const ctx: CanvasRenderingContext2D = ctxRaw;
 
   const { mime, ext } = pickBestMime(preferMp4);
-  // 先把所有 image 资源预加载
+  // 先把所有 image 资源预加载 (GIF 走 decoder 拿多帧, 静图走 <img>)
   const allSrcs = Array.from(new Set(project.clips.filter(c => c.trackId === 'image').map(c => (c as ImageClip).src)));
-  const imgCache = new Map<string, HTMLImageElement>();
+  const imgCache = new Map<string, MediaAsset>();
   await Promise.all(allSrcs.map(async src => {
-    try { imgCache.set(src, await loadImage(src)); } catch {}
+    try { imgCache.set(src, await loadMedia(src)); } catch {}
   }));
 
   // 第 0 帧先画
@@ -1840,6 +1985,89 @@ async function exportVideo(
   // eslint-disable-next-line no-console
   console.log('[export] done · blob size:', (blob.size / 1024 / 1024).toFixed(2), 'MB · mime:', mime);
   return { ext, size: blob.size, hasAudio, mime, resolution, fps };
+}
+
+// ============ exportGIF — GIF 模式直出 GIF (gif.js worker) ============
+// 不录音 / 不走 MediaRecorder / 帧帧 addFrame → gif.render → blob
+// 用 GIF_PRESETS 决定 width/height/fps. 时长跟 project.duration.
+// PreviewPane DOM-based 渲染 GIF 自带动画, 这里 export 走 canvas 也支持多帧 (drawableAt).
+export async function exportGIF(
+  project: ProjectState,
+  name: string,
+  onProgress: (p: number) => void,
+  presetId: GifPresetId = 'wechat',
+): Promise<{ ext: string; size: number; width: number; height: number; fps: number; frameCount: number; durationSec: number }> {
+  const preset = GIF_PRESETS.find(p => p.id === presetId) ?? GIF_PRESETS[0];
+  const { width: W, height: H, fps } = preset;
+  const durationSec = Math.min(project.duration, GIF_MAX_DURATION);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('canvas 2d 不可用');
+
+  // 预加载所有 image (含 GIF decoder)
+  const allSrcs = Array.from(new Set(project.clips.filter(c => c.trackId === 'image').map(c => (c as ImageClip).src)));
+  const imgCache = new Map<string, MediaAsset>();
+  await Promise.all(allSrcs.map(async src => {
+    try { imgCache.set(src, await loadMedia(src)); } catch {}
+  }));
+
+  // 动态 import gif.js + worker (减 prod bundle, 用户没点 GIF 导出就不加载)
+  const [{ default: GIF }, workerUrlMod] = await Promise.all([
+    import('gif.js'),
+    // gif.js 的 worker. Vite ?url import 拿到资源 URL, 不进 main bundle
+    import('gif.js/dist/gif.worker.js?url'),
+  ]);
+  const workerScript = (workerUrlMod as { default: string }).default;
+
+  // GIF quality 1=highest, 30=lowest. 10 是常用甜点 (微信表情包 ≤500KB 可达)
+  // workers 2 个: 主线程 + worker 并行 quantize
+  const gif = new GIF({
+    workers: 2,
+    quality: 10,
+    width: W,
+    height: H,
+    workerScript,
+    background: '#000000',
+    repeat: 0,  // 0 = infinite loop
+  });
+
+  const frameCount = Math.max(1, Math.round(durationSec * fps));
+  const delayMs = Math.round(1000 / fps);
+
+  // 同步逐帧渲染 + addFrame (gif.js encode 后续 async)
+  for (let i = 0; i < frameCount; i++) {
+    const t = (i / fps);
+    renderExportFrame(ctx, t, project, W, H, imgCache);
+    gif.addFrame(canvas, { copy: true, delay: delayMs });
+    // 进度: render 阶段占 50% (encode 阶段占 50%, gif.on('progress'))
+    if (i % 4 === 0) onProgress(0.5 * (i / frameCount));
+    // 让出主线程 (防 UI 卡死)
+    if (i % 8 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    gif.on('finished', (b: Blob) => resolve(b));
+    gif.on('progress', (p: number) => {
+      onProgress(0.5 + 0.5 * p);
+    });
+    gif.on('abort', () => reject(new Error('GIF encode aborted')));
+    gif.render();
+  });
+
+  // 触发下载
+  const safe = (name || '我的GIF').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}.gif`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return { ext: 'gif', size: blob.size, width: W, height: H, fps, frameCount, durationSec };
 }
 
 // ============================================================
@@ -2873,31 +3101,49 @@ export function AnimateMode() {
     setSelectedId(id);
   }, [commit, playhead, project, selectedId]);
 
-  // 把草图拆成 image clip (panda+face only) + caption clip (text)
+  // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
+  // 5 命名空间打通: 内置 panda/face + upload-panda/face + custom-face + network-panda/face + custom-panda (整图)
   const addDraftAsClips = useCallback(async (slot: DraftSlot) => {
     const elements = slot.state?.elements ?? [];
-    const pandaEl = elements.find((e): e is ImageElement =>
-      e.type === 'image' && (ALL_PANDAS.some(p => p.id === (e as ImageElement).name) || (e as ImageElement).name?.startsWith('upload-panda-')));
-    const faceEl = elements.find((e): e is ImageElement =>
-      e.type === 'image' && (ALL_FACES.some(f => f.id === (e as ImageElement).name) || (e as ImageElement).name?.startsWith('upload-face-') || (e as ImageElement).name?.startsWith('custom-face-')));
+    const isPandaName = (n: string | undefined) => !!n && (
+      ALL_PANDAS.some(p => p.id === n)
+      || n.startsWith('upload-panda-')
+      || n.startsWith('network-panda-')
+      || n.startsWith('custom-panda-')
+    );
+    const isFaceName = (n: string | undefined) => !!n && (
+      ALL_FACES.some(f => f.id === n)
+      || n.startsWith('upload-face-')
+      || n.startsWith('custom-face-')
+      || n.startsWith('network-face-')
+    );
+    const pandaEl = elements.find((e): e is ImageElement => e.type === 'image' && isPandaName((e as ImageElement).name));
+    const faceEl = elements.find((e): e is ImageElement => e.type === 'image' && isFaceName((e as ImageElement).name));
     const textEl = elements.find((e): e is TextElement => e.type === 'text');
 
-    // 试图重新合成 panda+face 无字幕图 — 必须 dataURL 持久化 (blob URL 刷新失效)
+    // 决定 imgSrc 优先级:
+    // 1. panda + face 双件 → composeMeme 合成无字幕高清图
+    // 2. panda 整图 (no face, e.g. network-panda-* / custom-panda-* / upload-panda-* 整图) → 直接用 panda.src (dataURL 全尺寸)
+    // 3. fallback → slot.previewUrl (220x220 缩略)
     let imgSrc = slot.previewUrl;
-    if (pandaEl) {
+    if (pandaEl && faceEl) {
       try {
+        // 内置 panda 查 meta 拿 faceOffset; 上传/网络/自定义 panda 取 element 本身的 src
         const pandaMeta = ALL_PANDAS.find(p => p.id === pandaEl.name);
-        if (pandaMeta && faceEl) {
-          imgSrc = await composeMeme({
-            pandaSrc: pandaMeta.src,
-            faceSrc: faceEl.src,
-            faceOffset: getLivePandaFaceOffset(pandaMeta),
-            size: 384, outputFormat: 'dataurl',
-            fillInternalShell: true,
-          });
-        }
+        const pandaSrc = pandaMeta?.src ?? pandaEl.src;
+        const faceOffset = pandaMeta ? getLivePandaFaceOffset(pandaMeta) : { x: 100, y: 70, w: 250, h: 250 };
+        imgSrc = await composeMeme({
+          pandaSrc,
+          faceSrc: faceEl.src,
+          faceOffset,
+          size: 384, outputFormat: 'dataurl',
+          fillInternalShell: true,
+        });
       } catch { /* 落败用 previewUrl */ }
+    } else if (pandaEl && !faceEl) {
+      // 整图模式 — panda 自身就是完整作品 (网图 / 上传整图 / 自制整图)
+      imgSrc = pandaEl.src;
     }
 
     // 傻瓜式 — lane 0 接末尾 (跟剪映/CapCut 一致). 不再每次开新 lane (旧 bug 根因)
@@ -3347,9 +3593,29 @@ export function AnimateMode() {
         ttsGenStats={ttsGenStats}
         onExportJSON={exportProjectJSON}
         onImportJSON={importProjectJSON}
+        mode={project.mode ?? 'video'}
+        onModeChange={(m) => {
+          // 切到 GIF: clamp duration ≤ 30s + 默认 preset wechat (240x240 15fps 4s)
+          commit(p => {
+            const next: ProjectState = { ...p, mode: m };
+            if (m === 'gif') {
+              next.duration = Math.min(p.duration, GIF_MAX_DURATION);
+              if (!next.gifPresetId) next.gifPresetId = 'wechat';
+              // GIF 模式无声 → 移除 TTS + BGM clip (用户警告: 切回视频后这些不在了)
+              const hasAudioClips = p.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
+              if (hasAudioClips) {
+                const ok = typeof window === 'undefined' ? true : window.confirm('GIF 模式无声音, 现有的 配音 + 背景音乐 clip 会被移除. 继续?');
+                if (!ok) return p;
+                next.clips = p.clips.filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm');
+              }
+            }
+            return next;
+          });
+        }}
       />
       <div className="am-workspace">
         <LeftPane
+          mode={project.mode ?? 'video'}
           uploads={uploads}
           setUploads={setUploads}
           userBGMs={userBGMs}
@@ -3513,6 +3779,7 @@ function AnimateToolbar({
   onSaveDraft, onToggleDraftPopover, onOpenPreview, onOpenExport,
   onOpenTemplates, onOpenBgmAlign, onOpenStateDump, onOpenShortcuts,
   ttsGenStats, onExportJSON, onImportJSON,
+  mode = 'video', onModeChange,
 }: {
   duration: number; clipCount: number;
   canUndo: boolean; canRedo: boolean; draftsCount: number;
@@ -3526,6 +3793,9 @@ function AnimateToolbar({
   ttsGenStats?: { total: number; done: number; failed: number; pending: number };
   onExportJSON?: () => void;
   onImportJSON?: () => void;
+  // v23-l: 视频 / GIF 双模式
+  mode?: ProjectMode;
+  onModeChange?: (m: ProjectMode) => void;
 }) {
   const [name, setName] = useState('我的沙雕动画');
   const [editing, setEditing] = useState(false);
@@ -3541,7 +3811,10 @@ function AnimateToolbar({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [durOpen]);
-  const DURATION_PRESETS = [5, 10, 15, 20, 30, 45, 60];
+  // GIF 模式时长上限 30s, 视频 60s
+  const isGif = mode === 'gif';
+  const maxDur = isGif ? GIF_MAX_DURATION : 60;
+  const DURATION_PRESETS = isGif ? [3, 4, 5, 6, 10, 15, 20] : [5, 10, 15, 20, 30, 45, 60];
 
   return (
     <div className="am-toolbar win7-titlebar">
@@ -3561,6 +3834,27 @@ function AnimateToolbar({
           <span className="am-toolbar-name-text" onClick={() => setEditing(true)} title="点击改名">{name}</span>
         )}
       </div>
+      {/* v23-l: 视频 / GIF 模式切换. GIF 模式无声 (TTS/BGM 隐藏) + 短时长 + 走 GIF encoder */}
+      {onModeChange && (
+        <div className="am-tb-mode" role="tablist" aria-label="输出模式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'video'}
+            className={'am-tb-mode-btn' + (mode === 'video' ? ' is-active' : '')}
+            onClick={() => onModeChange('video')}
+            title="视频模式 — 含声音 (TTS+BGM) + 长时长 + MP4 导出"
+          >🎬 视频</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'gif'}
+            className={'am-tb-mode-btn' + (mode === 'gif' ? ' is-active' : '')}
+            onClick={() => onModeChange('gif')}
+            title="GIF 模式 — 无声 + 短时长 + 直出 GIF (微信/X/TG 适配)"
+          >🎞️ GIF</button>
+        </div>
+      )}
       <div className="am-toolbar-stat">
         <span>{clipCount} 片段</span>
         {ttsGenStats && ttsGenStats.total > 0 && (ttsGenStats.pending > 0 || ttsGenStats.failed > 0) && (
@@ -3578,7 +3872,7 @@ function AnimateToolbar({
         <button
           className="am-tb-btn am-tb-duration-btn"
           onClick={() => setDurOpen(o => !o)}
-          title="点击设时长 (上限 60s)"
+          title={isGif ? 'GIF 时长上限 30s' : '视频时长上限 60s'}
           type="button"
         >
           ⏱ <strong>{duration.toFixed(1)}s</strong>
@@ -3586,7 +3880,7 @@ function AnimateToolbar({
         </button>
         {durOpen && (
           <div className="am-tb-duration-menu win7-panel">
-            <div className="am-tb-duration-head">视频时长 · 上限 60s</div>
+            <div className="am-tb-duration-head">{isGif ? `GIF 时长 · 上限 ${GIF_MAX_DURATION}s` : '视频时长 · 上限 60s'}</div>
             <div className="am-tb-duration-grid">
               {DURATION_PRESETS.map(d => (
                 <button
@@ -3604,10 +3898,10 @@ function AnimateToolbar({
               <input
                 type="number"
                 min={1}
-                max={60}
+                max={maxDur}
                 step={0.5}
                 value={Number(duration.toFixed(1))}
-                onChange={(e) => onSetDuration(clamp(parseFloat(e.target.value || '1'), 1, 60))}
+                onChange={(e) => onSetDuration(clamp(parseFloat(e.target.value || '1'), 1, maxDur))}
                 className="am-input am-tabular"
                 style={{ width: 60, padding: '3px 6px' }}
               />
@@ -3690,9 +3984,11 @@ const CAPTION_LIB: CaptionTemplate[] = [];
 type LibSub = 'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload';
 
 function LeftPane({
+  mode = 'video',
   uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddDraftAsClips,
   onAddClipsBatch, playhead, projectDuration,
 }: {
+  mode?: ProjectMode;
   uploads: Material[];
   setUploads: React.Dispatch<React.SetStateAction<Material[]>>;
   userBGMs: BGMPreset[];
@@ -3705,7 +4001,16 @@ function LeftPane({
   projectDuration: number;
 }) {
   const { draftSlots } = useMeme();
-  const [seg, setSeg] = useState<LibSeg>('asset');
+  const isGif = mode === 'gif';
+  // GIF 模式: voice/music 不可用. 自动切回 asset tab 如果当前是 voice/music
+  const [seg, setSegRaw] = useState<LibSeg>('asset');
+  const setSeg = (s: LibSeg) => {
+    if (isGif && (s === 'voice' || s === 'music')) return;
+    setSegRaw(s);
+  };
+  useEffect(() => {
+    if (isGif && (seg === 'voice' || seg === 'music')) setSegRaw('asset');
+  }, [isGif, seg]);
   const [sub, setSub] = useState<LibSub>('combo');
   const [fxGroup, setFxGroup] = useState<FxGroup | 'all'>('all');
   const [q, setQ] = useState('');
@@ -3867,8 +4172,9 @@ function LeftPane({
     <aside className="desktop-sidebar-left am-pane-left">
       <div className="am-seg-bar win7-panel">
         <SegBtn active={seg === 'asset'} icon={<ImageIcon size={14} />} label="素材" onClick={() => { setSeg('asset'); setSub('combo'); }} />
-        <SegBtn active={seg === 'music'} icon={<Music size={14} />} label="音乐" onClick={() => setSeg('music')} />
-        <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label="配音" onClick={() => setSeg('voice')} />
+        {/* GIF 模式无声 — 音乐 + 配音 隐藏 */}
+        {!isGif && <SegBtn active={seg === 'music'} icon={<Music size={14} />} label="音乐" onClick={() => setSeg('music')} />}
+        {!isGif && <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label="配音" onClick={() => setSeg('voice')} />}
         <SegBtn active={seg === 'caption'} icon={<MessageSquare size={14} />} label="字幕" onClick={() => setSeg('caption')} />
         <SegBtn active={seg === 'fx'} icon={<Sparkles size={14} />} label="动效" onClick={() => setSeg('fx')} />
       </div>
@@ -7303,11 +7609,18 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [outputInfo, setOutputInfo] = useState<{ ext: string; size: number; hasAudio: boolean; mime: string; resolution?: ExportResolution; fps?: ExportFps } | null>(null);
-  const [format, setFormat] = useState<'webm' | 'mp4'>('webm');
+  const [outputInfo, setOutputInfo] = useState<{ ext: string; size: number; hasAudio?: boolean; mime?: string; resolution?: ExportResolution; fps?: ExportFps; width?: number; height?: number; frameCount?: number; durationSec?: number } | null>(null);
+  // v23-l: MP4 默认主推 (99% 用户只懂 MP4). WebM 折叠到 advanced
+  const [format, setFormat] = useState<'webm' | 'mp4'>('mp4');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   // v23-k Phase A: 工业级 — 分辨率 + 帧率 自选
   const [resolution, setResolution] = useState<ExportResolution>('720p');
   const [fps, setFps] = useState<ExportFps>(30);
+  // v23-l: GIF preset (仅 mode=gif 用)
+  const isGif = (project.mode ?? 'video') === 'gif';
+  const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'wechat');
+  const gifPreset = GIF_PRESETS.find(p => p.id === gifPresetId) ?? GIF_PRESETS[0];
+
   const supportedMime = useMemo(() => pickBestMime(format === 'mp4'), [format]);
   const [phase, setPhase] = useState<'ready' | 'rendering' | 'done'>('ready');
   const [mp4AudioOK, setMp4AudioOK] = useState<null | boolean>(null);
@@ -7318,21 +7631,40 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
   const hasRecordedTTS = ttsClips.some(c => !!c.audioSrc);
   const ttsAllRecorded = hasTTS && ttsClips.every(c => !!c.audioSrc);
 
+  // GIF 估算大小: 帧数 × 平均帧大小 ~ 帧数 × (w*h*0.4 bytes / 1024). 480x480 100 frames ~ 460KB 经验值
+  const gifEstSize = useMemo(() => {
+    if (!isGif) return 0;
+    const dur = Math.min(project.duration, GIF_MAX_DURATION);
+    const frames = dur * gifPreset.fps;
+    const perFrameKB = (gifPreset.width * gifPreset.height) / 5800; // 经验 quality=10
+    return Math.round(frames * perFrameKB);
+  }, [isGif, gifPreset, project.duration]);
+
   // mount: 探测 mp4+audio 真支持否 (isTypeSupported 撒谎, 必须真测)
   useEffect(() => {
+    if (isGif) return; // GIF 模式无需探测 mp4
     void probeMp4AudioMuxing().then(ok => setMp4AudioOK(ok));
-  }, []);
+  }, [isGif]);
 
   const startExport = useCallback(() => {
     setPhase('rendering');
     cancelledRef.current = false;
     (async () => {
       try {
-        const result = await exportVideo(project, name, (p) => { if (!cancelledRef.current) setProgress(p); }, userBGMs, format === 'mp4', resolution, fps);
-        if (!cancelledRef.current) {
-          setOutputInfo(result);
-          setDone(true);
-          setPhase('done');
+        if (isGif) {
+          const result = await exportGIF(project, name, (p) => { if (!cancelledRef.current) setProgress(p); }, gifPresetId);
+          if (!cancelledRef.current) {
+            setOutputInfo(result);
+            setDone(true);
+            setPhase('done');
+          }
+        } else {
+          const result = await exportVideo(project, name, (p) => { if (!cancelledRef.current) setProgress(p); }, userBGMs, format === 'mp4', resolution, fps);
+          if (!cancelledRef.current) {
+            setOutputInfo(result);
+            setDone(true);
+            setPhase('done');
+          }
         }
       } catch (e) {
         if (!cancelledRef.current) {
@@ -7341,7 +7673,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
         }
       }
     })();
-  }, [project, name, format, userBGMs, resolution, fps]);
+  }, [project, name, format, userBGMs, resolution, fps, isGif, gifPresetId]);
 
   useEffect(() => {
     return () => { cancelledRef.current = true; audioEngine.cancelAll(); audioEngine.stopExportCapture(); };
@@ -7351,14 +7683,47 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
     <div className="am-export-modal-backdrop" onClick={(done || error) ? onClose : undefined}>
       <div className="am-export-modal win7-panel" onClick={(e) => e.stopPropagation()}>
         <div className="am-popover-head">
-          <span><Download size={14} /> 导出视频 ({supportedMime.ext.toUpperCase()})</span>
+          <span><Download size={14} /> {isGif ? '导出 GIF' : `导出视频 (${supportedMime.ext.toUpperCase()})`}</span>
           {(done || error || phase === 'ready') && <button className="am-popover-close" onClick={onClose}><X size={14} /></button>}
         </div>
         <div className="am-export-body">
-          {phase === 'ready' && (
+          {phase === 'ready' && isGif && (
             <>
               <div className="am-export-status">
-                <strong>导出视频</strong>
+                <strong>导出 GIF 动图</strong>
+                <span className="am-export-sub">{gifPreset.width}×{gifPreset.height} · {gifPreset.fps}fps · 时长 {Math.min(project.duration, GIF_MAX_DURATION).toFixed(1)}s · 预估 ~{gifEstSize}KB</span>
+              </div>
+              <div className="am-export-format-row">
+                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>社媒预设 (尺寸 + 帧率)</div>
+                <div className="am-row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  {GIF_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={'am-tb-btn' + (gifPresetId === p.id ? ' am-tb-btn-primary' : '')}
+                      onClick={() => setGifPresetId(p.id)}
+                      style={{ flex: '1 1 calc(50% - 3px)', justifyContent: 'center' }}
+                      title={p.note}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="am-field-sublabel" style={{ marginTop: 6, color: '#666' }}>{gifPreset.note}</div>
+              </div>
+              <div className="am-export-hint">
+                <AlertCircle size={11} />
+                <span>GIF 无声音 · 跨设备兼容性最强 (微信/X/TG 直发) · 体积越小延迟越低</span>
+              </div>
+              <button className="am-tb-btn am-tb-btn-primary" onClick={startExport} style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}>
+                <Download size={13} /> 开始导出 GIF
+              </button>
+            </>
+          )}
+          {phase === 'ready' && !isGif && (
+            <>
+              <div className="am-export-status">
+                <strong>导出 MP4 视频</strong>
                 <span className="am-export-sub">{RESOLUTION_DIM[resolution].w}×{RESOLUTION_DIM[resolution].h} · {fps}fps · 时长 {project.duration.toFixed(1)}s · 估算码率 {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
               </div>
               {/* v23-k Phase A: 分辨率 + 帧率 自选 */}
@@ -7420,31 +7785,42 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
                   </span>
                 </div>
               </div>
-              <div className="am-export-format-row">
-                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>视频格式</div>
-                <div className="am-row" style={{ gap: 6 }}>
-                  <button
-                    type="button"
-                    className={'am-tb-btn' + (format === 'webm' ? ' am-tb-btn-primary' : '')}
-                    onClick={() => setFormat('webm')}
-                    style={{ flex: 1, justifyContent: 'center' }}
-                  >
-                    WebM <span style={{ opacity: 0.7, fontSize: 10 }}>推荐 · 真音轨</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={'am-tb-btn' + (format === 'mp4' ? ' am-tb-btn-primary' : '')}
-                    onClick={() => setFormat('mp4')}
-                    style={{ flex: 1, justifyContent: 'center' }}
-                  >
-                    MP4 <span style={{ opacity: 0.7, fontSize: 10 }}>{mp4AudioOK === null ? '探测中…' : mp4AudioOK ? '兼容性高' : '⚠️ 此浏览器音轨可能丢'}</span>
-                  </button>
+              {/* v23-l: MP4 主推 + WebM 折叠 advanced (pro 用户才会切) */}
+              <button
+                type="button"
+                className="am-tb-btn"
+                onClick={() => setShowAdvanced(s => !s)}
+                style={{ width: '100%', justifyContent: 'center', fontSize: 11, color: '#666' }}
+              >
+                {showAdvanced ? '⊟ 收起高级选项' : '⊞ 高级 (其他格式)'}
+              </button>
+              {showAdvanced && (
+                <div className="am-export-format-row">
+                  <div className="am-field-sublabel" style={{ marginBottom: 4 }}>视频格式</div>
+                  <div className="am-row" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      className={'am-tb-btn' + (format === 'mp4' ? ' am-tb-btn-primary' : '')}
+                      onClick={() => setFormat('mp4')}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      MP4 <span style={{ opacity: 0.7, fontSize: 10 }}>{mp4AudioOK === null ? '探测中…' : mp4AudioOK ? '默认 · 兼容性高' : '⚠️ 此浏览器音轨可能丢'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={'am-tb-btn' + (format === 'webm' ? ' am-tb-btn-primary' : '')}
+                      onClick={() => setFormat('webm')}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      WebM <span style={{ opacity: 0.7, fontSize: 10 }}>pro · 真音轨更稳</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
               {format === 'mp4' && mp4AudioOK === false && (
                 <div className="am-export-hint" style={{ background: '#fff4d8', borderColor: '#c89028' }}>
                   <AlertCircle size={11} />
-                  <span><b>⚠️ 实测警告</b>: 此浏览器 MP4 容器 audio mux 失败 → 导出可能无声. 推荐选 WebM (含真音轨, 任何播放器/剪映都能开).</span>
+                  <span><b>⚠️ 实测警告</b>: 此浏览器 MP4 容器 audio mux 失败 → 导出可能无声. 切到 WebM (高级里) 含真音轨, 任何播放器/剪映都能开.</span>
                 </div>
               )}
               {hasTTS && (
@@ -7471,9 +7847,14 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
               </div>
               <div className="am-export-hint">
                 <AlertCircle size={11} />
-                <span>渲染期间 tab 可以最小化, 但不要关闭. 音轨走 Web Audio MediaStream 全自动.</span>
+                <span>渲染期间 tab 可以最小化, 但不要关闭. {isGif ? 'GIF encoder 走 worker 不阻塞 UI.' : '音轨走 Web Audio MediaStream 全自动.'}</span>
               </div>
-              <div className="am-export-meta">分辨率 1280×720 · 30fps · {supportedMime.mime}</div>
+              <div className="am-export-meta">
+                {isGif
+                  ? `${gifPreset.width}×${gifPreset.height} · ${gifPreset.fps}fps · GIF (gif.js worker)`
+                  : `${RESOLUTION_DIM[resolution].w}×${RESOLUTION_DIM[resolution].h} · ${fps}fps · ${supportedMime.mime}`
+                }
+              </div>
             </>
           )}
           {error && (
@@ -7485,11 +7866,18 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
           {done && !error && (
             <>
               <div className="am-export-done">
-                ✅ 导出完成 · {outputInfo?.ext.toUpperCase()} · {outputInfo ? (outputInfo.size / 1024 / 1024).toFixed(2) : '0'} MB · {outputInfo?.hasAudio ? '🔊 含 BGM 音轨' : '🔇 无音轨'}
+                ✅ 导出完成 · {outputInfo?.ext.toUpperCase()} · {outputInfo ? (outputInfo.size / 1024).toFixed(0) : '0'} KB
+                {!isGif && (outputInfo?.hasAudio ? ' · 🔊 含音轨' : ' · 🔇 无音轨')}
+                {isGif && ` · ${outputInfo?.frameCount ?? 0} 帧`}
               </div>
               <div className="am-export-hint">
                 <AlertCircle size={11} />
-                <span>文件已下载. {outputInfo?.hasAudio ? 'BGM 已写入. ' : ''}{hasTTS ? 'TTS 文字已烧录成字幕条. ' : ''}如需多音轨完整版, 推荐剪映/CapCut 二次处理.</span>
+                <span>
+                  文件已下载.{' '}
+                  {isGif
+                    ? '直接发微信/X/TG. 无声音 — 这是 GIF 格式特性.'
+                    : <>{outputInfo?.hasAudio ? 'BGM 已写入. ' : ''}{hasTTS ? 'TTS 文字已烧录成字幕条. ' : ''}如需多音轨完整版, 推荐剪映/CapCut 二次处理.</>}
+                </span>
               </div>
               <button className="am-tb-btn am-tb-btn-primary" onClick={onClose}>完成</button>
             </>
