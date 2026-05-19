@@ -3639,47 +3639,54 @@ export function AnimateMode() {
         onImportJSON={importProjectJSON}
         mode={project.mode ?? 'video'}
         onModeChange={(m) => {
-          // 切到 GIF: clamp duration ≤ 30s + 默认 preset wechat + 移除 TTS/BGM + 删 30s 后超时 clip + 清 caption orphan link + 清 audioEngine player Map
+          // FIX: confirm + audio side-effect 必须在 commit() 外. React 18 StrictMode dev 下
+          // setState updater 跑 2 次, 把 window.confirm() 放 updater 内会弹 2 次 dialog → user 觉得"点啥都没用".
+          // 跟 importProjectJSON 同模式: side-effect 先, commit 纯 reducer 后.
+          if (m === 'gif') {
+            const hasAudioClips = project.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
+            const overTimeClips = project.clips.filter(c => c.start >= GIF_MAX_DURATION);
+            if (hasAudioClips || overTimeClips.length > 0) {
+              const msgParts = [
+                hasAudioClips && 'GIF 无声音 → 配音 + 背景音乐 clip 会被移除',
+                overTimeClips.length > 0 && `${overTimeClips.length} 个 ${GIF_MAX_DURATION}s 后片段会被裁掉`,
+              ].filter(Boolean) as string[];
+              const ok = typeof window === 'undefined' ? true : window.confirm(`${msgParts.join(' · ')}. 继续?`);
+              if (!ok) return;
+            }
+          }
+          // commit 纯 reducer — 在 StrictMode 下被双调也只是冗余计算, 无副作用
           commit(p => {
             const next: ProjectState = { ...p, mode: m };
             if (m === 'gif') {
               next.duration = Math.min(p.duration, GIF_MAX_DURATION);
               if (!next.gifPresetId) next.gifPresetId = 'wechat';
-              const hasAudioClips = p.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
-              const overTimeClips = p.clips.filter(c => c.start >= GIF_MAX_DURATION);
-              if (hasAudioClips || overTimeClips.length > 0) {
-                const msgParts = [
-                  hasAudioClips && 'GIF 无声音 → 配音 + 背景音乐 clip 会被移除',
-                  overTimeClips.length > 0 && `${overTimeClips.length} 个 ${GIF_MAX_DURATION}s 后片段会被裁掉`,
-                ].filter(Boolean) as string[];
-                const ok = typeof window === 'undefined' ? true : window.confirm(`${msgParts.join(' · ')}. 继续?`);
-                if (!ok) return p;
-                const ttsIdsToRemove = new Set(
-                  p.clips.filter(c => c.trackId === 'tts').map(c => c.id)
-                );
-                next.clips = p.clips
-                  .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
-                  .filter(c => c.start < GIF_MAX_DURATION)
-                  .map(c => {
-                    // 清 caption.linkedTTSId orphan (指向已删 TTS)
-                    if (
-                      c.trackId === 'caption' &&
-                      (c as CaptionClip).linkedTTSId &&
-                      ttsIdsToRemove.has((c as CaptionClip).linkedTTSId!)
-                    ) {
-                      const cleaned = { ...c } as CaptionClip;
-                      delete cleaned.linkedTTSId;
-                      return cleaned as Clip;
-                    }
-                    return c;
-                  });
-                // 释放 audioEngine 内部 player Map (audit-recent MED-2d): 不然旧 player 留着可能继续响 + 内存 leak
-                audioEngine.destroyAllTTSPlayers();
-                audioEngine.destroyAllUserBGMPlayers();
-              }
+              const ttsIdsToRemove = new Set(
+                p.clips.filter(c => c.trackId === 'tts').map(c => c.id)
+              );
+              next.clips = p.clips
+                .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
+                .filter(c => c.start < GIF_MAX_DURATION)
+                .map(c => {
+                  // 清 caption.linkedTTSId orphan (指向已删 TTS)
+                  if (
+                    c.trackId === 'caption' &&
+                    (c as CaptionClip).linkedTTSId &&
+                    ttsIdsToRemove.has((c as CaptionClip).linkedTTSId!)
+                  ) {
+                    const cleaned = { ...c } as CaptionClip;
+                    delete cleaned.linkedTTSId;
+                    return cleaned as Clip;
+                  }
+                  return c;
+                });
             }
             return next;
           });
+          // 释放 audioEngine 内部 player Map (audit-recent MED-2d) — side effect 在 commit 后, setState 外
+          if (m === 'gif') {
+            audioEngine.destroyAllTTSPlayers();
+            audioEngine.destroyAllUserBGMPlayers();
+          }
         }}
       />
       <div className="am-workspace">
