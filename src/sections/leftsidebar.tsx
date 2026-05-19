@@ -243,14 +243,8 @@ export function LeftSidebar() {
   // 联网搜 modal 应用回调 — desktop / mobile 共用
   const handleNetworkApply = (mat: Material) => {
     try {
-      const currentPanda = state.elements.find(
-        (e) =>
-          e.type === 'image' &&
-          ((e as ImageElement).name === 'panda-head' ||
-            ALL_PANDAS.some((p) => p.id === (e as ImageElement).name) ||
-            (e as ImageElement).name.startsWith('upload-panda-') ||
-            (e as ImageElement).name.startsWith('network-panda-')),
-      );
+      // 跟全局 isPanda 一致 — 含 4 个外部素材命名空间 + 内置 panda
+      const currentPanda = state.elements.find((e) => e.type === 'image' && isPanda(e));
       // eslint-disable-next-line no-console
       console.log('[leftsidebar.handleNetworkApply]', {
         mat: { id: mat.id, srcPrefix: mat.src.slice(0, 60) },
