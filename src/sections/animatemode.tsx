@@ -2162,11 +2162,12 @@ export function AnimateMode() {
   }, []);
 
   // project 变 → debounced 写 IDB (hydrate 完了才开始, 防初次 default project 覆盖 IDB)
+  // 600ms → 250ms: 用户改完立即刷新, 旧值更小窗口 (但仍 debounce 防 auto-gen TTS 高频写)
   useEffect(() => {
     if (!projectHydrated) return;
     const t = window.setTimeout(() => {
       void idbSet(AM_CURRENT_IDB_KEY, project).catch(() => {});
-    }, 600);
+    }, 250);
     return () => window.clearTimeout(t);
   }, [project, projectHydrated]);
 
@@ -3031,11 +3032,19 @@ export function AnimateMode() {
         id: `rb-${ts}`, trackId: 'bgm', lane: 0, start: 0, end: totalDur,
         bgmId: bgm.id, name: bgm.name, volume: 0.5,
       });
-      commit(() => ({
+      // FIX: 之前 commit(() => ({...})) 丢 mode/gifPresetId. 现 explicit 构造完整 ProjectState 保留 schema.
+      const newProject: ProjectState = {
         duration: totalDur,
         lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
         clips: next,
-      }));
+        mode: project.mode ?? 'video',
+        gifPresetId: project.gifPresetId,
+      };
+      commit(() => newProject);
+      // 清旧 audio players Map (避免 stale clipId 的 player 残留 + 内存 leak)
+      audioEngine.destroyAll();
+      // 立即写 IDB — 不等 debounce, 防"用户立即刷新"丢数据
+      void idbSet(AM_CURRENT_IDB_KEY, newProject).catch(() => {});
       setSelectedId(null);
       setPlayhead(0);
       toast.dismiss(tid);
@@ -3266,11 +3275,19 @@ export function AnimateMode() {
   const loadDraft = useCallback((id: string) => {
     const slot = drafts.find(s => s.id === id);
     if (!slot) return;
-    audioEngine.cancelAll();
-    commit(() => ({ ...slot.project }));
+    // FIX: 走 hydrateProject 统一反序列化 (旧 draft 无 mode/gifPresetId 字段时默认 video, 跟 IDB/JSON import 对齐)
+    const hydrated = hydrateProject(slot.project);
+    if (!hydrated) {
+      toast.error('草稿数据格式无效, 无法加载');
+      return;
+    }
+    audioEngine.destroyAll(); // upgrade cancelAll → destroyAll, 释放旧 clipId 的 player Map
+    commit(() => hydrated.project);
+    // 立即写 IDB — 防"载入草稿后立即刷新"丢
+    void idbSet(AM_CURRENT_IDB_KEY, hydrated.project).catch(() => {});
     setSelectedId(null);
     setPlayhead(0);
-    toast.success(`已读入 ${slot.name}`);
+    toast.success(`已读入 ${slot.name}${hydrated.cleanedInvalidImages > 0 ? ` · 自动清理 ${hydrated.cleanedInvalidImages} 失效图` : ''}`);
   }, [drafts, commit]);
   const deleteDraft = useCallback((id: string) => {
     persistDrafts(drafts.filter(s => s.id !== id));
@@ -3912,9 +3929,12 @@ export function AnimateMode() {
           currentProject={project}
           onClose={() => setTemplatesModalOpen(false)}
           onLoad={(tpl) => {
-            // 加载: 把 tpl.project 替换当前 (覆盖 commit)
+            // 加载: 把 tpl.project 替换当前 (走 hydrateProject 防 schema 丢失, 跟 loadDraft / IDB / JSON import 对齐)
             try {
-              commit(() => ({ ...(tpl.project as ProjectState) }));
+              const hydrated = hydrateProject(tpl.project);
+              if (!hydrated) { toast.error('模板数据格式无效'); return; }
+              audioEngine.destroyAll();
+              commit(() => hydrated.project);
               setSelectedId(null);
               setPlayhead(0);
               toast.success(`已读入模板 ${tpl.name}`);
