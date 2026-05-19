@@ -1152,9 +1152,36 @@ const audioEngine = (() => {
 function makeBlankProject(): ProjectState {
   return {
     duration: 12,
+    mode: 'video',
     lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
     clips: [],
   };
+}
+
+// v23-l: 统一反序列化 — 旧 project 没 mode/gifPresetId 字段默认 video. 任何 raw → ProjectState 都过这.
+// 含 v9 blob: URL 失效 image clip 自动清逻辑.
+function hydrateProject(raw: unknown): { project: ProjectState; cleanedInvalidImages: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<ProjectState>;
+  if (!Array.isArray(r.clips) || typeof r.duration !== 'number') return null;
+  const before = r.clips.length;
+  const cleanClips = r.clips.filter(c =>
+    !(c.trackId === 'image' && typeof (c as ImageClip).src === 'string' && (c as ImageClip).src.startsWith('blob:'))
+  );
+  const project: ProjectState = {
+    duration: r.duration,
+    clips: cleanClips,
+    lanes: {
+      image: r.lanes?.image ?? 1,
+      caption: r.lanes?.caption ?? 1,
+      fx: r.lanes?.fx ?? 1,
+      tts: r.lanes?.tts ?? 1,
+      bgm: r.lanes?.bgm ?? 1,
+    },
+    mode: r.mode === 'gif' ? 'gif' : 'video',
+    gifPresetId: r.gifPresetId,
+  };
+  return { project, cleanedInvalidImages: before - cleanClips.length };
 }
 
 function makeInitialProject(): ProjectState {
@@ -2083,6 +2110,36 @@ export function AnimateMode() {
   const [projectHydrated, setProjectHydrated] = useState(false);
   // v23-l mobile: 底栏 4 tab → sheet
   const [mobileSheet, setMobileSheet] = useState<'assets' | 'caption' | 'fx' | 'inspector' | null>(null);
+  // v23-l audit-fix: sheet drag-to-dismiss (leftover #4). 之前 cursor:grab 撒谎 — 现在 PointerDown/Move/Up 真支持向下拖关.
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const dragStartYRef = useRef<number | null>(null);
+  const [sheetTranslateY, setSheetTranslateY] = useState(0);
+  const onSheetHandlePointerDown = (e: React.PointerEvent) => {
+    dragStartYRef.current = e.clientY;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onSheetHandlePointerMove = (e: React.PointerEvent) => {
+    if (dragStartYRef.current === null) return;
+    const dy = e.clientY - dragStartYRef.current;
+    if (dy > 0) setSheetTranslateY(dy); // 只允许向下拖
+  };
+  const onSheetHandlePointerUp = (e: React.PointerEvent) => {
+    if (dragStartYRef.current === null) return;
+    const dy = e.clientY - dragStartYRef.current;
+    dragStartYRef.current = null;
+    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    const sheetH = sheetRef.current?.offsetHeight ?? 1;
+    if (dy / sheetH > 0.3) {
+      // 拖超 30% 关
+      setSheetTranslateY(0);
+      setMobileSheet(null);
+    } else {
+      // snap 回原位
+      setSheetTranslateY(0);
+    }
+  };
+  // sheet 关时重置 translateY (防 reopen 残留)
+  useEffect(() => { if (mobileSheet === null && sheetTranslateY !== 0) setSheetTranslateY(0); }, [mobileSheet, sheetTranslateY]);
 
   // mount: 从 IDB 恢复上次的 project (静态站, 用户跨刷新/切走不丢工作)
   // schema migrate:
@@ -2092,27 +2149,11 @@ export function AnimateMode() {
     let cancelled = false;
     idbGet<ProjectState>(AM_CURRENT_IDB_KEY).then(loaded => {
       if (cancelled) return;
-      if (loaded && Array.isArray(loaded.clips) && typeof loaded.duration === 'number') {
-        const invalidIds = loaded.clips
-          .filter(c => c.trackId === 'image' && typeof (c as ImageClip).src === 'string' && (c as ImageClip).src.startsWith('blob:'))
-          .map(c => c.id);
-        const cleanClips = invalidIds.length > 0
-          ? loaded.clips.filter(c => !invalidIds.includes(c.id))
-          : loaded.clips;
-        const migrated: ProjectState = {
-          duration: typeof loaded.duration === 'number' ? loaded.duration : 12,
-          clips: cleanClips,
-          lanes: {
-            image: loaded.lanes?.image ?? 1,
-            caption: loaded.lanes?.caption ?? 1,
-            fx: loaded.lanes?.fx ?? 1,
-            tts: loaded.lanes?.tts ?? 1,
-            bgm: loaded.lanes?.bgm ?? 1,
-          },
-        };
-        setProject(migrated);
-        if (invalidIds.length > 0) {
-          toast.warning(`检测到 ${invalidIds.length} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`);
+      const hydrated = hydrateProject(loaded);
+      if (hydrated) {
+        setProject(hydrated.project);
+        if (hydrated.cleanedInvalidImages > 0) {
+          toast.warning(`检测到 ${hydrated.cleanedInvalidImages} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`);
         }
       }
       setProjectHydrated(true);
@@ -2194,7 +2235,7 @@ export function AnimateMode() {
   const exportProjectJSON = useCallback(() => {
     try {
       const payload = {
-        version: 'v23-k',
+        version: 'v23-l',
         exportedAt: new Date().toISOString(),
         name: '我的沙雕动画',
         project,
@@ -2228,23 +2269,19 @@ export function AnimateMode() {
         }
         const text = await file.text();
         const data = JSON.parse(text) as { project?: ProjectState; name?: string };
-        const incoming = data.project;
-        if (!incoming || !Array.isArray(incoming.clips) || typeof incoming.duration !== 'number') {
+        const hydrated = hydrateProject(data.project);
+        if (!hydrated) {
           toast.error('不是有效 .amjson 文件');
           return;
         }
         if (!window.confirm(`导入会替换当前工作 · 当前 ${project.clips.length} 片段会清空 (已存草稿不影响). 确认?`)) return;
-        setProject({
-          duration: incoming.duration,
-          lanes: incoming.lanes ?? { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
-          clips: incoming.clips,
-        });
+        setProject(hydrated.project);
         setPlayhead(0);
         setSelectedId(null);
         historyRef.current = { past: [], future: [] };
         setHistoryTick(t => t + 1);
         audioEngine.destroyAll();
-        toast.success(`✓ 已导入项目 · ${incoming.clips.length} 片段 · ${incoming.duration.toFixed(1)}s${data.name ? ` · 名称: ${data.name}` : ''}`);
+        toast.success(`✓ 已导入项目 · ${hydrated.project.clips.length} 片段 · ${hydrated.project.duration.toFixed(1)}s${data.name ? ` · 名称: ${data.name}` : ''}${hydrated.cleanedInvalidImages > 0 ? ` · 清理 ${hydrated.cleanedInvalidImages} 失效图` : ''}`);
       } catch (e) {
         toast.error(`导入失败: ${(e as Error).message}`);
       }
@@ -3132,19 +3169,22 @@ export function AnimateMode() {
     // 3. fallback → slot.previewUrl (220x220 缩略)
     let imgSrc = slot.previewUrl;
     if (pandaEl && faceEl) {
-      try {
-        // 内置 panda 查 meta 拿 faceOffset; 上传/网络/自定义 panda 取 element 本身的 src
-        const pandaMeta = ALL_PANDAS.find(p => p.id === pandaEl.name);
-        const pandaSrc = pandaMeta?.src ?? pandaEl.src;
-        const faceOffset = pandaMeta ? getLivePandaFaceOffset(pandaMeta) : { x: 100, y: 70, w: 250, h: 250 };
-        imgSrc = await composeMeme({
-          pandaSrc,
-          faceSrc: faceEl.src,
-          faceOffset,
-          size: 384, outputFormat: 'dataurl',
-          fillInternalShell: true,
-        });
-      } catch { /* 落败用 previewUrl */ }
+      // 内置 panda 查 meta 拿 faceOffset; 非内置 panda 用整图 fallback (避免硬编码 faceOffset 合成丑) (audit-recent MED-2h)
+      const pandaMeta = ALL_PANDAS.find(p => p.id === pandaEl.name);
+      if (pandaMeta) {
+        try {
+          imgSrc = await composeMeme({
+            pandaSrc: pandaMeta.src,
+            faceSrc: faceEl.src,
+            faceOffset: getLivePandaFaceOffset(pandaMeta),
+            size: 384, outputFormat: 'dataurl',
+            fillInternalShell: true,
+          });
+        } catch { /* 落败用 previewUrl */ }
+      } else {
+        // 非内置 panda (upload/network/custom) + face: 整图 fallback (face 数据保留在编辑器, timeline 上呈现整图)
+        imgSrc = pandaEl.src;
+      }
     } else if (pandaEl && !faceEl) {
       // 整图模式 — panda 自身就是完整作品 (网图 / 上传整图 / 自制整图)
       imgSrc = pandaEl.src;
@@ -3599,18 +3639,43 @@ export function AnimateMode() {
         onImportJSON={importProjectJSON}
         mode={project.mode ?? 'video'}
         onModeChange={(m) => {
-          // 切到 GIF: clamp duration ≤ 30s + 默认 preset wechat (240x240 15fps 4s)
+          // 切到 GIF: clamp duration ≤ 30s + 默认 preset wechat + 移除 TTS/BGM + 删 30s 后超时 clip + 清 caption orphan link + 清 audioEngine player Map
           commit(p => {
             const next: ProjectState = { ...p, mode: m };
             if (m === 'gif') {
               next.duration = Math.min(p.duration, GIF_MAX_DURATION);
               if (!next.gifPresetId) next.gifPresetId = 'wechat';
-              // GIF 模式无声 → 移除 TTS + BGM clip (用户警告: 切回视频后这些不在了)
               const hasAudioClips = p.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
-              if (hasAudioClips) {
-                const ok = typeof window === 'undefined' ? true : window.confirm('GIF 模式无声音, 现有的 配音 + 背景音乐 clip 会被移除. 继续?');
+              const overTimeClips = p.clips.filter(c => c.start >= GIF_MAX_DURATION);
+              if (hasAudioClips || overTimeClips.length > 0) {
+                const msgParts = [
+                  hasAudioClips && 'GIF 无声音 → 配音 + 背景音乐 clip 会被移除',
+                  overTimeClips.length > 0 && `${overTimeClips.length} 个 ${GIF_MAX_DURATION}s 后片段会被裁掉`,
+                ].filter(Boolean) as string[];
+                const ok = typeof window === 'undefined' ? true : window.confirm(`${msgParts.join(' · ')}. 继续?`);
                 if (!ok) return p;
-                next.clips = p.clips.filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm');
+                const ttsIdsToRemove = new Set(
+                  p.clips.filter(c => c.trackId === 'tts').map(c => c.id)
+                );
+                next.clips = p.clips
+                  .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
+                  .filter(c => c.start < GIF_MAX_DURATION)
+                  .map(c => {
+                    // 清 caption.linkedTTSId orphan (指向已删 TTS)
+                    if (
+                      c.trackId === 'caption' &&
+                      (c as CaptionClip).linkedTTSId &&
+                      ttsIdsToRemove.has((c as CaptionClip).linkedTTSId!)
+                    ) {
+                      const cleaned = { ...c } as CaptionClip;
+                      delete cleaned.linkedTTSId;
+                      return cleaned as Clip;
+                    }
+                    return c;
+                  });
+                // 释放 audioEngine 内部 player Map (audit-recent MED-2d): 不然旧 player 留着可能继续响 + 内存 leak
+                audioEngine.destroyAllTTSPlayers();
+                audioEngine.destroyAllUserBGMPlayers();
               }
             }
             return next;
@@ -3688,9 +3753,9 @@ export function AnimateMode() {
         onClipContextMenu={onClipContextMenu}
       />
       {ctxMenu.render()}
-      {/* v23-l mobile: 底栏 4 大 tab — 复刻剪映 (素材/字幕/动效/导出/检查器) */}
+      {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}
       {isMobile && (
-        <div className="am-mobile-bottombar" role="tablist" aria-label="底部工具">
+        <div className="am-mobile-bottombar am-mobile-bottombar--5" role="tablist" aria-label="底部工具">
           <button
             type="button"
             role="tab"
@@ -3723,6 +3788,22 @@ export function AnimateMode() {
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'inspector'}
+            disabled={!selectedId}
+            className={
+              'am-mb-tab' +
+              (mobileSheet === 'inspector' ? ' is-active' : '') +
+              (!selectedId ? ' is-disabled' : '')
+            }
+            onClick={() => selectedId && setMobileSheet(s => s === 'inspector' ? null : 'inspector')}
+            title={!selectedId ? '先选中片段' : '编辑选中片段'}
+          >
+            <span className="am-mb-tab-ic">🔧</span>
+            <span className="am-mb-tab-lbl">编辑</span>
+          </button>
+          <button
+            type="button"
             className="am-mb-tab"
             onClick={() => { setIsPlaying(false); setExportModalOpen(true); }}
           >
@@ -3731,37 +3812,63 @@ export function AnimateMode() {
           </button>
         </div>
       )}
-      {/* v23-l mobile sheet — 上滑展开, 内嵌 LeftPane (复用同组件, sheet CSS reset 桌面定位) */}
+      {/* v23-l mobile sheet — 上滑展开. 4 tab + 5th (Inspector MVP) 分支 */}
       {isMobile && mobileSheet && (
         <>
           <div className="am-mobile-sheet-backdrop" onClick={() => setMobileSheet(null)} />
-          <div className="am-mobile-sheet" role="dialog" aria-modal="true">
-            <div className="am-mobile-sheet-handle" onClick={() => setMobileSheet(null)} />
+          <div
+            className="am-mobile-sheet"
+            role="dialog"
+            aria-modal="true"
+            ref={sheetRef}
+            style={sheetTranslateY > 0 ? { transform: `translateY(${sheetTranslateY}px)`, transition: 'none' } : undefined}
+          >
+            <div
+              className="am-mobile-sheet-handle"
+              onClick={() => setMobileSheet(null)}
+              onPointerDown={onSheetHandlePointerDown}
+              onPointerMove={onSheetHandlePointerMove}
+              onPointerUp={onSheetHandlePointerUp}
+              onPointerCancel={onSheetHandlePointerUp}
+            />
             <div className="am-mobile-sheet-head">
               <span>
                 {mobileSheet === 'assets' && '🎨 素材库'}
                 {mobileSheet === 'caption' && '💬 字幕'}
                 {mobileSheet === 'fx' && '✨ 动效'}
-                {mobileSheet === 'inspector' && '⚙️ 检查器'}
+                {mobileSheet === 'inspector' && '🔧 编辑'}
               </span>
               <button className="am-mobile-sheet-close" onClick={() => setMobileSheet(null)} aria-label="关闭">
                 <X size={18} />
               </button>
             </div>
             <div className="am-mobile-sheet-body">
-              <LeftPane
-                mode={project.mode ?? 'video'}
-                initialSeg={mobileSheet === 'caption' ? 'caption' : mobileSheet === 'fx' ? 'fx' : 'asset'}
-                uploads={uploads}
-                setUploads={setUploads}
-                userBGMs={userBGMs}
-                setUserBGMs={setUserBGMs}
-                onQuickAdd={(p) => { quickAdd(p); setMobileSheet(null); /* 加完关 sheet, 立即看效果 */ }}
-                onAddDraftAsClips={(s) => { addDraftAsClips(s); setMobileSheet(null); }}
-                onAddClipsBatch={(cs) => { addClipsBatch(cs); setMobileSheet(null); }}
-                playhead={playhead}
-                projectDuration={project.duration}
-              />
+              {mobileSheet === 'inspector' && selectedClip ? (
+                <MobileInspectorMVP
+                  clip={selectedClip}
+                  onUpdateText={(text) => commit(p => ({
+                    ...p,
+                    clips: p.clips.map(c => c.id === selectedClip.id ? ({ ...c, text } as Clip) : c),
+                  }))}
+                  onDelete={() => { deleteClip(selectedClip.id); setMobileSheet(null); }}
+                  onSplit={() => { splitAt(selectedClip.id, playhead); setMobileSheet(null); }}
+                  onDuplicate={() => { duplicateClip(selectedClip.id); setMobileSheet(null); }}
+                />
+              ) : (
+                <LeftPane
+                  mode={project.mode ?? 'video'}
+                  initialSeg={mobileSheet === 'caption' ? 'caption' : mobileSheet === 'fx' ? 'fx' : 'asset'}
+                  uploads={uploads}
+                  setUploads={setUploads}
+                  userBGMs={userBGMs}
+                  setUserBGMs={setUserBGMs}
+                  onQuickAdd={(p) => { quickAdd(p); setMobileSheet(null); /* 加完关 sheet, 立即看效果 */ }}
+                  onAddDraftAsClips={async (s) => { await addDraftAsClips(s); setMobileSheet(null); /* await 避免 toast 没出 sheet 已关 */ }}
+                  onAddClipsBatch={(cs) => { addClipsBatch(cs); setMobileSheet(null); }}
+                  playhead={playhead}
+                  projectDuration={project.duration}
+                />
+              )}
             </div>
           </div>
         </>
@@ -4000,10 +4107,11 @@ function AnimateToolbar({
         className="am-tb-btn"
         onClick={() => { if (window.confirm('新建空白项目? 当前工作会清空 (草稿已存的不影响)')) onReset(); }}
         title="新建空白项目 (会清空当前)"
+        data-mobile-hide
       ><Plus size={13} /> <span>新建</span></button>
       <button className="am-tb-btn" onClick={onRandomize} title="随机生成"><Shuffle size={13} /> <span>随机</span></button>
-      <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)"><Trash2 size={13} /> <span>清空</span></button>
-      <button className="am-tb-btn" onClick={() => { if (window.confirm('整理: 把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.')) onFlatten(); }} title="把多轨压回主轨 (剪映主轨模式)">
+      <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)" data-mobile-hide><Trash2 size={13} /> <span>清空</span></button>
+      <button className="am-tb-btn" onClick={() => { if (window.confirm('整理: 把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.')) onFlatten(); }} title="把多轨压回主轨 (剪映主轨模式)" data-mobile-hide>
         ⤓ <span>整理</span>
       </button>
       <div className="am-tb-sep" />
@@ -4047,6 +4155,63 @@ function AnimateToolbar({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// MOBILE INSPECTOR (v23-l) — 选中 clip 后 mobile sheet 内的极简编辑器
+// MVP scope: 字幕/配音 text 编辑 + 删除 + 分割 + 复制. 完整属性 (FX/voice/lane) 走 desktop.
+// ============================================================
+function MobileInspectorMVP({ clip, onUpdateText, onDelete, onSplit, onDuplicate }: {
+  clip: Clip;
+  onUpdateText: (text: string) => void;
+  onDelete: () => void;
+  onSplit: () => void;
+  onDuplicate: () => void;
+}) {
+  const isCaption = clip.trackId === 'caption';
+  const isTTS = clip.trackId === 'tts';
+  const supportsText = isCaption || isTTS;
+  const currentText = supportsText ? ((clip as CaptionClip | TTSClip).text ?? '') : '';
+  const typeLabel = (
+    {
+      image: '🖼️ 图片',
+      caption: '💬 字幕',
+      fx: '✨ 动效',
+      tts: '🎤 配音',
+      bgm: '🎵 BGM',
+    } as Record<TrackType, string>
+  )[clip.trackId];
+
+  return (
+    <div className="am-mobile-inspector">
+      <div className="am-mobile-inspector-head">
+        <span>{typeLabel}</span>
+        <span className="am-mobile-inspector-time">
+          {clip.start.toFixed(1)}s – {clip.end.toFixed(1)}s
+        </span>
+      </div>
+      {supportsText && (
+        <div className="am-mobile-inspector-section">
+          <label className="am-field-sublabel">{isCaption ? '字幕文字' : '配音文字'}</label>
+          <textarea
+            className="am-input am-mobile-inspector-textarea"
+            value={currentText}
+            onChange={(e) => onUpdateText(e.target.value)}
+            rows={3}
+            placeholder={isCaption ? '点击编辑字幕' : '点击编辑配音'}
+          />
+        </div>
+      )}
+      <div className="am-mobile-inspector-actions">
+        <button className="am-tb-btn" onClick={onSplit} type="button">✂ 分割</button>
+        <button className="am-tb-btn" onClick={onDuplicate} type="button">📋 复制</button>
+        <button className="am-tb-btn am-mobile-inspector-delete" onClick={onDelete} type="button">🗑 删除</button>
+      </div>
+      <div className="am-mobile-inspector-hint">
+        💡 完整属性 (FX/voice/lane/transform) 请切到 desktop 用右侧 Inspector
+      </div>
     </div>
   );
 }
@@ -5250,12 +5415,12 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
   onQuickAdd: (p: DragPayload) => void;
   onDelete?: () => void;
 }) {
-  // 内置 file 类 BGM (e.g. bgm-jigou): 没 durationSec → 运行时探测一次 cache
+  // 内置 file 类 BGM (e.g. bgm-jigou): 没 durationSec → 运行时探测一次 cache (lazy useState init 已读 cache, useEffect 仅 async fetch)
   const [probedDur, setProbedDur] = useState<number | undefined>(item.durationSec ?? _bgmDurationCache.get(item.id));
   useEffect(() => {
     if (item.kind !== 'file' || !item.src) return;
     if (item.durationSec) return; // 用户上传已带
-    if (_bgmDurationCache.has(item.id)) { setProbedDur(_bgmDurationCache.get(item.id)); return; }
+    if (_bgmDurationCache.has(item.id)) return; // lazy useState init 已拿到
     getAudioDuration(item.src).then(d => {
       _bgmDurationCache.set(item.id, d);
       setProbedDur(d);
@@ -5620,9 +5785,8 @@ function PreviewPane({
   const fxTargetImageId = selectedFXClip?.targetClipId ?? null;
 
   // image natural aspect (img onLoad 后填) — px-based render 用它算 height
-  const naturalAspectRef = useRef<Map<string, number>>(new Map());
-  const [naturalTick, setNaturalTick] = useState(0);
-  void naturalTick;
+  // v23-l audit-fix: 单 useState<Map> 替代 ref + tick (lint react-hooks/refs — refs 不该在 render 读)
+  const [naturalAspects, setNaturalAspects] = useState<Map<string, number>>(() => new Map());
 
   // caption: 所有 active caption clips (按 lane 顺序), 渲染时按 transform 位置叠加
   const activeCaptionClips = useMemo(() => {
@@ -5837,7 +6001,7 @@ function PreviewPane({
             //   旧: left:50%+tr.x%, transform: translate(-50%) scale(sx,sy) — 多层 % + scale 叠加, 易被 CSS edge cases 干扰
             //   新: 直接算 image bbox 在 canvas 内的绝对 px (left/top/width/height), transform 只 rotate
             //        跟 react-draggable (编辑器用的) 同理念 — 单一 source of truth, 不依赖任何 CSS scale 复合
-            const naturalAspect = naturalAspectRef.current.get(c.id) ?? 1; // h/w
+            const naturalAspect = naturalAspects.get(c.id) ?? 1; // h/w
             const totalRot = tr.rotation + fxA.rotateAdd;
             // v23-i: 删 scene 强制 z=0 — 按 lane 排 (lane 0 顶, 大 lane 底)
             const z = 10 - c.lane;
@@ -5886,11 +6050,12 @@ function PreviewPane({
                     const t = e.currentTarget;
                     if (t.naturalWidth > 0) {
                       const aspect = t.naturalHeight / t.naturalWidth;
-                      const prev = naturalAspectRef.current.get(c.id);
-                      if (prev !== aspect) {
-                        naturalAspectRef.current.set(c.id, aspect);
-                        setNaturalTick(n => n + 1); // trigger 1 re-render
-                      }
+                      setNaturalAspects(prev => {
+                        if (prev.get(c.id) === aspect) return prev;
+                        const next = new Map(prev);
+                        next.set(c.id, aspect);
+                        return next;
+                      });
                     }
                   }}
                   style={{
@@ -7811,7 +7976,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
           {phase === 'ready' && !isGif && (
             <>
               <div className="am-export-status">
-                <strong>导出 MP4 视频</strong>
+                <strong>{`导出 ${(supportedMime.ext || 'mp4').toUpperCase()} 视频`}</strong>
                 <span className="am-export-sub">{RESOLUTION_DIM[resolution].w}×{RESOLUTION_DIM[resolution].h} · {fps}fps · 时长 {project.duration.toFixed(1)}s · 估算码率 {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
               </div>
               {/* v23-k Phase A: 分辨率 + 帧率 自选 */}
@@ -7954,7 +8119,11 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
           {done && !error && (
             <>
               <div className="am-export-done">
-                ✅ 导出完成 · {outputInfo?.ext.toUpperCase()} · {outputInfo ? (outputInfo.size / 1024).toFixed(0) : '0'} KB
+                ✅ 导出完成 · {outputInfo?.ext.toUpperCase()} · {outputInfo
+                  ? (outputInfo.size >= 1024 * 1024
+                    ? `${(outputInfo.size / 1024 / 1024).toFixed(2)} MB`
+                    : `${(outputInfo.size / 1024).toFixed(0)} KB`)
+                  : '0 KB'}
                 {!isGif && (outputInfo?.hasAudio ? ' · 🔊 含音轨' : ' · 🔇 无音轨')}
                 {isGif && ` · ${outputInfo?.frameCount ?? 0} 帧`}
               </div>
@@ -8149,6 +8318,11 @@ function Timeline({
     let payload: DragPayload;
     try { payload = JSON.parse(raw) as DragPayload; } catch { return; }
     if (payload.type !== type) return;
+    // v23-l: GIF 模式无声 → TTS/BGM 拖入 timeline 阻挡 (LeftPane 已隐藏 tab, 这里防其他入口) (audit-recent MED-2d-2)
+    if ((project.mode ?? 'video') === 'gif' && (payload.type === 'tts' || payload.type === 'bgm')) {
+      toast.warning('GIF 模式无声音, 不能加 ' + (payload.type === 'tts' ? '配音' : '背景音乐'));
+      return;
+    }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = e.clientX - rect.left;
     const rawTime = Math.max(0, x / pxPerSec);
