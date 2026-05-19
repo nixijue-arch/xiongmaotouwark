@@ -34,6 +34,7 @@ import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_L
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
 import { IS_MAC, fmtShortcut, isMetaOrCtrl, matchShortcut, isTypingTarget } from '@/lib/keyboard';
 import { ANIMATE_TEMPLATES, type AnimateTemplate } from '@/data/animateTemplates';
+import { useIsMobile } from '@/hooks/usemediaquery';
 import './animatemode.css';
 
 // ============================================================
@@ -2074,11 +2075,14 @@ export async function exportGIF(
 // Main Component
 // ============================================================
 export function AnimateMode() {
+  const isMobile = useIsMobile();
   const [project, setProject] = useState<ProjectState>(() => makeInitialProject());
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectHydrated, setProjectHydrated] = useState(false);
+  // v23-l mobile: 底栏 4 tab → sheet
+  const [mobileSheet, setMobileSheet] = useState<'assets' | 'caption' | 'fx' | 'inspector' | null>(null);
 
   // mount: 从 IDB 恢复上次的 project (静态站, 用户跨刷新/切走不丢工作)
   // schema migrate:
@@ -3568,7 +3572,7 @@ export function AnimateMode() {
   ]);
 
   return (
-    <div className="am-root">
+    <div className={'am-root' + (isMobile ? ' am-root-mobile' : '')}>
       <AnimateToolbar
         duration={project.duration}
         clipCount={project.clips.length}
@@ -3684,6 +3688,84 @@ export function AnimateMode() {
         onClipContextMenu={onClipContextMenu}
       />
       {ctxMenu.render()}
+      {/* v23-l mobile: 底栏 4 大 tab — 复刻剪映 (素材/字幕/动效/导出/检查器) */}
+      {isMobile && (
+        <div className="am-mobile-bottombar" role="tablist" aria-label="底部工具">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'assets'}
+            className={'am-mb-tab' + (mobileSheet === 'assets' ? ' is-active' : '')}
+            onClick={() => setMobileSheet(s => s === 'assets' ? null : 'assets')}
+          >
+            <span className="am-mb-tab-ic">🎨</span>
+            <span className="am-mb-tab-lbl">素材</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'caption'}
+            className={'am-mb-tab' + (mobileSheet === 'caption' ? ' is-active' : '')}
+            onClick={() => setMobileSheet(s => s === 'caption' ? null : 'caption')}
+          >
+            <span className="am-mb-tab-ic">💬</span>
+            <span className="am-mb-tab-lbl">字幕</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'fx'}
+            className={'am-mb-tab' + (mobileSheet === 'fx' ? ' is-active' : '')}
+            onClick={() => setMobileSheet(s => s === 'fx' ? null : 'fx')}
+          >
+            <span className="am-mb-tab-ic">✨</span>
+            <span className="am-mb-tab-lbl">动效</span>
+          </button>
+          <button
+            type="button"
+            className="am-mb-tab"
+            onClick={() => { setIsPlaying(false); setExportModalOpen(true); }}
+          >
+            <span className="am-mb-tab-ic">⬇️</span>
+            <span className="am-mb-tab-lbl">导出</span>
+          </button>
+        </div>
+      )}
+      {/* v23-l mobile sheet — 上滑展开, 内嵌 LeftPane (复用同组件, sheet CSS reset 桌面定位) */}
+      {isMobile && mobileSheet && (
+        <>
+          <div className="am-mobile-sheet-backdrop" onClick={() => setMobileSheet(null)} />
+          <div className="am-mobile-sheet" role="dialog" aria-modal="true">
+            <div className="am-mobile-sheet-handle" onClick={() => setMobileSheet(null)} />
+            <div className="am-mobile-sheet-head">
+              <span>
+                {mobileSheet === 'assets' && '🎨 素材库'}
+                {mobileSheet === 'caption' && '💬 字幕'}
+                {mobileSheet === 'fx' && '✨ 动效'}
+                {mobileSheet === 'inspector' && '⚙️ 检查器'}
+              </span>
+              <button className="am-mobile-sheet-close" onClick={() => setMobileSheet(null)} aria-label="关闭">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="am-mobile-sheet-body">
+              <LeftPane
+                mode={project.mode ?? 'video'}
+                initialSeg={mobileSheet === 'caption' ? 'caption' : mobileSheet === 'fx' ? 'fx' : 'asset'}
+                uploads={uploads}
+                setUploads={setUploads}
+                userBGMs={userBGMs}
+                setUserBGMs={setUserBGMs}
+                onQuickAdd={(p) => { quickAdd(p); setMobileSheet(null); /* 加完关 sheet, 立即看效果 */ }}
+                onAddDraftAsClips={(s) => { addDraftAsClips(s); setMobileSheet(null); }}
+                onAddClipsBatch={(cs) => { addClipsBatch(cs); setMobileSheet(null); }}
+                playhead={playhead}
+                projectDuration={project.duration}
+              />
+            </div>
+          </div>
+        </>
+      )}
       {draftPopoverOpen && (
         <DraftPopover
           drafts={drafts}
@@ -3985,10 +4067,12 @@ type LibSub = 'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload';
 
 function LeftPane({
   mode = 'video',
+  initialSeg,
   uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddDraftAsClips,
   onAddClipsBatch, playhead, projectDuration,
 }: {
   mode?: ProjectMode;
+  initialSeg?: LibSeg;
   uploads: Material[];
   setUploads: React.Dispatch<React.SetStateAction<Material[]>>;
   userBGMs: BGMPreset[];
@@ -4003,7 +4087,7 @@ function LeftPane({
   const { draftSlots } = useMeme();
   const isGif = mode === 'gif';
   // GIF 模式: voice/music 不可用. 自动切回 asset tab 如果当前是 voice/music
-  const [seg, setSegRaw] = useState<LibSeg>('asset');
+  const [seg, setSegRaw] = useState<LibSeg>(initialSeg ?? 'asset');
   const setSeg = (s: LibSeg) => {
     if (isGif && (s === 'voice' || s === 'music')) return;
     setSegRaw(s);
@@ -4011,6 +4095,10 @@ function LeftPane({
   useEffect(() => {
     if (isGif && (seg === 'voice' || seg === 'music')) setSegRaw('asset');
   }, [isGif, seg]);
+  // mobile sheet 切换 tab 时, initialSeg 改变 → reset
+  useEffect(() => {
+    if (initialSeg) setSegRaw(initialSeg);
+  }, [initialSeg]);
   const [sub, setSub] = useState<LibSub>('combo');
   const [fxGroup, setFxGroup] = useState<FxGroup | 'all'>('all');
   const [q, setQ] = useState('');
