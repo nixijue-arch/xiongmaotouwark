@@ -1193,7 +1193,35 @@ function hydrateProject(raw: unknown): { project: ProjectState; cleanedInvalidIm
     // v24: gif mode 时 gifPresetId 必须有 (ExportModal 等下游依赖). 老 project 没字段时兜底 'wechat'.
     gifPresetId: r.mode === 'gif' ? (r.gifPresetId ?? 'wechat') : r.gifPresetId,
   };
-  return { project, cleanedInvalidImages: before - cleanClips.length };
+  // v24+: 任何进入 gif mode 的 project 强制 sanitize — 删 TTS/BGM clip (老 IDB / 草稿 / 模板 / undo 历史
+  // 可能含 audio clip, timeline UI filter 隐藏但 playback loop line 2653/2662/7933 仍遍历 clip 触发 playBGM/playTTS)
+  return { project: sanitizeProjectForMode(project), cleanedInvalidImages: before - cleanClips.length };
+}
+
+// v24+: GIF 模式 sanitize 不变式 — 物理删 TTS/BGM clip + 清 caption.linkedTTSId orphan + cap duration.
+// 任何 setProject/commit 进入 GIF state 都先过这, 是 reducer-level invariant.
+function sanitizeProjectForMode(project: ProjectState): ProjectState {
+  if (project.mode !== 'gif') return project;
+  const hasAudio = project.clips.some(c => c.trackId === 'tts' || c.trackId === 'bgm');
+  const durationOK = project.duration <= GIF_MAX_DURATION;
+  const presetOK = !!project.gifPresetId;
+  if (!hasAudio && durationOK && presetOK) return project; // 已干净, 不重建对象
+  const ttsIds = new Set(project.clips.filter(c => c.trackId === 'tts').map(c => c.id));
+  return {
+    ...project,
+    clips: project.clips
+      .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
+      .map(c => {
+        if (c.trackId === 'caption' && (c as CaptionClip).linkedTTSId && ttsIds.has((c as CaptionClip).linkedTTSId!)) {
+          const cleaned = { ...c } as CaptionClip;
+          delete cleaned.linkedTTSId;
+          return cleaned as Clip;
+        }
+        return c;
+      }),
+    duration: Math.min(project.duration, GIF_MAX_DURATION),
+    gifPresetId: project.gifPresetId ?? 'wechat',
+  };
 }
 
 function makeInitialProject(): ProjectState {
@@ -2220,7 +2248,8 @@ export function AnimateMode() {
   const [, setHistoryTick] = useState(0);
   const commit = useCallback((updater: (prev: ProjectState) => ProjectState) => {
     setProject(prev => {
-      const next = updater(prev);
+      // v24+: reducer-level invariant — GIF mode 强制无 TTS/BGM clip (防数据泄露到 playback engine)
+      const next = sanitizeProjectForMode(updater(prev));
       if (next === prev) return prev;
       historyRef.current.past.push(prev);
       if (historyRef.current.past.length > HISTORY_MAX) historyRef.current.past.shift();
@@ -2229,7 +2258,10 @@ export function AnimateMode() {
       return next;
     });
   }, []);
-  const setProjectLive = useCallback((updater: (prev: ProjectState) => ProjectState) => { setProject(updater); }, []);
+  // setProjectLive 也走 sanitize — 拖动 live preview 期间状态也保 GIF 干净
+  const setProjectLive = useCallback((updater: (prev: ProjectState) => ProjectState) => {
+    setProject(prev => sanitizeProjectForMode(updater(prev)));
+  }, []);
   const dragSnapshotRef = useRef<ProjectState | null>(null);
   const beginDrag = useCallback(() => { dragSnapshotRef.current = project; }, [project]);
   const endDrag = useCallback(() => {
@@ -2632,6 +2664,9 @@ export function AnimateMode() {
   //   没 audioSrc 且 genFailed: SS 触发式 fallback (无 sync 但有声)
   //   没 audioSrc 也没 fail: auto-gen pending — 静默等 (v23-k: 不再 SS 兜底, 避免 audio gen 完后双响)
   useEffect(() => {
+    // v24+: GIF 模式 hard guard — 无音频. 虽然 sanitize 已物理删 TTS/BGM clip, 这里加防御层
+    // (即使 sanitize 漏一处, playback engine 也不触发任何 audio)
+    if ((project.mode ?? 'video') === 'gif') return;
     for (const c of project.clips) {
       if (c.trackId === 'tts') {
         const ts = c as TTSClip;
@@ -3001,12 +3036,21 @@ export function AnimateMode() {
     }));
   }, [commit, project]);
   const setDuration = useCallback((d: number) => {
-    commit(p => ({ ...p, duration: Math.max(1, Math.round(d * 10) / 10) }));
-  }, [commit]);
+    // v24+: mode-aware cap — GIF 15s / video 60s. 超 cap toast 提示用户.
+    const targetMax = (project.mode ?? 'video') === 'gif' ? GIF_MAX_DURATION : 60;
+    const rounded = Math.round(d * 10) / 10;
+    const capped = Math.max(1, Math.min(targetMax, rounded));
+    if (capped < rounded) {
+      toast.info(`${(project.mode ?? 'video') === 'gif' ? 'GIF' : '视频'} 时长上限 ${targetMax}s, 已 cap 到 ${capped}s`);
+    }
+    commit(p => ({ ...p, duration: capped }));
+  }, [commit, project.mode]);
   const extendDuration = useCallback((delta: number) => {
-    commit(p => ({ ...p, duration: Math.min(60, p.duration + delta) }));
+    // v24+: mode-aware cap — GIF 15s / video 60s
+    const targetMax = (project.mode ?? 'video') === 'gif' ? GIF_MAX_DURATION : 60;
+    commit(p => ({ ...p, duration: Math.min(targetMax, p.duration + delta) }));
     toast(`时长已加长 ${delta}s`);
-  }, [commit]);
+  }, [commit, project.mode]);
   const clearAll = useCallback(() => {
     // 清空 = 清 clips + 重置 lanes 到全 1 (傻瓜式默认)
     commit(p => ({ ...p, clips: [], lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 } }));
@@ -3025,12 +3069,16 @@ export function AnimateMode() {
   const randomize = useCallback(async () => {
     const lines = ['家人们谁懂啊', '我直接裂开', '但我装作很淡定', '我可太牛了', '麻了麻了', '让你装！', '别问 问就是不知道', '你礼貌吗', '6 兄弟 6', '今天也要努力摸鱼'];
     const fxs: ImageFx[] = ['none', 'none', 'shake', 'zoom', 'flash'];
+    const isGifMode = (project.mode ?? 'video') === 'gif';
     const voices = VOICE_LIB.filter(v => v.lang.startsWith('zh')).map(v => v.id);
     const segs = 4;
-    const ttsGap = 1.0; // 每段 TTS 后预留 1s 间隔 (剪映风格连贯感)
-    const initialOffset = 0.3; // 第一段从 0.3s 开始 (头部留白)
+    // v24: GIF 模式无 TTS, 每段固定时长 1.5s + 0.3s gap, 总 ≈ 7.2s 控制在 GIF_MAX_DURATION (15s) 内
+    //      video 模式每段时长按 TTS 时长走, gap 1s (剪映风格)
+    const ttsGap = isGifMode ? 0.3 : 1.0;
+    const initialOffset = isGifMode ? 0 : 0.3;
+    const gifSegDur = 1.5;
     const ts = Date.now();
-    const tid = toast.loading('随机生成中 (panda+face 合成…)');
+    const tid = toast.loading(isGifMode ? '随机生成中 (GIF 模式 · 无声)' : '随机生成中 (panda+face 合成…)');
     try {
       const composedImages = await Promise.all(
         Array.from({ length: segs }, async () => {
@@ -3051,11 +3099,21 @@ export function AnimateMode() {
       let cursor = initialOffset;
       for (let i = 0; i < segs; i++) {
         const line = lines[Math.floor(Math.random() * lines.length)];
-        const voice = voices[Math.floor(Math.random() * voices.length)];
-        const ttsDur = estimateTTSDuration(line, voice);
+        // GIF 模式: 每段 image 固定 gifSegDur, caption 跟 image 同长. 无 TTS.
+        // video 模式: 每段按 TTS 时长 + gap.
+        let segDur: number;
+        let captionEnd: number;
+        let voice = voices[Math.floor(Math.random() * voices.length)];
+        if (isGifMode) {
+          segDur = gifSegDur + ttsGap;
+          captionEnd = cursor + gifSegDur;
+        } else {
+          const ttsDur = estimateTTSDuration(line, voice);
+          segDur = ttsDur + ttsGap;
+          captionEnd = cursor + ttsDur;
+        }
         const segStart = cursor;
-        const ttsEnd = segStart + ttsDur;
-        const segEnd = ttsEnd + ttsGap;
+        const segEnd = segStart + segDur;
         const imageId = `ri${i}-${ts}`;
         next.push({
           id: imageId, trackId: 'image', lane: 0,
@@ -3066,17 +3124,20 @@ export function AnimateMode() {
         });
         next.push({
           id: `rc${i}-${ts}`, trackId: 'caption', lane: 0,
-          start: segStart, end: ttsEnd, text: line,
+          start: segStart, end: captionEnd, text: line,
         });
-        next.push({
-          id: `rt${i}-${ts}`, trackId: 'tts', lane: 0,
-          start: segStart, end: ttsEnd, text: line, voice,
-        });
+        // v24: GIF 模式跳过 TTS clip (无声音)
+        if (!isGifMode) {
+          next.push({
+            id: `rt${i}-${ts}`, trackId: 'tts', lane: 0,
+            start: segStart, end: captionEnd, text: line, voice,
+          });
+        }
         // FX clip 到 FX 轨 (时间轴可见, 右侧可调时长 / 类型). 跳 'none' 避免空 fx clip
         const fxPick = fxs[Math.floor(Math.random() * fxs.length)];
         if (fxPick !== 'none') {
           const fxInfo = FX_LIB.find(f => f.id === fxPick);
-          const fxDur = Math.min(ttsDur, fxInfo?.defaultDuration ?? 0.8);
+          const fxDur = Math.min(captionEnd - segStart, fxInfo?.defaultDuration ?? 0.8);
           next.push({
             id: `rfx${i}-${ts}`, trackId: 'fx', lane: 0,
             start: segStart, end: segStart + fxDur,
@@ -3085,14 +3146,18 @@ export function AnimateMode() {
         }
         cursor = segEnd;
       }
-      // 总时长自适应 (最少 8s, 防 clip 顶不下)
-      const totalDur = Math.max(cursor, 8);
-      const bgm = BGM_LIB[Math.floor(Math.random() * BGM_LIB.length)];
-      next.push({
-        id: `rb-${ts}`, trackId: 'bgm', lane: 0, start: 0, end: totalDur,
-        bgmId: bgm.id, name: bgm.name, volume: 0.5,
-      });
-      // FIX: 之前 commit(() => ({...})) 丢 mode/gifPresetId. 现 explicit 构造完整 ProjectState 保留 schema.
+      // 总时长自适应 — GIF: cap GIF_MAX_DURATION (15s) · video: 最少 8s
+      let totalDur = isGifMode
+        ? Math.min(Math.max(cursor, 4), GIF_MAX_DURATION)
+        : Math.max(cursor, 8);
+      // v24: GIF 模式跳过 BGM clip (无声音)
+      if (!isGifMode) {
+        const bgm = BGM_LIB[Math.floor(Math.random() * BGM_LIB.length)];
+        next.push({
+          id: `rb-${ts}`, trackId: 'bgm', lane: 0, start: 0, end: totalDur,
+          bgmId: bgm.id, name: bgm.name, volume: 0.5,
+        });
+      }
       const newProject: ProjectState = {
         duration: totalDur,
         lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
@@ -3108,7 +3173,11 @@ export function AnimateMode() {
       setSelectedId(null);
       setPlayhead(0);
       toast.dismiss(tid);
-      toast.success(`已生成 4 段配套熊猫头 · 总时长 ${totalDur.toFixed(1)}s · 段间 1s`);
+      toast.success(
+        isGifMode
+          ? `已生成 4 段 GIF · 总时长 ${totalDur.toFixed(1)}s · 无声`
+          : `已生成 4 段配套熊猫头 · 总时长 ${totalDur.toFixed(1)}s · 段间 1s`,
+      );
     } catch (e) {
       toast.dismiss(tid);
       toast.error('随机生成失败: ' + (e as Error).message);
@@ -3524,8 +3593,8 @@ export function AnimateMode() {
           onClick: () => updateClipCommit(c.id, { fx: 'move', endTransform: { ...(ic.transform ?? DEFAULT_TRANSFORM) } }) });
       }
     }
-    // v23-k: caption clip 特定 — 链接 / 生成配音
-    if (c.trackId === 'caption') {
+    // v23-k: caption clip 特定 — 链接 / 生成配音. v24: GIF 模式无声音, 整段隐藏配音相关项
+    if (c.trackId === 'caption' && (project.mode ?? 'video') !== 'gif') {
       const cc = c as CaptionClip;
       items.push({ id: 'sep-cap', label: '', separator: true });
       if (cc.linkedTTSId) {
@@ -3829,11 +3898,12 @@ export function AnimateMode() {
             return next;
           });
 
-          // 5) 立即 IDB write + audio cleanup (仅 gif 时)
+          // 5) 立即 IDB write + audio cleanup
           await idbSet(getCurrentIdbKey(m), committedProject).catch(() => {});
+          // v24+: 切到 GIF 时 audioEngine.destroyAll() 一次性彻底 (含 cancelAll 停 BGM synth + destroyAll*Players)
+          // 原来只调 destroyAll*Players 漏了 cancelAll → 内置 BGM synth (Web Audio) 仍在响. 真 bug 修复.
           if (m === 'gif') {
-            audioEngine.destroyAllTTSPlayers();
-            audioEngine.destroyAllUserBGMPlayers();
+            audioEngine.destroyAll();
           }
         }}
       />
@@ -3871,6 +3941,7 @@ export function AnimateMode() {
           onRandomize={randomize}
           onOpenShortcuts={() => setShortcutsModalOpen(true)}
           onToggleDraftPopover={() => setDraftPopoverOpen(o => !o)}
+          mode={project.mode ?? 'video'}
         />
         <RightPane
           clip={selectedClip}
@@ -4158,10 +4229,10 @@ function AnimateToolbar({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [durOpen]);
-  // GIF 模式时长上限 30s, 视频 60s
+  // v24+: GIF 模式时长上限 GIF_MAX_DURATION (15s), 视频 60s. preset 列表 ≤ targetMax.
   const isGif = mode === 'gif';
   const maxDur = isGif ? GIF_MAX_DURATION : 60;
-  const DURATION_PRESETS = isGif ? [3, 4, 5, 6, 10, 15, 20] : [5, 10, 15, 20, 30, 45, 60];
+  const DURATION_PRESETS = isGif ? [3, 4, 5, 6, 10, 15] : [5, 10, 15, 20, 30, 45, 60];
 
   return (
     <div className="am-toolbar win7-titlebar">
@@ -4219,7 +4290,7 @@ function AnimateToolbar({
         <button
           className="am-tb-btn am-tb-duration-btn"
           onClick={() => setDurOpen(o => !o)}
-          title={isGif ? 'GIF 时长上限 30s' : '视频时长上限 60s'}
+          title={isGif ? `GIF 时长上限 ${GIF_MAX_DURATION}s` : '视频时长上限 60s'}
           type="button"
         >
           ⏱ <strong>{duration.toFixed(1)}s</strong>
@@ -4800,12 +4871,13 @@ function LeftPane({
               {/* v23-i: 字幕实用功能扩展 — 位置预设 / 沙雕 emoji 一键插 / 批量导入 */}
               <CaptionPositionPresets onQuickAdd={onQuickAdd} />
               <CaptionEmojiPicker onQuickAdd={onQuickAdd} />
-              {/* v23-k: 批量导入加 "同步生成配音" toggle */}
+              {/* v23-k: 批量导入加 "同步生成配音" toggle. v24: 接收 isGif 强制隐藏 TTS toggle */}
               <CaptionBatchImport
                 onQuickAdd={onQuickAdd}
                 onAddClipsBatch={onAddClipsBatch}
                 playhead={playhead}
                 projectDuration={projectDuration}
+                isGif={isGif}
               />
             </div>
           )}
@@ -5379,20 +5451,24 @@ function CaptionEmojiPicker({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => vo
   );
 }
 
-// v23-i: 批量字幕导入 — paste 多行文本 → 自动按行 split + 时间均分
-function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, projectDuration }: {
+// v23-i: 批量字幕导入 — paste 多行文本 → 自动按行 split + 时间均分.
+// v24: GIF 模式强制 withTTS=false (GIF 无声音), 隐藏 toggle.
+function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, projectDuration, isGif }: {
   onQuickAdd: (p: DragPayload) => void;
   onAddClipsBatch: (clips: Clip[]) => void;
   playhead: number;
   projectDuration: number;
+  isGif?: boolean;
 }) {
   const [text, setText] = useState('');
-  // v23-k: 默认"一起加" (字幕+配音双向链接), 沙雕动画 99% 用户希望两个一起
-  const [withTTS, setWithTTS] = useState(true);
+  // v23-k: 默认"一起加" (字幕+配音双向链接). v24: GIF 模式强制 false.
+  const [withTTS, setWithTTS] = useState(!isGif);
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  // GIF 模式下 useState 初值是 false 但若 mode 切换后用户没刷, 再保险一次:
+  const effWithTTS = !isGif && withTTS;
   const doImport = () => {
     if (lines.length === 0) { toast.error('粘贴一段台词, 每行一条字幕'); return; }
-    if (withTTS) {
+    if (effWithTTS) {
       const voice = VOICE_LIB[0].id;
       const ttsVoice = resolveVoiceId(voice);
       const clips: Clip[] = [];
@@ -5426,34 +5502,36 @@ function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, projectDura
   };
   return (
     <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📋 批量导入台词稿</div>
-      {/* v23-k: 二选一 大 chip 顶部, 默认"一起加" — 用户一眼看到结果是啥 */}
-      <div className="am-pair-mode-row" role="radiogroup" aria-label="生成模式">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={withTTS}
-          className={'am-pair-mode' + (withTTS ? ' is-active' : '')}
-          onClick={() => setWithTTS(true)}
-          title="每行台词同时建 1 个字幕 + 1 个配音 · 双向链接 (改一个另一个自动跟)"
-        >
-          <span className="am-pair-mode-ic">✨</span>
-          <span className="am-pair-mode-main">字幕 + 配音 一起加</span>
-          <span className="am-pair-mode-sub">推荐 · 双向链接</span>
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={!withTTS}
-          className={'am-pair-mode' + (!withTTS ? ' is-active' : '')}
-          onClick={() => setWithTTS(false)}
-          title="仅字幕轨, 每条 2.5s 接龙"
-        >
-          <span className="am-pair-mode-ic">💬</span>
-          <span className="am-pair-mode-main">只加字幕</span>
-          <span className="am-pair-mode-sub">每条 2.5s</span>
-        </button>
-      </div>
+      <div className="am-cap-extra-head">📋 批量导入台词稿{isGif && <span className="am-cap-extra-sub" style={{ marginLeft: 8 }}>(GIF 模式 · 仅字幕)</span>}</div>
+      {/* v23-k: 二选一 大 chip 顶部, 默认"一起加" — 用户一眼看到结果是啥. v24: GIF 模式不显示 toggle */}
+      {!isGif && (
+        <div className="am-pair-mode-row" role="radiogroup" aria-label="生成模式">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={withTTS}
+            className={'am-pair-mode' + (withTTS ? ' is-active' : '')}
+            onClick={() => setWithTTS(true)}
+            title="每行台词同时建 1 个字幕 + 1 个配音 · 双向链接 (改一个另一个自动跟)"
+          >
+            <span className="am-pair-mode-ic">✨</span>
+            <span className="am-pair-mode-main">字幕 + 配音 一起加</span>
+            <span className="am-pair-mode-sub">推荐 · 双向链接</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!withTTS}
+            className={'am-pair-mode' + (!withTTS ? ' is-active' : '')}
+            onClick={() => setWithTTS(false)}
+            title="仅字幕轨, 每条 2.5s 接龙"
+          >
+            <span className="am-pair-mode-ic">💬</span>
+            <span className="am-pair-mode-main">只加字幕</span>
+            <span className="am-pair-mode-sub">每条 2.5s</span>
+          </button>
+        </div>
+      )}
       <textarea
         className="am-input am-textarea am-cap-batch-input"
         value={text}
@@ -5467,7 +5545,7 @@ function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, projectDura
         onClick={doImport}
         disabled={lines.length === 0}
       >
-        ✚ 加 {lines.length > 0 ? `${lines.length} 段` : ''} {withTTS ? '→ 字幕+配音' : '→ 字幕'}
+        ✚ 加 {lines.length > 0 ? `${lines.length} 段` : ''} {effWithTTS ? '→ 字幕+配音' : '→ 字幕'}
       </button>
     </div>
   );
@@ -5907,7 +5985,7 @@ function PreviewPane({
   clips, lanes, time, duration, isPlaying, selectedId,
   onSelect, onPlayPause, onSeek, onTransformLive, onCaptionTextLive, onUpdateClipLive, onUpdateClipCommit, onBeginDrag, onEndDrag, onQuickAdd,
   onClipContextMenu,
-  onRandomize, onOpenShortcuts, onToggleDraftPopover,
+  onRandomize, onOpenShortcuts, onToggleDraftPopover, mode,
 }: {
   clips: Clip[];
   lanes: LaneCount;
@@ -5930,7 +6008,9 @@ function PreviewPane({
   onRandomize?: () => void;
   onOpenShortcuts?: () => void;
   onToggleDraftPopover?: () => void;
+  mode?: ProjectMode;
 }) {
+  const isGifMode = mode === 'gif';
   const [aspect, setAspect] = useState<AspectId>('16:9');
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
@@ -6151,8 +6231,15 @@ function PreviewPane({
               {(onRandomize || onOpenShortcuts || onToggleDraftPopover) && (
                 <div className="am-preview-empty-cta">
                   {onRandomize && (
-                    <button type="button" className="am-preview-empty-btn am-preview-empty-btn-primary" onClick={onRandomize} title="一键生成 4 段沙雕作品 (随机熊猫+台词+配音+BGM)">
-                      <Shuffle size={13} strokeWidth={2.2} /> 🎲 一键生成
+                    <button
+                      type="button"
+                      className="am-preview-empty-btn am-preview-empty-btn-primary"
+                      onClick={onRandomize}
+                      title={isGifMode
+                        ? '一键生成 4 段 GIF (随机熊猫+字幕, 无声音)'
+                        : '一键生成 4 段沙雕作品 (随机熊猫+台词+配音+BGM)'}
+                    >
+                      <Shuffle size={13} strokeWidth={2.2} /> 🎲 一键生成{isGifMode ? ' (GIF)' : ''}
                     </button>
                   )}
                   {onToggleDraftPopover && (
@@ -7871,7 +7958,9 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
   //   有 audioSrc → syncTTSPlayer 严格绑 playhead (出现时强 cancel pending SS)
   //   没 audioSrc 且 genFailed → SS 触发式 fallback
   //   没 audioSrc 也没 fail → auto-gen pending, 静默
+  // v24+: GIF 模式 hard guard, 无音频 (跟主 transport 一致)
   useEffect(() => {
+    if ((project.mode ?? 'video') === 'gif') return;
     for (const c of project.clips) {
       if (c.trackId === 'tts') {
         const ts = c as TTSClip;
