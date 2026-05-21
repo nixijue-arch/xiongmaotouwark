@@ -2,7 +2,7 @@
 // 范式: 循环优先. clips 全是 [0,duration] 全幅图层 (无时间轴), 循环本身取代时间轴.
 // 复用 animcore 纯渲染核心 + gifloop 循环引擎. 绝不 import animatemode (避免拉起 audio 单例).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, Download, Repeat, Trash2, Upload, Loader2, FlipHorizontal, Type as TypeIcon, Eye, Layers, X } from 'lucide-react';
+import { Play, Pause, Download, Trash2, Upload, Loader2, FlipHorizontal, Type as TypeIcon, Eye, Layers, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import { ALL_PANDAS, ALL_FACES, type Material } from '@/data/materials';
@@ -334,7 +334,6 @@ export function GifMode() {
     <div className={`gm-root${isMobile ? ' gm-mobile' : ''}`}>
       {/* ===== 顶栏 ===== */}
       <div className="gm-topbar">
-        <div className="gm-brand"><Repeat size={16} /> GIF 循环</div>
         <div className="gm-presets">
           {GIF_PRESETS.map(p => (
             <button key={p.id} title={p.note}

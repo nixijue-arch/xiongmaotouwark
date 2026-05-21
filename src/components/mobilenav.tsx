@@ -18,7 +18,6 @@ import {
   FileText,
   User,
   Film,
-  Repeat,
 } from 'lucide-react';
 import { useMeme } from '@/context/memecontext';
 import type { Page } from '@/app';
@@ -39,7 +38,6 @@ const NAV_ITEMS: Array<{
   { page: 'quick', icon: Zap, labelZh: '快速生图', labelEn: 'Quick' },
   { page: 'editor', icon: PenTool, labelZh: '表情包编辑器', labelEn: 'Meme Editor' },
   { page: 'animate', icon: Film, labelZh: '沙雕动画剪辑', labelEn: 'Animation Editor' },
-  { page: 'gif', icon: Repeat, labelZh: 'GIF 循环', labelEn: 'GIF Loop' },
   { page: 'collection', icon: FolderOpen, labelZh: '草图本', labelEn: 'Drafts' },
   { page: 'museum', icon: ImageIcon, labelZh: '博物馆', labelEn: 'Museum' },
   { page: 'about', icon: BookOpen, labelZh: '了解熊猫头', labelEn: 'About' },

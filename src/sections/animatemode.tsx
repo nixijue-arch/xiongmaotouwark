@@ -49,6 +49,7 @@ import {
   type ProjectMode, type GifPresetId, type ProjectState,
   type MediaAsset, type FxApply,
 } from '@/lib/animcore';
+import { GifMode } from '@/sections/gifmode';
 
 // ============================================================
 // Types
@@ -1633,6 +1634,10 @@ export function AnimateMode() {
   const [projectHydrated, setProjectHydrated] = useState(false);
   // v23-l mobile: 底栏 4 tab → sheet
   const [mobileSheet, setMobileSheet] = useState<'assets' | 'caption' | 'fx' | 'inspector' | null>(null);
+  // 视频/GIF 视图 (融入: GIF 是 animate 内的视图, 非独立板块). localStorage 持久.
+  const [view, setView] = useState<'video' | 'gif'>(() => {
+    try { return localStorage.getItem('xmw.animate-view') === 'gif' ? 'gif' : 'video'; } catch { return 'video'; }
+  });
   // v23-l audit-fix: sheet drag-to-dismiss (leftover #4). 之前 cursor:grab 撒谎 — 现在 PointerDown/Move/Up 真支持向下拖关.
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStartYRef = useRef<number | null>(null);
@@ -3271,124 +3276,15 @@ export function AnimateMode() {
         ttsGenStats={ttsGenStats}
         onExportJSON={exportProjectJSON}
         onImportJSON={importProjectJSON}
-        mode={project.mode ?? 'video'}
-        onModeChange={async (m) => {
-          // v24 双缓存切 mode 流程:
-          //   1) 先保存当前 state 到当前 mode 对应的 IDB key (避免 debounce 漏)
-          //   2) 读取目标 mode 缓存
-          //   3) AppDialog 弹"复制时间轴"checkbox (video→gif 默认勾, gif→video 默认不勾)
-          //   4) 勾选: 复制当前 state 到目标 mode (v→g 自动裁/删 TTS/BGM)
-          //      不勾: 用目标 mode 已有缓存; 若无 → 新建空白
-          //   5) commit + idbSet 目标 key + (仅切 gif 时) 清 audio player
-          if (m === (project.mode ?? 'video')) return;
-          const currentMode: ProjectMode = project.mode ?? 'video';
-          const isV2G = currentMode === 'video' && m === 'gif';
-
-          // 1) 保存当前 state 到当前 mode 对应 key
-          await idbSet(getCurrentIdbKey(currentMode), project).catch(() => {});
-
-          // 2) 读取目标 mode 缓存
-          const targetRaw = await idbGet<ProjectState>(getCurrentIdbKey(m)).catch(() => undefined);
-          const targetHydrated = targetRaw ? hydrateProject(targetRaw) : null;
-          const hasTargetCache = !!targetHydrated && targetHydrated.project.clips.length > 0;
-
-          // 3) summary
-          const tts = project.clips.filter(c => c.trackId === 'tts').length;
-          const bgm = project.clips.filter(c => c.trackId === 'bgm').length;
-          const imgs = project.clips.filter(c => c.trackId === 'image').length;
-          const captions = project.clips.filter(c => c.trackId === 'caption').length;
-          const summaryLines: string[] = [];
-          if (imgs > 0 || captions > 0) summaryLines.push(`${imgs} 张图片 · ${captions} 条字幕`);
-          if (tts > 0 || bgm > 0) summaryLines.push(`${tts} 个配音 + ${bgm} 个 BGM`);
-
-          const checkboxKey = 'copyTimeline';
-          const checkboxLabel = isV2G
-            ? `复制视频时间轴到 GIF (自动裁 ${GIF_MAX_DURATION}s 后片段并移除配音/BGM)`
-            : '复制 GIF 时间轴到视频';
-          const targetLabel = m === 'gif' ? `GIF (≤${GIF_MAX_DURATION}s, 无声音)` : '视频';
-
-          const res = await showDialog({
-            title: `切换到 ${m === 'gif' ? 'GIF' : '视频'} 模式`,
-            message: (
-              <>
-                <p>当前 <strong>{currentMode === 'gif' ? 'GIF' : '视频'}</strong> 工作区:</p>
-                <ul>
-                  {summaryLines.length > 0
-                    ? summaryLines.map((l, i) => <li key={i}>{l}</li>)
-                    : <li>(空)</li>}
-                </ul>
-                {hasTargetCache ? (
-                  <p>💡 目标 <strong>{targetLabel}</strong> 已有 {targetHydrated!.project.clips.length} 个片段, 切回会保留它.</p>
-                ) : (
-                  <p>目标 <strong>{targetLabel}</strong> 工作区为空.</p>
-                )}
-              </>
-            ),
-            confirmText: '切换',
-            checkboxes: [{
-              key: checkboxKey,
-              label: checkboxLabel,
-              defaultChecked: isV2G,
-              description: isV2G
-                ? '勾选: 复制当前视频时间轴到 GIF 工作区 (会裁剪) · 不勾: 用 GIF 已有缓存或空白'
-                : '勾选: 复制当前 GIF 时间轴到视频工作区 · 不勾: 用视频已有缓存或空白',
-            }],
-          });
-
-          if (!res.confirmed) return;
-          const shouldCopy = !!res.checkboxes[checkboxKey];
-
-          // 4) commit functional updater — 读 fresh prev 而非 closure project
-          //    (修 H2: showDialog open 期间, TTS auto-gen 可能写 setProjectLive 更新 project state;
-          //     如果用 closure project 构造 nextProject 会丢这些中间改动 — 用 prev 让最新 state 入合并)
-          let committedProject: ProjectState = project; // 闭包外暴露给后续 idbSet
-          commit((prev) => {
-            let next: ProjectState;
-            if (shouldCopy) {
-              if (m === 'gif') {
-                // video → gif: 裁 ≥GIF_MAX_DURATION + 删 TTS/BGM + 清 orphan linkedTTSId
-                const ttsIds = new Set(prev.clips.filter(c => c.trackId === 'tts').map(c => c.id));
-                next = {
-                  ...prev,
-                  mode: 'gif',
-                  duration: Math.min(prev.duration, GIF_MAX_DURATION),
-                  gifPresetId: prev.gifPresetId ?? 'wechat',
-                  clips: prev.clips
-                    .filter(c => c.trackId !== 'tts' && c.trackId !== 'bgm')
-                    .filter(c => c.start < GIF_MAX_DURATION)
-                    .map(c => {
-                      if (c.trackId === 'caption' && (c as CaptionClip).linkedTTSId && ttsIds.has((c as CaptionClip).linkedTTSId!)) {
-                        const cleaned = { ...c } as CaptionClip;
-                        delete cleaned.linkedTTSId;
-                        return cleaned as Clip;
-                      }
-                      return c;
-                    }),
-                };
-              } else {
-                // gif → video: 直接 copy + mode 切到 video
-                next = { ...prev, mode: 'video' };
-              }
-            } else if (targetHydrated) {
-              next = targetHydrated.project;
-            } else {
-              next = m === 'gif'
-                ? { duration: 6, mode: 'gif', gifPresetId: 'wechat', lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 }, clips: [] }
-                : { duration: 12, mode: 'video', lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 }, clips: [] };
-            }
-            committedProject = next;
-            return next;
-          });
-
-          // 5) 立即 IDB write + audio cleanup
-          await idbSet(getCurrentIdbKey(m), committedProject).catch(() => {});
-          // v24+: 切到 GIF 时 audioEngine.destroyAll() 一次性彻底 (含 cancelAll 停 BGM synth + destroyAll*Players)
-          // 原来只调 destroyAll*Players 漏了 cancelAll → 内置 BGM synth (Web Audio) 仍在响. 真 bug 修复.
-          if (m === 'gif') {
-            audioEngine.destroyAll();
-          }
+        mode={view}
+        onModeChange={(m) => {
+          // 融入: 视频/GIF 只切视图 (GIF 视图渲 GifMode 循环编辑器), 无确认弹窗.
+          setView(m);
+          setIsPlaying(false);
+          try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ }
         }}
       />
+      {view === 'video' ? (<>
       <div className="am-workspace">
         <LeftPane
           mode={project.mode ?? 'video'}
@@ -3460,9 +3356,12 @@ export function AnimateMode() {
         onSetDuration={setDuration}
         onClipContextMenu={onClipContextMenu}
       />
+      </>) : (
+        <GifMode />
+      )}
       {ctxMenu.render()}
       {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}
-      {isMobile && (
+      {isMobile && view === 'video' && (
         <div className="am-mobile-bottombar am-mobile-bottombar--5" role="tablist" aria-label="底部工具">
           <button
             type="button"
@@ -3521,7 +3420,7 @@ export function AnimateMode() {
         </div>
       )}
       {/* v23-l mobile sheet — 上滑展开. 4 tab + 5th (Inspector MVP) 分支 */}
-      {isMobile && mobileSheet && (
+      {isMobile && view === 'video' && mobileSheet && (
         <>
           <div className="am-mobile-sheet-backdrop" onClick={() => setMobileSheet(null)} />
           <div
@@ -3735,8 +3634,8 @@ function AnimateToolbar({
         )}
       </div>
       {/* v23-l: 视频 / GIF 模式切换. GIF 模式无声 (TTS/BGM 隐藏) + 短时长 + 走 GIF encoder */}
-      {/* GIF 模式 toggle 隐藏 — GIF 已迁到独立 ?page=gif 板块. animate = 纯视频. mode 机器整体清理在 P4. */}
-      {false && onModeChange && (
+      {/* 视频 / GIF 视图切换 (Win7 金色 toggle, 无确认弹窗即时切). GIF 视图 = 循环编辑器 GifMode. */}
+      {onModeChange && (
         <div className="am-tb-mode" role="tablist" aria-label="输出模式">
           <button
             type="button"
@@ -3756,6 +3655,7 @@ function AnimateToolbar({
           >🎞️ GIF</button>
         </div>
       )}
+      {mode === 'video' && (<>
       <div className="am-toolbar-stat">
         <span>{clipCount} 片段</span>
         {ttsGenStats && ttsGenStats.total > 0 && (ttsGenStats.pending > 0 || ttsGenStats.failed > 0) && (
@@ -3887,6 +3787,7 @@ function AnimateToolbar({
           )}
         </div>
       )}
+      </>)}
     </div>
   );
 }
