@@ -53,7 +53,7 @@ const _bboxCache = new Map<string, Bbox>();
 // 把 face PNG 按 alpha>50 的 bbox 抠出来 → 紧凑 dataURL, 加上 padding 防边缘 alpha-clip
 // 编辑器加 face 元素时用 — 元素尺寸 = bbox 而不是 naturalWidth 含的大量透明 padding
 // 这样 face 在 panda anchor 里精确就位, 不会因为 PNG 含 padding 撑得过大
-export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: string; w: number; h: number }> {
+export async function bboxCropImage(src: string, padPx = 4, fillShell = false): Promise<{ dataUrl: string; w: number; h: number }> {
   const img = await loadImage(src);
   const [x1, y1, x2, y2] = getContentBbox(img);
   const cw = Math.max(1, x2 - x1);
@@ -61,7 +61,12 @@ export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: 
   const c = document.createElement('canvas');
   c.width = cw + padPx * 2;
   c.height = ch + padPx * 2;
-  c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  if (fillShell) {
+    // 沙雕动画两图层 panda: 内部 transparent 填白防场景透出 (几何尺寸不变 → face anchor 不偏)
+    drawShellFilled(c.getContext('2d', { willReadFrequently: true })!, img, x1, y1, cw, ch, padPx, padPx, c.width, c.height);
+  } else {
+    c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  }
   return { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height };
 }
 
@@ -195,6 +200,35 @@ function detectOuterTransparent(imgData: Uint8ClampedArray, w: number, h: number
     if (y < h - 1) stack.push(idx + w);
   }
   return visited;
+}
+
+// 在画布上画"内部填白、外部透明"的 panda 外壳:
+// fill 白底 → 画 panda → flood-fill 标记外部 transparent 并 erase 回 alpha=0.
+// 结果: panda 黑廓内 alpha=0 处变白 (遮住场景背景), 廓外保持 transparent.
+// 复用给 flattenAlphaShell (单拖 panda/face) + bboxCropImage(fillShell) (GIF 配套/随机两图层).
+function drawShellFilled(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  sx: number, sy: number, sw: number, sh: number,
+  dx: number, dy: number, W: number, H: number,
+): void {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+  // 用原始 panda 像素检测外部 transparent (composite 后 alpha=0 处已变白 opaque, 不能用)
+  const detect = document.createElement('canvas');
+  detect.width = W;
+  detect.height = H;
+  const dctx = detect.getContext('2d', { willReadFrequently: true });
+  if (!dctx) return;
+  dctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+  const outerMask = detectOuterTransparent(dctx.getImageData(0, 0, W, H).data, W, H, 30);
+  const md = ctx.getImageData(0, 0, W, H);
+  const data = md.data;
+  for (let i = 0; i < W * H; i++) {
+    if (outerMask[i]) data[i * 4 + 3] = 0;
+  }
+  ctx.putImageData(md, 0, 0);
 }
 
 export function composeMemeCanvas(opts: ComposeOpts): HTMLCanvasElement {
@@ -459,12 +493,13 @@ export async function calcEditorFaceLayout(args: {
  *
  * @returns { croppedSrc, x, y, w, h } — panda 元素位置 + 尺寸 + 已 bbox-crop 的 src
  */
-export async function getEditorPandaBox(src: string): Promise<{
+export async function getEditorPandaBox(src: string, opts?: { fillShell?: boolean }): Promise<{
   croppedSrc: string;
   x: number; y: number;
   w: number; h: number;
 }> {
-  const cropped = await bboxCropImage(src);
+  // fillShell: GIF 两图层 panda 内部填白防场景透出 (默认 false → 编辑器/快速/校准路径零影响)
+  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false);
   const aspect = cropped.w / Math.max(1, cropped.h);
   const FRAME = 350;
   let w = FRAME, h = FRAME;
@@ -526,29 +561,8 @@ export async function flattenAlphaShell(srcUrl: string): Promise<string> {
   c.height = H;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('canvas 2d ctx unavailable');
-  // 1. fill 整画布白底 (panda 内部 alpha=0 处会透出白)
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-  // 2. draw panda — alpha>0 黑廓盖在白上, 半透明边缘 anti-alias 在白底上 blend
-  ctx.drawImage(img, bx1, by1, W, H, 0, 0, W, H);
-  // 3. 用 panda 原始 ImageData 检测外部 transparent, erase 输出对应像素回 transparent
-  //    (用原始 panda 像素而不是已 composite 后的, 因为 composite 后 alpha=0 处变成白 opaque 了)
-  const detect = document.createElement('canvas');
-  detect.width = W;
-  detect.height = H;
-  const dctx = detect.getContext('2d', { willReadFrequently: true });
-  if (!dctx) throw new Error('canvas 2d ctx unavailable');
-  dctx.drawImage(img, bx1, by1, W, H, 0, 0, W, H);
-  const detectData = dctx.getImageData(0, 0, W, H).data;
-  const outerMask = detectOuterTransparent(detectData, W, H, 30);
-  const mainImgData = ctx.getImageData(0, 0, W, H);
-  const mainData = mainImgData.data;
-  for (let i = 0; i < W * H; i++) {
-    if (outerMask[i]) {
-      mainData[i * 4 + 3] = 0;
-    }
-  }
-  ctx.putImageData(mainImgData, 0, 0);
+  // 内部 transparent 填白, 外部 transparent 保持 (黑廓内遮场景, 廓外透出背景)
+  drawShellFilled(ctx, img, bx1, by1, W, H, 0, 0, W, H);
   const url = c.toDataURL('image/png');
   // LRU 淘汰最旧
   if (_flattenedShellCache.size >= FLATTENED_SHELL_CACHE_LIMIT) {

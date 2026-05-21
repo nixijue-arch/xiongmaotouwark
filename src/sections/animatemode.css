@@ -2766,6 +2766,27 @@
   position: relative;
   /* win7-panel 自带 background / border / shadow */
 }
+/* 联网搜图 / 智能抠脸 入口按钮 (video + gif 素材面板复用) */
+.am-matsrc { margin: 0 0 8px; }
+.am-matsrc-btn { width: 100%; justify-content: center; }
+
+/* 配套 单层/双层 切换 (仅 GIF onAddCombo 时显示) */
+.am-combo-layers { display: flex; gap: 4px; margin: 8px 0 4px; }
+.am-combo-layer-btn {
+  flex: 1; padding: 6px 4px; font-size: 11.5px; font-weight: 700;
+  border-radius: 7px; cursor: pointer; white-space: nowrap;
+  color: var(--retro-muted, #6682a4);
+  background: rgba(255,255,255,0.7);
+  border: 1px solid var(--retro-stroke, #7f9dc8);
+  transition: all 140ms;
+}
+.am-combo-layer-btn:hover { color: var(--retro-text, #18324f); background: #fff; }
+.am-combo-layer-btn.is-active {
+  background: linear-gradient(180deg, #fff4ec 0%, #ffe1c8 100%);
+  color: #c84a00; border-color: rgba(255,94,0,0.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.85);
+}
+
 .am-tl-head {
   display: flex;
   align-items: center;

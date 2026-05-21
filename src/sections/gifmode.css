@@ -1,5 +1,5 @@
 /* gifmode.css — GIF 视图 (融入 animate, 复用 am-toolbar / am-workspace / am-preview-pane 外壳) */
-/* 仅定义 GIF 专属控件 + 面板内容, 视觉用全站 --retro-*/--win7-* tokens 跟视频视图一致 */
+/* 仅定义 GIF 专属控件 + 面板内容, 视觉走全站 retro / win7 tokens 跟视频视图一致 */
 
 /* ---- 顶栏 GIF 控件 (在蓝色 am-toolbar 上, 故 light glass) ---- */
 .gm-tb-select {
@@ -31,6 +31,77 @@
   color: var(--retro-text, #18324f);
   scrollbar-width: thin;
 }
+/* 左栏改 flex 列: seg bar + subtabs 固定, 素材体滚动 (跟视频左栏一致) */
+.gm-pane-left { display: flex; flex-direction: column; overflow: hidden; }
+/* 顶部 tab 适配 — 3 段按钮 + 6 子tab 各 flex:1 平铺满栏宽 (不再左挤; 视频是 5 段网格, GIF 只 3 段) */
+.gm-segbar { display: flex; gap: 6px; margin-bottom: 8px; flex: none; }
+.gm-segbar .am-seg-btn { flex: 1; min-width: 0; padding: 7px 2px; }
+.gm-pane-left .am-subtabs { flex: none; gap: 2px; padding: 6px 4px 4px; }
+.gm-pane-left .am-subtab { flex: 1; text-align: center; padding: 4px 0; min-width: 0; white-space: nowrap; }
+.gm-search { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; padding: 4px 8px; border-radius: 7px; background: #fff; border: 1px solid var(--retro-stroke, #7f9dc8); flex: none; }
+.gm-search input { flex: 1; min-width: 0; border: none; background: transparent; font-size: 12px; color: var(--retro-text, #18324f); outline: none; }
+.gm-search button { border: none; background: transparent; cursor: pointer; color: #6682a4; display: flex; padding: 2px; }
+.gm-assetbody { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.gm-draft-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 12px; text-align: center; color: var(--retro-muted, #6682a4); font-size: 12px; }
+.gm-draft-empty > div:nth-child(2) { font-weight: 700; color: var(--retro-text, #18324f); }
+.gm-upload-zone { padding: 4px 0; }
+.gm-capcolors { display: flex; gap: 5px; margin: 6px 0; flex-wrap: wrap; }
+.gm-capcolor { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(127,157,200,0.5); padding: 0; }
+.gm-capcolor.active { border-color: #0d67c6; box-shadow: 0 0 0 2px rgba(13,103,198,0.25); }
+.gm-custombtn { width: 100%; margin-top: 4px; }
+.gm-onionbtn { width: 100%; margin-top: 6px; }
+/* 撤回/重做/清空 工具组 */
+.gm-tb-histgroup { display: inline-flex; gap: 4px; }
+/* 动效 tab 内的循环方式行 + 溶解时长 */
+.gm-loopmodes { margin-bottom: 6px; }
+.gm-fx-num { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--retro-text, #18324f); margin: 4px 0 6px; }
+.gm-fx-num input { width: 62px; padding: 3px 5px; border-radius: 6px; border: 1px solid var(--retro-stroke, #7f9dc8); background: #fff; font-size: 12px; }
+.gm-custom-edit { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.55); border: 1px dashed var(--retro-stroke-dark, #54749f); }
+.gm-toggle-row { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--retro-text, #18324f); cursor: pointer; }
+
+/* GIF 草稿 popover (顶栏) */
+.gm-draftwrap { position: relative; }
+.gm-pop-overlay { position: fixed; inset: 0; z-index: 40; }
+.gm-draftpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 41; width: 250px; max-height: 62vh; overflow-y: auto; padding: 10px; border-radius: 12px; background: linear-gradient(180deg, #f4faff 0%, #e2efff 100%); border: 1px solid rgba(255,255,255,0.85); box-shadow: inset 0 0 0 1px #73a7d8, 0 18px 44px rgba(5,20,39,0.3); display: flex; flex-direction: column; gap: 8px; }
+.gm-draftpop-save { width: 100%; justify-content: center; }
+.gm-draftpop-list { display: flex; flex-direction: column; gap: 6px; }
+.gm-draftpop-item { display: flex; align-items: center; gap: 8px; padding: 5px; border-radius: 8px; background: #fff; border: 1px solid var(--retro-stroke, #7f9dc8); }
+.gm-draftpop-item img, .gm-draftpop-blank { width: 38px; height: 38px; flex: none; border-radius: 6px; object-fit: contain; background: #fff; border: 1px solid #c3d6ee; }
+.gm-draftpop-blank { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #6682a4; }
+.gm-draftpop-load { flex: 1; min-width: 0; text-align: left; border: none; background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; color: var(--retro-text, #18324f); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-draftpop-load:hover { color: #0d67c6; }
+
+/* 画板 = 视频同款 DOM 舞台 (复用全局 am-preview-canvas / am-stage-img / am-stage-frame / am-stage-handle / am-caption-stage / am-move-marker). GIF 仅加白底 + A·B 连线 */
+.gm-stage { position: relative; background: #fff; overflow: hidden; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(127,157,200,0.5), 0 6px 18px rgba(40,78,120,0.18); }
+.gm-layerlist { max-height: 40vh; overflow-y: auto; }
+.gm-marker-line { position: absolute; height: 2px; background: rgba(255,94,0,0.85); transform-origin: left center; pointer-events: none; z-index: 59; }
+
+/* GIF 循环时间轴 — clips/ruler/playhead/handles 复用视频全局 am-tl-* 类 (一眼对齐视频); 这里只留 label 列 + GIF 专属补充 */
+.gm-timeline { margin: 0 12px 12px; padding: 8px 10px; border-radius: 10px; background: var(--win7-panel-bg, linear-gradient(180deg, rgba(241,249,255,0.98), rgba(214,236,255,0.96))); border: 1px solid rgba(255,255,255,0.78); box-shadow: inset 0 0 0 1px var(--win7-panel-line, #78aede), inset 0 1px 0 rgba(255,255,255,0.9); position: relative; }
+.gm-tl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; }
+.gm-tl-title { font-size: 12px; font-weight: 800; color: #0a356d; }
+.gm-tl-headright { display: flex; align-items: center; gap: 8px; flex: none; }
+.gm-tl-loopbadge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--retro-stroke, #7f9dc8); color: #0a356d; background: linear-gradient(180deg, #ffffff, #e3f0ff); white-space: nowrap; }
+.gm-tl-loopbadge.gm-loop-boomerang { color: #8a4a08; border-color: #d6a55c; background: linear-gradient(180deg, #fff4d1, #ffd97a); }
+.gm-tl-loopbadge.gm-loop-crossfade { color: #4a2070; border-color: #8a4abf; background: linear-gradient(180deg, #f3e6ff, #d8b4f8); }
+.gm-tl-body { display: flex; max-height: 26vh; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.gm-tl-labels { flex: none; width: 132px; display: flex; flex-direction: column; }
+.gm-tl-lhead { height: 24px; flex: none; border-bottom: 1px solid var(--retro-stroke, #7f9dc8); }
+.gm-tl-empty { font-size: 12px; color: var(--retro-muted, #6682a4); padding: 6px; }
+.gm-tl-label { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 4px 0 2px; cursor: pointer; border-bottom: 1px solid rgba(127,157,200,0.28); }
+.gm-tl-label.is-sel { background: linear-gradient(180deg, #fff7e0, #ffeab8); }
+.gm-tl-thumb { width: 22px; height: 22px; border-radius: 4px; object-fit: contain; background: #fff; border: 1px solid #c3d6ee; flex: none; }
+.gm-tl-capic { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #6682a4; flex: none; }
+.gm-tl-lname { font-size: 11.5px; font-weight: 600; color: var(--retro-text, #18324f); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-tl-motion { flex: 1; min-width: 0; height: 22px; border-radius: 5px; font-size: 11px; font-weight: 700; padding: 0 2px; color: var(--retro-text, #18324f); background: #fff; border: 1px solid var(--retro-stroke, #7f9dc8); cursor: pointer; }
+.gm-tl-lanes { flex: 1; min-width: 0; position: relative; }
+.gm-tl-lanes.is-drop { box-shadow: inset 0 0 0 2px rgba(255,94,0,0.45); border-radius: 6px; }
+/* 循环接缝标记 (ruler 右端, 时长手柄左侧) */
+.gm-tl-seam { position: absolute; top: 2px; right: 16px; font-size: 12px; line-height: 1; color: #0a356d; opacity: 0.9; cursor: help; z-index: 4; text-shadow: 0 1px 0 rgba(255,255,255,0.85); pointer-events: auto; }
+.gm-tl-seam.gm-seam-boomerang { color: #c2700e; }
+.gm-tl-seam.gm-seam-crossfade { color: #7a3bbf; }
+/* 时长手柄 (fit-all: 常驻 ruler 右缘内侧防溢出; bar 复用全局 am-tl-duration-handle-bar) */
+.gm-tl-durhandle { position: absolute; top: -1px; right: 0; height: 22px; width: 10px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; z-index: 5; touch-action: none; }
 
 .gm-sec-title { font-size: 11px; font-weight: 800; color: #0a356d; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
 .gm-sec-title:first-child { margin-top: 0; }
@@ -123,7 +194,19 @@
 .gm-variant button { display: flex; align-items: center; gap: 5px; padding: 5px 14px; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 800; color: #4f3400; background: linear-gradient(180deg, #ffd45e 0%, #ffb01b 100%); border: 1px solid #c28e11; }
 
 /* 移动端: am-workspace 网格 → 堆叠 */
-.gm-workspace.gm-mobile { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; }
-.gm-workspace.gm-mobile .gm-preview { order: -1; }
-.gm-workspace.gm-mobile .gm-canvas { max-height: 40vh; }
+/* 移动端: 三栏网格 → 单列堆叠 (预览在上, 素材/字幕/动效 + 图层 + 时间轴 依次往下, 整体滚动) */
+.gm-workspace.gm-mobile { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; gap: 8px; }
+.gm-workspace.gm-mobile .gm-preview { order: -1; min-height: 0; }
+.gm-workspace.gm-mobile .am-preview-stage { max-height: 42vh; }
+.gm-workspace.gm-mobile .gm-pane-left,
+.gm-workspace.gm-mobile .gm-pane-right { display: block; max-height: none; overflow: visible; }
+.gm-workspace.gm-mobile .gm-assetbody,
+.gm-workspace.gm-mobile .gm-layerlist { max-height: none; overflow: visible; }
+@media (max-width: 768px) {
+  .gm-toolbar { flex-wrap: wrap; height: auto; min-height: 0; padding: 6px 8px; row-gap: 5px; }
+  .gm-timeline { margin: 0 8px 8px; }
+  .gm-tl-labels { width: 104px; }
+  .gm-tl-body { max-height: 30vh; }
+  .gm-draftpop { width: min(280px, 92vw); }
+}
 @media (max-width: 768px) { .gm-variant-grid { grid-template-columns: 1fr; } }

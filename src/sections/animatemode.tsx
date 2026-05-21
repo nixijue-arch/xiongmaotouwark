@@ -18,7 +18,7 @@ import {
   // v23-b FX/voice icons (替代 emoji)
   Maximize2, Sunrise, Sunset, ArrowRightFromLine, ArrowLeftFromLine,
   ChevronsUp, Zap, Heart, RefreshCw, Tv2, Camera, ZoomIn, ZoomOut,
-  Film, DoorOpen, LogOut, Globe, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
+  Film, DoorOpen, LogOut, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
   Vibrate, Type as TypeIcon, ArrowLeftRight, ArrowUpDown, Layers, FileText,
   ImagePlus, AlertTriangle, Folder, Pencil, Check, Keyboard,
 } from 'lucide-react';
@@ -28,7 +28,7 @@ import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, type Material } from '@/data/materials';
 // v23-d: 内置 SVG scene preset 删除 — 用户嫌 cheesy, 改成纯用户上传 (任意位图/jpg/png/gif)
 // import { ANIMATE_SCENES } from '@/data/animateScenes';  // 保留 file 备查, 不再 import
-import { composeMeme, flattenAlphaShell } from '@/lib/composeMeme';
+import { composeMeme } from '@/lib/composeMeme';
 import { useMeme, type DraftSlot, type ImageElement, type TextElement, type MemeElement } from '@/context/memecontext';
 import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_LABELS } from '@/data/quickModeTexts';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -50,43 +50,13 @@ import {
   type MediaAsset, type FxApply,
 } from '@/lib/animcore';
 import { GifMode } from '@/sections/gifmode';
+import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
+import { VOICE_LIB, VOICE_BY_ID, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
 
 // ============================================================
 // Types
 // ============================================================
-interface DragPayload {
-  type: TrackType;
-  src?: string; label?: string;
-  voice?: string; text?: string;
-  bgmId?: string; name?: string;
-  fx?: ImageFx;
-  // image 子类 — 'scene' = 场景背景图 (全屏 cover)
-  kind?: 'scene';
-  // caption 模板
-  captionStyle?: CaptionStyle;
-  captionFontSize?: number;
-  captionColor?: string;
-  defaultDuration?: number;
-}
-interface VoicePreset {
-  id: string;
-  name: string;
-  desc: string;
-  emoji: string;
-  icon?: LucideIcon; // v23-b: 优先 icon, emoji 兜底 (兼容老调用点)
-  gender: 'male' | 'female';
-  lang: 'zh-CN' | 'en-US' | 'en-GB';
-  hints: string[];      // 浏览器 SS voice.name 关键字
-  azureName: string;    // Microsoft Neural voice name — 配 TTS proxy 用
-  source?: 'ss' | 'youdao' | 'baidu'; // 老字段, 保留兼容 (现已无实际意义, 都走云端)
-  preferredEngine?: 'youdao' | 'baidu'; // 云端 TTS 优先 engine, 决定听感. 失败自动 fallback 另一个 (除非 noFallback)
-  baiduPer?: number;    // baidu 说话人 ID (0=度小美女 1=度小宇男 4=度丫丫萌). 仅 engine=baidu 起效
-  noFallback?: boolean; // 严格模式: preferred engine 失败时不 fallback (保证音色一致, 失败时 inspector 显 ❌)
-  playbackRate?: number; // audio.playbackRate hack — 让同 engine audio 听感真区分. 默认 1.0
-  sampleText: string;   // 试听稿 (短, <10 字)
-  fallbackPitch: number; // 找不到匹配 gender 时使用 (并自动校正到极端)
-  rate: number;
-}
+// DragPayload → '@/lib/sharededitor'; VoicePreset → '@/lib/voicelib' (E0 抽出)
 interface BGMPreset {
   id: string;
   name: string;
@@ -119,114 +89,7 @@ const TRACK_META: Record<TrackType, { name: string; icon: LucideIcon }> = {
 };
 const TRACK_ORDER: TrackType[] = ['image', 'caption', 'fx', 'tts', 'bgm'];
 
-// VOICE_LIB v16 — 推翻级诚实化
-// 实测真相:
-//   - Chrome 中文 SS voice 永远是 Huihui/Yaoyao 女声 (Chromium issue 374263394/331977824)
-//   - SpeechSynthesisUtterance.pitch 在中文 voice 上效果近乎 placebo (无差异感)
-//   - 真男声/萝莉只有 Edge browser + Yunjian/Xiaoyi Online Natural 才有
-// 所以: 中文只留 1 个浏览器试听 (诚实标注 "浏览器原生 · 品质有限"). 真音质走 "📂 上传 mp3".
-// 英文浏览器 voice 库男女齐全, 保留 3 个 (听感真有差异)
-// 国内可靠免费 TTS engine 只 youdao 一家 (baidu 加 sign 验证, Google 墙, Edge bing 403)
-// 中文 voice 全女声 (youdao + 浏览器 SS 都只 female). 真男声需自部署 TTS proxy (见 VoiceDiagBtn)
-// v23-b: 精简至中英各 1 — 实测 baidu 中文 / Ryan 英式 听感与主声差异不明显
-// 想加回更多 voice → 自部署 edge-tts proxy + setTTSProxyURL (azureName 已保留)
-const VOICE_LIB: VoicePreset[] = [
-  {
-    id: 'zh-youdao',
-    name: '中文 · 晓晓',
-    desc: '中文女声 · 有道朗读 · 成熟播音腔',
-    emoji: '🎙️', // keep emoji for compat (VoicePreset.emoji 字段)
-    icon: Mic,
-    gender: 'female',
-    lang: 'zh-CN',
-    hints: [],
-    azureName: 'zh-CN-XiaoxiaoNeural',
-    source: 'youdao',
-    preferredEngine: 'youdao',
-    noFallback: false,
-    playbackRate: 1.0,
-    fallbackPitch: 1.0,
-    rate: 1.0,
-    sampleText: '家人们都来看看',
-  },
-  {
-    id: 'en-joey',
-    name: 'English · Guy',
-    desc: '美式男声 · 云端真品质',
-    emoji: '🇺🇸',
-    icon: Globe,
-    gender: 'male',
-    lang: 'en-US',
-    hints: ['Guy', 'Davis', 'Andrew', 'Brian', 'Mark'],
-    azureName: 'en-US-GuyNeural',
-    source: 'youdao',
-    preferredEngine: 'youdao',
-    playbackRate: 1.0,
-    fallbackPitch: 1.0,
-    rate: 1.02,
-    sampleText: 'Yo guys',
-  },
-];
-const VOICE_BY_ID = Object.fromEntries(VOICE_LIB.map(v => [v.id, v])) as Record<string, VoicePreset>;
-// TTS 时长估算 — 让 clip width 跟实际朗读时间匹配
-// 中文: ≈ 0.26s / 字 (1.0 rate), 英文: ≈ 0.32s / 词
-// 抖音/CapCut 实测节奏类似. 留 +0.4s 头尾缓冲, 最少 0.8s 防极短 clip
-function estimateTTSDuration(text: string, voiceId: string): number {
-  const v = VOICE_BY_ID[resolveVoiceId(voiceId)];
-  const playbackRate = v?.playbackRate ?? 1.0;
-  const clean = (text || '').trim();
-  if (!clean) return 1.2;
-  let raw: number;
-  if (v?.lang.startsWith('zh')) {
-    // 中文按字数 (含标点也算节奏停顿)
-    const chars = clean.replace(/\s+/g, '').length;
-    raw = chars * 0.26;
-  } else {
-    // 英文按词数
-    const words = clean.split(/\s+/).filter(Boolean).length;
-    raw = words * 0.32;
-  }
-  // playbackRate>1 加速 → 实际墙钟更短
-  return Math.max(0.8, Math.min(30, (raw + 0.3) / playbackRate));
-}
-
-// fallback: 旧 voice id → 新 id, 防 IDB 旧 project crash
-// 中文 voice 全部映射到 zh-youdao (晓晓), 因为国内只 youdao 一家可靠 engine
-const LEGACY_VOICE_MAP: Record<string, string> = {
-  'zh-xiaoxiao': 'zh-youdao',
-  'zh-narrator': 'zh-youdao',
-  'zh-yunjian': 'zh-youdao',
-  'zh-yunxi': 'zh-youdao',
-  'zh-yunyang': 'zh-youdao',
-  'zh-xiaohan': 'zh-youdao',
-  'zh-xiaoyi': 'zh-youdao',
-  'zh-sweet': 'zh-youdao',
-  'zh-cutie': 'zh-youdao',
-  'zh-loli': 'zh-youdao',
-  'zh-female': 'zh-youdao',
-  'zh-default': 'zh-youdao',
-  'zh-f-standard': 'zh-youdao',
-  'zh-m-standard': 'zh-youdao',
-  'zh-m-bass': 'zh-youdao',
-  'zh-f-loli': 'zh-youdao',
-  'zh-m-anchor': 'zh-youdao',
-  'zh-robot': 'zh-youdao',
-  'zh-baidu-female': 'zh-youdao',
-  'zh-baidu-male': 'zh-youdao',
-  // 英文 — v23-b 精简: en-storyteller 合并到 en-joey
-  'en-jenny': 'en-joey',
-  'en-f-jenny': 'en-joey',
-  'en-m-joey': 'en-joey',
-  'en-m-adam': 'en-joey',
-  'en-m-ryan': 'en-joey',
-  'en-storyteller': 'en-joey',
-  'en-f-sonia': 'en-joey',
-};
-function resolveVoiceId(id: string): string {
-  if (VOICE_BY_ID[id]) return id;
-  if (LEGACY_VOICE_MAP[id] && VOICE_BY_ID[LEGACY_VOICE_MAP[id]]) return LEGACY_VOICE_MAP[id];
-  return VOICE_LIB[0].id;
-}
+// VOICE_LIB / VOICE_BY_ID / estimateTTSDuration / resolveVoiceId → '@/lib/voicelib' (E0 抽出)
 
 // ============================================================
 // 配音方案 v15 — 现实最优
@@ -477,25 +340,7 @@ const FX_LABEL: Record<ImageFx, string> = {
   move: '移动',
 };
 
-// v23-d: 场景库 — 实拍位图 (Lorem Picsum stable seed, fastly CDN 全球, CORS open)
-// img.crossOrigin='anonymous' 已 set, 可用于 canvas 合成 + MP4 export
-// 同 seed 永远同图. 1280x720 = sl1 cover ratio.
-// 加载失败时 onerror 占位 — fallback 引导用户去外部图源 (unsplash/pixabay/pexels) 上传
-const PICSUM = (seed: string) => `https://picsum.photos/seed/${seed}/1280/720`;
-const SCENE_LIB: Material[] = [
-  { id: 'scene-city',    src: PICSUM('city18'),     labelCn: '城市',     labelEn: 'City',     tags: ['场景', '城市', '街道'], tagsEn: ['scene', 'city'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-mountain', src: PICSUM('mountain7'), labelCn: '山林',     labelEn: 'Mountain', tags: ['场景', '山', '自然'],   tagsEn: ['scene', 'mountain'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-beach',   src: PICSUM('beach22'),   labelCn: '海滩',     labelEn: 'Beach',    tags: ['场景', '海', '海滩'],   tagsEn: ['scene', 'beach'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-forest',  src: PICSUM('forest11'),  labelCn: '森林',     labelEn: 'Forest',   tags: ['场景', '森林', '树'],   tagsEn: ['scene', 'forest'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-room',    src: PICSUM('room33'),    labelCn: '房间',     labelEn: 'Room',     tags: ['场景', '室内', '房间'], tagsEn: ['scene', 'room'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-street',  src: PICSUM('street55'),  labelCn: '街道',     labelEn: 'Street',   tags: ['场景', '街道', '都市'], tagsEn: ['scene', 'street'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-sky',     src: PICSUM('sky88'),     labelCn: '天空',     labelEn: 'Sky',      tags: ['场景', '天空', '云'],   tagsEn: ['scene', 'sky'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-sunset',  src: PICSUM('sunset44'),  labelCn: '日落',     labelEn: 'Sunset',   tags: ['场景', '日落', '黄昏'], tagsEn: ['scene', 'sunset'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-night',   src: PICSUM('night77'),   labelCn: '夜景',     labelEn: 'Night',    tags: ['场景', '夜', '霓虹'],   tagsEn: ['scene', 'night'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-snow',    src: PICSUM('snow99'),    labelCn: '雪景',     labelEn: 'Snow',     tags: ['场景', '雪', '冬'],     tagsEn: ['scene', 'snow'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-desert',  src: PICSUM('desert12'),  labelCn: '沙漠',     labelEn: 'Desert',   tags: ['场景', '沙漠'],         tagsEn: ['scene', 'desert'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-  { id: 'scene-cafe',    src: PICSUM('cafe66'),    labelCn: '咖啡馆',   labelEn: 'Cafe',     tags: ['场景', '咖啡馆', '室内'], tagsEn: ['scene', 'cafe'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: 'scene' },
-];
+// PICSUM / SCENE_LIB → '@/lib/sharededitor' (E1 抽出, 12 scene)
 
 const SNAP_PX = 8;
 const LANE_ROW_H = 44;
@@ -1178,9 +1023,7 @@ function makeInitialProject(): ProjectState {
 // ============================================================
 // Helpers
 // ============================================================
-function uid(prefix = 'c') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
+// uid → '@/lib/sharededitor' (E0 抽出)
 function clipsByLane(clips: Clip[], type: TrackType, lane: number): Clip[] {
   return clips.filter(c => c.trackId === type && c.lane === lane);
 }
@@ -2089,6 +1932,7 @@ export function AnimateMode() {
     win.__dumpProject = dumpProject;
     win.__dumpTemplate = dumpTemplate;
     const onKey = (e: KeyboardEvent) => {
+      if (view !== 'video') return; // DevTool 快捷键也仅视频视图 (GIF 视图不触发)
       if (e.ctrlKey && e.shiftKey && (e.code === 'KeyD' || e.key === 'D' || e.key === 'd')) {
         e.preventDefault();
         dump();
@@ -2109,7 +1953,7 @@ export function AnimateMode() {
       window.removeEventListener('keydown', onKey);
       delete win.__dumpTTS; delete win.__dumpProject; delete win.__dumpTemplate;
     };
-  }, [project.clips, project.duration, project.lanes]);
+  }, [view, project.clips, project.duration, project.lanes]);
 
   // FIX #8a: 切到其他板块时 (AnimateMode unmount), audio 还在响 — destroyAll 彻底销毁
   useEffect(() => () => {
@@ -2122,7 +1966,7 @@ export function AnimateMode() {
   const spokenRef = useRef<Set<string>>(new Set());
   const bgmStartedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying || view !== 'video') {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       audioEngine.cancelAll();
       spokenRef.current.clear();
@@ -2145,7 +1989,7 @@ export function AnimateMode() {
     }
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [isPlaying, project.duration]);
+  }, [isPlaying, project.duration, view]);
   // TTS / BGM 同步 — 两条路径:
   //   有 audioSrc: syncTTSPlayer 严格跟 playhead 绑 (1s/2s/3s 听到对应字, 可导出 MP4 真音轨)
   //   没 audioSrc 且 genFailed: SS 触发式 fallback (无 sync 但有声)
@@ -2153,7 +1997,7 @@ export function AnimateMode() {
   useEffect(() => {
     // v24+: GIF 模式 hard guard — 无音频. 虽然 sanitize 已物理删 TTS/BGM clip, 这里加防御层
     // (即使 sanitize 漏一处, playback engine 也不触发任何 audio)
-    if ((project.mode ?? 'video') === 'gif') return;
+    if (view !== 'video' || (project.mode ?? 'video') === 'gif') return;
     for (const c of project.clips) {
       if (c.trackId === 'tts') {
         const ts = c as TTSClip;
@@ -2190,7 +2034,7 @@ export function AnimateMode() {
         }
       }
     }
-  }, [playhead, isPlaying, project.clips]);
+  }, [playhead, isPlaying, project.clips, view]);
   const seekPlayhead = useCallback((t: number) => {
     // SS 不能 seek (一次性 trigger), 取消 + 重置 spokenRef
     try { audioEngine.cancel(); } catch {}
@@ -3197,6 +3041,7 @@ export function AnimateMode() {
   // 注意: 必须放在所有 callback (copyClipToClipboard/ctxMenu 等) 之后, 避免 TDZ
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (view !== 'video') return; // GIF 视图不响应视频快捷键 (彻底分开 video/gif)
       if (isTypingTarget(e)) {
         if (e.key === 'Escape') (e.target as HTMLInputElement).blur?.();
         return;
@@ -3243,6 +3088,7 @@ export function AnimateMode() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
+    view,
     selectedId, playhead, project.duration,
     undo, redo, duplicateClip, deleteClip, splitAt, nudge, saveCurrentAsDraft,
     seekPlayhead, setIsPlaying, moveClipLane,
@@ -3858,7 +3704,7 @@ type LibSeg = 'asset' | 'music' | 'voice' | 'caption' | 'fx';
 // 旧的 10 条都被 "快速生成" 区替代 (随机出 quickModeTexts 内容)
 interface CaptionTemplate { id: string; text: string; emoji: string; style: CaptionStyle; fontSize: number; color: string; desc: string; }
 // v23-c: 字幕样式 demo 文字 — 在 QuickGen 预览框统一用 (不跟用户输入文字)
-const CAPTION_SAMPLE_TEXT = '字幕样式';
+// CAPTION_SAMPLE_TEXT → '@/lib/sharededitor' (E2 抽出, 随 CaptionQuickGen)
 // v23-c revert: 不再放一堆 preset row, 让 QuickGen 区域负责样式调试. LeftPane caption subtab 只显 QuickGen
 const CAPTION_LIB: CaptionTemplate[] = [];
 type LibSub = 'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload';
@@ -4110,20 +3956,26 @@ function LeftPane({
             <ComboTab onAdd={onQuickAdd} />
           )}
           {seg === 'asset' && sub === 'panda' && (
-            <div className="sidebar-grid">
-              {/* v23-b: 内置 panda 池 + 用户上传 kind=panda */}
-              {filter(uploads.filter(u => u.kind === 'panda')).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
-              {filter(ALL_PANDAS).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} />)}
-              {filter(ALL_PANDAS).length === 0 && <p className="am-empty-line">无匹配素材</p>}
-            </div>
+            <>
+              <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [m, ...prev].slice(0, AM_UPLOAD_MAX_COUNT))} />
+              <div className="sidebar-grid">
+                {/* v23-b: 内置 panda 池 + 用户上传 kind=panda + 联网搜图沉淀 */}
+                {filter(uploads.filter(u => u.kind === 'panda')).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
+                {filter(ALL_PANDAS).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} />)}
+                {filter(ALL_PANDAS).length === 0 && <p className="am-empty-line">无匹配素材</p>}
+              </div>
+            </>
           )}
           {seg === 'asset' && sub === 'face' && (
-            <div className="sidebar-grid">
-              {/* v23-b: 内置 face 池 + 用户上传 kind=face */}
-              {filter(uploads.filter(u => u.kind === 'face')).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
-              {filter(ALL_FACES).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} />)}
-              {filter(ALL_FACES).length === 0 && <p className="am-empty-line">无匹配素材</p>}
-            </div>
+            <>
+              <MaterialSourceButtons kind="face" onAdd={(m) => setUploads(prev => [m, ...prev].slice(0, AM_UPLOAD_MAX_COUNT))} />
+              <div className="sidebar-grid">
+                {/* v23-b: 内置 face 池 + 用户上传 kind=face + 智能抠脸沉淀 */}
+                {filter(uploads.filter(u => u.kind === 'face')).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
+                {filter(ALL_FACES).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} />)}
+                {filter(ALL_FACES).length === 0 && <p className="am-empty-line">无匹配素材</p>}
+              </div>
+            </>
           )}
           {seg === 'asset' && sub === 'scene' && (
             <>
@@ -4313,627 +4165,21 @@ function SegBtn({ active, icon, label, onClick }: { active: boolean; icon: React
 // ComboTab — panda+face 配套合成主入口 (素材库第一个 tab)
 // 用 composeMeme + getLivePandaFaceOffset 自动应用校准, 单 ImageClip 加入时间轴
 // 左右切 + 随机 (主) + 点缩略图展开全部选项手动选 (深度)
-function ComboTab({ onAdd }: { onAdd: (payload: DragPayload) => void }) {
-  const [pIdx, setPIdx] = useState(() => Math.floor(Math.random() * ALL_PANDAS.length));
-  const [fIdx, setFIdx] = useState(() => Math.floor(Math.random() * ALL_FACES.length));
-  const [picker, setPicker] = useState<'panda' | 'face' | null>(null);
-  const [pickerQ, setPickerQ] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<string>('');
-  const panda = ALL_PANDAS[pIdx % ALL_PANDAS.length];
-  const face = ALL_FACES[fIdx % ALL_FACES.length];
+// ComboTab → '@/lib/sharededitor' (E1 抽出, 加 onAddCombo 给 GIF 两图层)
 
-  useEffect(() => {
-    let cancelled = false;
-    setPreview('');
-    // 直接生成 dataURL — preview 用 + 拖到时间轴当 clip src 都能持久化
-    void composeMeme({
-      pandaSrc: panda.src, faceSrc: face.src,
-      faceOffset: getLivePandaFaceOffset(panda),
-      size: 384, outputFormat: 'dataurl',
-      fillInternalShell: true,
-    }).then(url => {
-      if (!cancelled) setPreview(url);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [panda.src, face.src, panda]);
+// MaterialCardClip → '@/lib/sharededitor' (E1 抽出)
 
-  const shuffle = () => {
-    setPIdx(Math.floor(Math.random() * ALL_PANDAS.length));
-    setFIdx(Math.floor(Math.random() * ALL_FACES.length));
-  };
-  const cyclePanda = (dir: 1 | -1) => setPIdx(i => (i + dir + ALL_PANDAS.length) % ALL_PANDAS.length);
-  const cycleFace = (dir: 1 | -1) => setFIdx(i => (i + dir + ALL_FACES.length) % ALL_FACES.length);
-
-  const handleAdd = async () => {
-    if (loading) return;
-    setLoading(true);
-    try {
-      // 加 ImageClip 必须用 dataURL 持久化 (blob URL 刷新失效 → 破图)
-      const composed = await composeMeme({
-        pandaSrc: panda.src, faceSrc: face.src,
-        faceOffset: getLivePandaFaceOffset(panda),
-        size: 384, outputFormat: 'dataurl',
-        fillInternalShell: true,
-      });
-      onAdd({ type: 'image', src: composed, label: `${panda.labelCn}+${face.labelCn}`, defaultDuration: 2.5 });
-      toast.success(`已加 ${panda.labelCn}+${face.labelCn} 配套`);
-    } catch {
-      toast.error('合成失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    if (!preview) { e.preventDefault(); return; }
-    const payload: DragPayload = { type: 'image', src: preview, label: `${panda.labelCn}+${face.labelCn}`, defaultDuration: 2.5 };
-    e.dataTransfer.setData('application/x-meme', JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = 'copy';
-  };
-
-  // 展开 picker — 列出全部 panda 或 face, 支持搜索
-  const pickerList = useMemo(() => {
-    if (!picker) return [] as Material[];
-    const all = picker === 'panda' ? ALL_PANDAS : ALL_FACES;
-    if (!pickerQ) return all;
-    const k = pickerQ.toLowerCase();
-    return all.filter(m =>
-      m.labelCn.toLowerCase().includes(k) ||
-      m.labelEn.toLowerCase().includes(k) ||
-      m.tags.some(t => t.toLowerCase().includes(k))
-    );
-  }, [picker, pickerQ]);
-
-  return (
-    <div className="am-combo-tab">
-      <div className="am-combo-tab-head">
-        <span className="am-combo-tab-title">🐼+🤔 配套合成</span>
-        <span className="am-combo-tab-sub">校准自动应用 · 单层加入</span>
-      </div>
-
-      <div className="am-combo-tab-slots">
-        <div className="am-combo-tab-slot">
-          <div className="am-combo-tab-slot-label">熊猫头 ({pIdx + 1}/{ALL_PANDAS.length})</div>
-          <div className="am-combo-tab-slot-row">
-            <button className="am-combo-arrow" onClick={() => cyclePanda(-1)} type="button" title="上一个">‹</button>
-            <button
-              className="am-combo-tab-thumb-btn"
-              onClick={() => { setPicker('panda'); setPickerQ(''); }}
-              title="点击展开全部选项手动选"
-              type="button"
-            >
-              <img src={panda.src} alt={panda.labelCn} className="am-combo-tab-thumb" draggable={false} />
-              <span className="am-combo-tab-thumb-name">{panda.labelCn}</span>
-              <span className="am-combo-tab-expand">▾</span>
-            </button>
-            <button className="am-combo-arrow" onClick={() => cyclePanda(1)} type="button" title="下一个">›</button>
-          </div>
-        </div>
-
-        <div className="am-combo-tab-slot">
-          <div className="am-combo-tab-slot-label">表情 ({fIdx + 1}/{ALL_FACES.length})</div>
-          <div className="am-combo-tab-slot-row">
-            <button className="am-combo-arrow" onClick={() => cycleFace(-1)} type="button" title="上一个">‹</button>
-            <button
-              className="am-combo-tab-thumb-btn"
-              onClick={() => { setPicker('face'); setPickerQ(''); }}
-              title="点击展开全部选项手动选"
-              type="button"
-            >
-              <img src={face.src} alt={face.labelCn} className="am-combo-tab-thumb" draggable={false} />
-              <span className="am-combo-tab-thumb-name">{face.labelCn}</span>
-              <span className="am-combo-tab-expand">▾</span>
-            </button>
-            <button className="am-combo-arrow" onClick={() => cycleFace(1)} type="button" title="下一个">›</button>
-          </div>
-        </div>
-      </div>
-
-      <button className="am-combo-shuffle-btn" onClick={shuffle} type="button">
-        <Shuffle size={12} /> <span>随机一对</span>
-      </button>
-
-      <div
-        className="am-combo-tab-preview"
-        draggable={!!preview}
-        onDragStart={onDragStart}
-        title={preview ? '点 / 拖拽 加入时间轴' : '合成中…'}
-      >
-        {preview ? (
-          <img src={preview} alt="合成预览" className="am-combo-tab-preview-img" draggable={false} />
-        ) : (
-          <div className="am-combo-preview-loading">合成中…</div>
-        )}
-      </div>
-      <button className="am-combo-add" onClick={handleAdd} disabled={loading || !preview} type="button">
-        {loading ? '加入中…' : '✚ 加入时间轴'}
-      </button>
-
-      {picker && (
-        <div className="am-combo-picker-overlay" onClick={() => setPicker(null)}>
-          <div className="am-combo-picker win7-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="am-combo-picker-head">
-              <span>选 {picker === 'panda' ? '熊猫头' : '表情'} · {pickerList.length}/{picker === 'panda' ? ALL_PANDAS.length : ALL_FACES.length}</span>
-              <button className="am-popover-close" onClick={() => setPicker(null)} type="button"><X size={14} /></button>
-            </div>
-            <div className="am-combo-picker-search material-search-box">
-              <Search size={12} color="#888" />
-              <input
-                autoFocus
-                type="text"
-                className="material-search-input"
-                placeholder={`搜${picker === 'panda' ? '熊猫头' : '表情'}…`}
-                value={pickerQ}
-                onChange={(e) => setPickerQ(e.target.value)}
-              />
-              {pickerQ && (
-                <button className="material-search-clear" onClick={() => setPickerQ('')} type="button">
-                  <X size={11} />
-                </button>
-              )}
-            </div>
-            <div className="am-combo-picker-grid">
-              {pickerList.map((m, i) => {
-                const origIdx = (picker === 'panda' ? ALL_PANDAS : ALL_FACES).findIndex(x => x.id === m.id);
-                const isActive = picker === 'panda' ? origIdx === pIdx : origIdx === fIdx;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className={'am-combo-picker-card' + (isActive ? ' is-active' : '')}
-                    onClick={() => {
-                      if (picker === 'panda') setPIdx(origIdx);
-                      else setFIdx(origIdx);
-                      setPicker(null);
-                    }}
-                    title={m.labelCn}
-                  >
-                    <img src={m.src} alt={m.labelCn} className="am-combo-picker-thumb" draggable={false} loading="lazy" />
-                    <span className="am-combo-picker-name">{m.labelCn}</span>
-                  </button>
-                );
-              })}
-              {pickerList.length === 0 && (
-                <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MaterialCardClip({ item, kind, onQuickAdd, onDelete }: {
-  item: Material; kind?: 'scene' | 'panda' | 'face' | 'upload';
-  onQuickAdd: (payload: DragPayload) => void;
-  onDelete?: () => void;
-}) {
-  // 单独 panda/face 拖入沙雕动画时, flattenAlphaShell 把内部 transparent fill 白, 防场景透出
-  // scene 不处理 (本身就是背景), upload 用户图也不动 (尊重用户原图)
-  const needsFlattenShell = kind === 'panda' || kind === 'face';
-  const buildPayload = useCallback(async (): Promise<DragPayload> => {
-    let src = item.src;
-    if (needsFlattenShell) {
-      try { src = await flattenAlphaShell(item.src); } catch { /* fallback 原 src */ }
-    }
-    return {
-      type: 'image', src, label: item.labelCn,
-      defaultDuration: kind === 'scene' ? 4.0 : 2.5,
-      kind: kind === 'scene' ? 'scene' : undefined,
-    };
-  }, [item.src, item.labelCn, kind, needsFlattenShell]);
-  // v23-i: 性能修 — 之前 mount 时所有 ~200 panda/face card 并发跑 flattenAlphaShell, 卡板. 改 lazy
-  // cached 默认拿原 src (拖时立即可用, panda 内部边缘可能透出, trade-off)
-  // hover/click 才触发 flatten, cache 命中后下次 fast
-  const cachedPayloadRef = useRef<DragPayload | null>(null);
-  useEffect(() => {
-    cachedPayloadRef.current = {
-      type: 'image', src: item.src, label: item.labelCn,
-      defaultDuration: kind === 'scene' ? 4.0 : 2.5,
-      kind: kind === 'scene' ? 'scene' as const : undefined,
-    };
-  }, [item.src, item.labelCn, kind]);
-  // hover warmup — 用户 hover 1 张卡时才 schedule flatten (一次性 1 个并发, 不卡 LeftPane)
-  const warmedRef = useRef(false);
-  const onHover = () => {
-    if (!needsFlattenShell || warmedRef.current) return;
-    warmedRef.current = true;
-    void buildPayload().then(p => { cachedPayloadRef.current = p; }).catch(() => {});
-  };
-  const handleClick = useCallback(async () => {
-    const tid = needsFlattenShell ? toast.loading('合成中…') : null;
-    try {
-      const payload = await buildPayload();
-      if (tid) toast.dismiss(tid);
-      onQuickAdd(payload);
-    } catch (e) {
-      if (tid) toast.dismiss(tid);
-      toast.error('处理失败: ' + (e as Error).message);
-    }
-  }, [buildPayload, needsFlattenShell, onQuickAdd]);
-  const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    const p = cachedPayloadRef.current ?? {
-      type: 'image' as const, src: item.src, label: item.labelCn,
-      defaultDuration: kind === 'scene' ? 4.0 : 2.5,
-      kind: kind === 'scene' ? 'scene' as const : undefined,
-    };
-    e.dataTransfer.setData('application/x-meme', JSON.stringify(p));
-    e.dataTransfer.effectAllowed = 'copy';
-    const imgEl = e.currentTarget.querySelector('img') as HTMLImageElement | null;
-    if (imgEl) { try { e.dataTransfer.setDragImage(imgEl, 32, 32); } catch {} }
-  };
-  return (
-    <div
-      className="material-card am-card"
-      draggable
-      onDragStart={onDragStart}
-      onClick={handleClick}
-      onDoubleClick={handleClick}
-      onMouseEnter={onHover}
-      title={`单击或拖到时间轴: ${item.labelCn}`}
-    >
-      <img
-        src={item.src}
-        alt={item.labelCn}
-        className={'material-img' + (kind === 'scene' ? ' am-img-scene' : '')}
-        draggable={false}
-        loading="lazy"
-        onError={(e) => {
-          // Picsum 偶发 5xx / 国内偶尔被墙 → 显占位 + 提示用户改用外部图源上传
-          const el = e.currentTarget;
-          el.style.background = 'linear-gradient(135deg, #cbd1da, #8b95a4)';
-          el.style.objectFit = 'contain';
-          el.removeAttribute('src');
-        }}
-      />
-      <span className="material-name">{item.labelCn}</span>
-      {item.tags.length > 0 && kind !== 'scene' && (
-        <div className="material-tags">
-          {item.tags.slice(0, 2).map(t => <span key={t} className="material-tag">{t}</span>)}
-        </div>
-      )}
-      {onDelete && (
-        <button className="am-card-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="删除">
-          <X size={10} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function DraftCardClip({ slot, onAddDraftAsClips }: {
-  slot: DraftSlot;
-  onAddDraftAsClips: (s: DraftSlot) => void;
-}) {
-  const { previewUrl, name, elementCount } = slot;
-  // 检测是否有文字 — 用于给 card 加 "字幕分轨" tag
-  const hasText = useMemo(() => {
-    return (slot.state?.elements ?? []).some(e => e.type === 'text' && !!(e as TextElement).text?.trim());
-  }, [slot.state]);
-  return (
-    <div
-      className="material-card am-card am-card-draft"
-      onClick={() => onAddDraftAsClips(slot)}
-      onDoubleClick={() => onAddDraftAsClips(slot)}
-      title={`点击加入: ${name} — 画面 + 字幕 自动分轨`}
-    >
-      {previewUrl ? (
-        <img src={previewUrl} alt={name} className="material-img am-img-scene" draggable={false} loading="lazy" />
-      ) : (
-        <div className="material-img am-draft-blank">—</div>
-      )}
-      <span className="material-name">{name}</span>
-      <div className="material-tags">
-        <span className="material-tag">{elementCount} 层</span>
-        {hasText && <span className="material-tag am-draft-tag-cap">字幕分轨</span>}
-      </div>
-    </div>
-  );
-}
+// DraftCardClip → '@/lib/sharededitor' (E1 抽出)
 
 // 字幕快速生成 — 从 quickModeTexts 随机出文字 + 用户调样式 → 拖/单击加到时间轴
 // 4 模式: default('all') / roast / fomo / fud, 跟 QuickMode 同源
-function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
-  const [mode, setMode] = useState<CaptionMode | 'all'>('all');
-  const [text, setText] = useState(() => pickRandomText('zh', 'all') || '点击编辑字幕');
-  const [style, setStyle] = useState<CaptionStyle>('meme');
-  const [fontSize, setFontSize] = useState(56);
-  const [color, setColor] = useState('#ffffff');
-  const reroll = useCallback(() => {
-    const t = pickRandomText('zh', mode, text);
-    if (t) setText(t);
-  }, [mode, text]);
-  // 切模式 — 重新随机一条
-  useEffect(() => {
-    const t = pickRandomText('zh', mode);
-    if (t) setText(t);
-    // 切到 panel 自动改黑字 (背景白), 其他默认白字
-    setColor(c => style === 'panel' || c === '#222222' ? c : c);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-  const payload: DragPayload = useMemo(() => ({
-    type: 'caption',
-    text,
-    captionStyle: style,
-    captionFontSize: fontSize,
-    captionColor: color,
-    defaultDuration: 2.5,
-  }), [text, style, fontSize, color]);
-  const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    e.dataTransfer.setData('application/x-meme', JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = 'copy';
-  };
-  const MODE_BTNS: (CaptionMode | 'all')[] = ['all', 'roast', 'fomo', 'fud'];
-  return (
-    <div className="am-cap-quick win7-panel">
-      <div className="am-cap-quick-head">
-        <span>🎲 快速生成</span>
-        <span className="am-cap-quick-sub">从快速模式池抽 · 编辑后加</span>
-      </div>
-      <div className="am-cap-quick-modes">
-        {MODE_BTNS.map(m => (
-          <button
-            key={m}
-            type="button"
-            className={'am-cap-quick-mode' + (mode === m ? ' is-active' : '')}
-            onClick={() => setMode(m)}
-            title={m === 'all' ? '默认 (全池)' : CAPTION_MODE_LABELS[m]?.zh ?? m}
-          >
-            {m === 'all' ? '默认' : CAPTION_MODE_LABELS[m]?.zh ?? m}
-          </button>
-        ))}
-      </div>
-      {/* v23-c: 预览框 — 固定文字 "字幕样式" 演示当前 style + 真显当前字号, 不跟随用户输入文本 */}
-      <div
-        className={`am-cap-quick-preview am-caption-style-${style} am-cap-preview-demo`}
-        draggable
-        onDragStart={onDragStart}
-        style={{
-          // 按比例缩放: 预览框最大 ~28px 行高, 字幕原始 20-100, 缩到 22-64 范围, 但**保留差异**
-          fontSize: Math.max(18, Math.min(64, fontSize * 0.7)),
-          color,
-          minHeight: Math.max(60, fontSize * 0.95),
-        }}
-        title={`样式演示 · 加到时间轴时实际文字: "${text || '空'}" · 字号 ${fontSize}px`}
-      >
-        {CAPTION_SAMPLE_TEXT}
-      </div>
-      <div className="am-row am-row-tight" style={{ marginTop: 6 }}>
-        <button type="button" className="am-tb-btn" onClick={reroll} title="再抽一条 (避免连出同句)">
-          <Shuffle size={11} /> 换一条
-        </button>
-        <input
-          type="text"
-          className="am-input am-cap-quick-input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="或直接打字"
-          maxLength={80}
-        />
-      </div>
-      <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">样式</span>
-        <div className="am-style-chips am-style-chips-mini">
-          {(['meme', 'panel', 'bar'] as CaptionStyle[]).map(s => (
-            <button
-              key={s}
-              type="button"
-              className={`am-style-chip am-style-chip-${s}${style === s ? ' is-active' : ''}`}
-              onClick={() => {
-                setStyle(s);
-                // 自动调默认色 — panel 黑字 / 其他白字 (仍保留用户选过的色)
-                if (s === 'panel' && color === '#ffffff') setColor('#222222');
-                if (s !== 'panel' && color === '#222222') setColor('#ffffff');
-              }}
-            >
-              {s === 'meme' ? 'Meme' : s === 'panel' ? '白板' : '黑条'}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">字号</span>
-        <input
-          type="range" min="20" max="100" step="2"
-          value={fontSize}
-          onChange={(e) => setFontSize(parseInt(e.target.value))}
-          className="am-range am-cap-quick-range"
-        />
-        <span className="am-cap-quick-val">{fontSize}</span>
-      </div>
-      <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">颜色</span>
-        <div className="am-chips am-chips-tight">
-          {['#ffffff', '#222222', '#ff5e00', '#1f84df', '#00cc66', '#cb2a2a', '#ffbf22'].map(c => (
-            <button
-              key={c}
-              type="button"
-              className={'am-chip am-chip-color' + (color.toLowerCase() === c.toLowerCase() ? ' is-active' : '')}
-              style={{ background: c, width: 18, height: 18, padding: 0 }}
-              onClick={() => setColor(c)}
-              title={c}
-            />
-          ))}
-        </div>
-      </div>
-      <button
-        type="button"
-        className="am-tb-btn am-tb-btn-primary am-cap-quick-add"
-        onClick={() => onQuickAdd(payload)}
-      >
-        ✚ 加到时间轴 (playhead 位置)
-      </button>
-    </div>
-  );
-}
+// CaptionQuickGen / CaptionPositionPresets / CaptionEmojiPicker / CaptionBatchImport → '@/lib/sharededitor' (E2 抽出)
 
-// v23-c: CaptionRow / CAPTION_LIB 已废弃 (用户 explicit "不是放一堆示例的意思")
-// 保留 type 不删, 兼容外部引用. QuickGen 区域负责样式调试
+// CaptionPositionPresets → '@/lib/sharededitor' (E2 抽出, 加 captionTransform 真定位)
 
-// v23-i: 字幕位置预设 — 5 个常用位置 (沙雕短视频抖音/快手常见布局)
-function CaptionPositionPresets({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
-  const presets: { id: string; label: string; x: number; y: number; emoji: string }[] = [
-    { id: 'top',       label: '顶部',   x: 0,  y: -35, emoji: '⬆️' },
-    { id: 'mid-up',    label: '中上',   x: 0,  y: -15, emoji: '↗' },
-    { id: 'mid',       label: '居中',   x: 0,  y: 0,   emoji: '·' },
-    { id: 'mid-down',  label: '中下',   x: 0,  y: 15,  emoji: '↘' },
-    { id: 'bottom',    label: '底部',   x: 0,  y: 35,  emoji: '⬇️' },
-  ];
-  const addAt = (p: typeof presets[number]) => {
-    onQuickAdd({
-      type: 'caption',
-      text: '位置示例',
-      captionStyle: 'meme',
-      captionFontSize: 48,
-      defaultDuration: 2.5,
-      // 用 captionFontSize / captionColor 路径 — 位置走 transform 但 DragPayload 无 captionTransform 字段
-      // 实际加入后用户可在 Inspector 调 Y. 这里仅 mark 提示
-    });
-    // 立即用 transform 微调 — 但 quickAdd 走不通 transform field. 加完后用户 Inspector 改 Y%
-    toast(`已加底部字幕 · 在画板拖动调位置`, { duration: 2500 });
-    void p;
-  };
-  return (
-    <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📍 字幕位置预设</div>
-      <div className="am-cap-extra-sub">点一下加位置示例 · 加入后可继续拖</div>
-      <div className="am-cap-pos-grid">
-        {presets.map(p => (
-          <button key={p.id} type="button" className="am-cap-pos-btn" onClick={() => addAt(p)} title={`y=${p.y}%`}>
-            <span className="am-cap-pos-icon">{p.emoji}</span>
-            <span className="am-cap-pos-label">{p.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+// CaptionEmojiPicker → '@/lib/sharededitor' (E2 抽出)
 
-// v23-i: 沙雕常用 emoji 一键插入 — 选中 caption clip 后追加到 text
-function CaptionEmojiPicker({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
-  const emojis = ['😂', '🤣', '💀', '🐼', '🤡', '🥹', '🫠', '😭', '👀', '👻', '💩', '🔥', '✨', '💯', '🙏', '🤝'];
-  return (
-    <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">🎭 沙雕表情字幕</div>
-      <div className="am-cap-extra-sub">单击加一条单 emoji 字幕 · 大字号</div>
-      <div className="am-cap-emoji-grid">
-        {emojis.map(e => (
-          <button
-            key={e}
-            type="button"
-            className="am-cap-emoji-btn"
-            onClick={() => onQuickAdd({ type: 'caption', text: e, captionStyle: 'meme', captionFontSize: 80, defaultDuration: 1.2 })}
-            title={`加 ${e} 字幕 (大字号 1.2s)`}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// v23-i: 批量字幕导入 — paste 多行文本 → 自动按行 split + 时间均分.
-// v24: GIF 模式强制 withTTS=false (GIF 无声音), 隐藏 toggle.
-function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, projectDuration, isGif }: {
-  onQuickAdd: (p: DragPayload) => void;
-  onAddClipsBatch: (clips: Clip[]) => void;
-  playhead: number;
-  projectDuration: number;
-  isGif?: boolean;
-}) {
-  const [text, setText] = useState('');
-  // v23-k: 默认"一起加" (字幕+配音双向链接). v24: GIF 模式强制 false.
-  const [withTTS, setWithTTS] = useState(!isGif);
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  // GIF 模式下 useState 初值是 false 但若 mode 切换后用户没刷, 再保险一次:
-  const effWithTTS = !isGif && withTTS;
-  const doImport = () => {
-    if (lines.length === 0) { toast.error('粘贴一段台词, 每行一条字幕'); return; }
-    if (effWithTTS) {
-      const voice = VOICE_LIB[0].id;
-      const ttsVoice = resolveVoiceId(voice);
-      const clips: Clip[] = [];
-      let cursor = Math.max(0, playhead);
-      const gap = 0.3;
-      for (const line of lines) {
-        const dur = estimateTTSDuration(line, ttsVoice);
-        const segEnd = Math.min(projectDuration, cursor + dur);
-        if (segEnd - cursor < 0.3) break;
-        const capId = uid('c');
-        const ttsId = uid('t');
-        clips.push({
-          id: capId, trackId: 'caption', lane: 0, start: cursor, end: segEnd,
-          text: line, style: 'meme', fontSize: 48, linkedTTSId: ttsId,
-        } as Clip);
-        clips.push({
-          id: ttsId, trackId: 'tts', lane: 0, start: cursor, end: segEnd,
-          text: line, voice: ttsVoice, linkedCaptionId: capId,
-        } as Clip);
-        cursor = segEnd + gap;
-      }
-      onAddClipsBatch(clips);
-      toast.success(`✓ ${lines.length} 段台词 → 字幕 + 配音 配套生成, 已双向链接`);
-    } else {
-      lines.forEach(line => {
-        onQuickAdd({ type: 'caption', text: line, captionStyle: 'meme', captionFontSize: 48, defaultDuration: 2.5 });
-      });
-      toast.success(`已加 ${lines.length} 条字幕 · 每条 2.5s`);
-    }
-    setText('');
-  };
-  return (
-    <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📋 批量导入台词稿{isGif && <span className="am-cap-extra-sub" style={{ marginLeft: 8 }}>(GIF 模式 · 仅字幕)</span>}</div>
-      {/* v23-k: 二选一 大 chip 顶部, 默认"一起加" — 用户一眼看到结果是啥. v24: GIF 模式不显示 toggle */}
-      {!isGif && (
-        <div className="am-pair-mode-row" role="radiogroup" aria-label="生成模式">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={withTTS}
-            className={'am-pair-mode' + (withTTS ? ' is-active' : '')}
-            onClick={() => setWithTTS(true)}
-            title="每行台词同时建 1 个字幕 + 1 个配音 · 双向链接 (改一个另一个自动跟)"
-          >
-            <span className="am-pair-mode-ic">✨</span>
-            <span className="am-pair-mode-main">字幕 + 配音 一起加</span>
-            <span className="am-pair-mode-sub">推荐 · 双向链接</span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!withTTS}
-            className={'am-pair-mode' + (!withTTS ? ' is-active' : '')}
-            onClick={() => setWithTTS(false)}
-            title="仅字幕轨, 每条 2.5s 接龙"
-          >
-            <span className="am-pair-mode-ic">💬</span>
-            <span className="am-pair-mode-main">只加字幕</span>
-            <span className="am-pair-mode-sub">每条 2.5s</span>
-          </button>
-        </div>
-      )}
-      <textarea
-        className="am-input am-textarea am-cap-batch-input"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={'家人们谁懂啊\n直接裂开\n但我装作很淡定\n我可太牛了'}
-        rows={5}
-      />
-      <button
-        type="button"
-        className="am-tb-btn am-tb-btn-primary am-cap-batch-add"
-        onClick={doImport}
-        disabled={lines.length === 0}
-      >
-        ✚ 加 {lines.length > 0 ? `${lines.length} 段` : ''} {effWithTTS ? '→ 字幕+配音' : '→ 字幕'}
-      </button>
-    </div>
-  );
-}
+// CaptionBatchImport → '@/lib/sharededitor' (E2 抽出, isGif=true 强制仅字幕)
 
 // v23-k: TTS 批量导入 — 对称 CaptionBatchImport, paste 多段 → 多个 TTS clip + 可选同步字幕
 function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {

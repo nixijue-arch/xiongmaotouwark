@@ -1032,7 +1032,7 @@ export function SmartExtractModal({ isOpen, onClose, onConfirm, language }: Prop
   return (
     <div className="fixed inset-0 z-[2001] flex items-center justify-center p-2" style={{ backgroundColor: 'rgba(10, 53, 109, 0.6)' }} onClick={handleClose}>
       <div className="relative w-full max-w-5xl rounded-2xl p-5 max-h-[96vh] overflow-y-auto"
-           style={{ background: 'linear-gradient(180deg, #fffdf7 0%, #f7f1e3 100%)', border: '3px solid #0a4e97', boxShadow: '0 8px 24px rgba(7, 48, 95, 0.22)' }} onClick={e => e.stopPropagation()}>
+           style={{ background: 'linear-gradient(180deg, rgba(241,249,255,0.98) 0%, rgba(214,236,255,0.96) 100%)', border: '2px solid rgba(13,103,198,0.55)', boxShadow: '0 8px 24px rgba(7, 48, 95, 0.22), inset 0 1px 0 rgba(255,255,255,0.9)' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-3">

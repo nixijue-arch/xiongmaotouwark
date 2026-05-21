@@ -2,7 +2,7 @@
 // "时间重映射 + 帧序列 + 循环安全动作". crossfade / 多变体 / onion-skin 见 P2.
 import {
   renderExportFrame, loadMedia, clamp, GIF_PRESETS, GIF_MAX_DURATION,
-  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta,
+  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform,
 } from '@/lib/animcore';
 
 export type GifLoopMode = 'normal' | 'boomerang' | 'crossfade';
@@ -80,7 +80,7 @@ export function loopSpecAt(t: number, D: number, config: GifLoopConfig): LoopFra
 
 // 循环安全动作 — 相位锁 u=(t/D)mod1 + 整数周期 n → f(0)==f(1) 必然闭环.
 // amp 归一化 (0~1.5 常用), 内部按动作种类换算成 px / 度 / 比例.
-export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number, W: number): MotionDelta {
+export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number, W: number, H: number = W, base?: Transform): MotionDelta {
   if (!m || m.kind === 'none' || D <= 0) return ZERO_DELTA;
   const u = (((t / D) % 1) + 1) % 1;
   const n = Math.max(1, Math.round(m.cycles));
@@ -94,13 +94,35 @@ export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number,
     case 'pulseLoop': return { dx: 0, dy: 0, dScale: 1 + A * 0.20 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };
     case 'spin360':   return { dx: 0, dy: 0, dScale: 1, dRot: 360 * n * u };
     case 'float':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.03 * Math.sin(2 * ph), dScale: 1, dRot: 0 };
+    // 弹跳 — |sin| 触地反弹 (u=0 与 u末 都=0, 无缝)
+    case 'bounce':    return { dx: 0, dy: -A * W * 0.09 * Math.abs(Math.sin(ph)), dScale: 1, dRot: 0 };
+    // 圆周漂移 — (sin, cos-1) 绕一点转圈 (u=0/末 都回原点, 无缝)
+    case 'orbit':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.05 * (Math.cos(ph) - 1), dScale: 1, dRot: 0 };
+    // v25 鬼畜系 — 都是 sin/cos/|sin| of 整数×ph, u=0/1 必闭环. 内部已 bake 较高频率, cycles=1 也"很动"
+    case 'hop':       return { dx: A * W * 0.10 * Math.sin(ph), dy: -A * W * 0.05 * Math.abs(Math.sin(2 * ph)), dScale: 1, dRot: 0 };          // 来回横跳 + 小跳
+    case 'wobble':    return { dx: 0, dy: 0, dScale: 1 + A * 0.05 * Math.sin(3 * ph), dRot: A * 10 * Math.sin(2 * ph) };                       // 果冻晃 (转+缩)
+    case 'jitter':    return { dx: A * W * 0.028 * Math.sin(3 * ph), dy: A * W * 0.026 * Math.sin(4 * ph), dScale: 1, dRot: A * 3 * Math.sin(5 * ph) }; // 疯狂抖 intensify
+    case 'punch':     return { dx: 0, dy: 0, dScale: 1 + A * 0.32 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };                                     // 怼脸放大 (zoom in→out)
+    case 'swing':     return { dx: A * W * 0.03 * Math.sin(ph), dy: 0, dScale: 1, dRot: A * 16 * Math.sin(ph) };                              // 钟摆荡
+    // 自定义移动 A→B 乒乓 — w 三角波 0→1→0, 首尾 w=0 必无缝. A=base(clip.transform), B=m.to
+    case 'customMove': {
+      if (!m.to || !base) return ZERO_DELTA;
+      const w = u < 0.5 ? u * 2 : (1 - u) * 2;
+      return {
+        dx: ((m.to.x - base.x) / 100) * W * w,
+        dy: ((m.to.y - base.y) / 100) * H * w,
+        dScale: 1 + ((m.to.scale / Math.max(0.01, base.scale)) - 1) * w,
+        dRot: (m.to.rotation - base.rotation) * w,
+      };
+    }
     default:          return ZERO_DELTA;
   }
 }
 
 // 给 renderExportFrame 的 motionAt resolver — 从每个 image clip 的 loopMotion 算 delta.
-export function makeLoopMotionAt(D: number, W: number): (clip: ImageClip, t: number) => MotionDelta {
-  return (clip, t) => loopMotionDelta(clip.loopMotion, t, D, W);
+// H 用于非方形画板的垂直换算; customMove 取 clip.transform 作 A.
+export function makeLoopMotionAt(D: number, W: number, H: number = W): (clip: ImageClip, t: number) => MotionDelta {
+  return (clip, t) => loopMotionDelta(clip.loopMotion, t, D, W, H, clip.transform);
 }
 
 // 渲染一帧 (P1 无 crossfade — 直接合成器 + motionAt). spec.blendWith 留给 P2.
@@ -160,23 +182,40 @@ async function encodeGIFBlob(
   const { width: W, height: H, fps } = preset;
   const D = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
+  // 超采样: 小尺寸渲 2× 再缩 → 边缘/字幕/人脸抗锯齿更顺 (大尺寸不必, 省内存/时间)
+  const SS = W <= 420 ? 2 : 1;
+  const RW = W * SS, RH = H * SS;
+  // 编码画布 = 目标尺寸 (gif.js 按此编码输出)
   const main = document.createElement('canvas'); main.width = W; main.height = H;
   const mctx = main.getContext('2d', { alpha: false });
-  const scratch = document.createElement('canvas'); scratch.width = W; scratch.height = H;
-  const sctx = scratch.getContext('2d', { alpha: true });   // crossfade head 层
-  if (!mctx || !sctx) throw new Error('canvas 2d 不可用');
+  if (!mctx) throw new Error('canvas 2d 不可用');
+  mctx.imageSmoothingEnabled = true; mctx.imageSmoothingQuality = 'high';
+  // 渲染画布 = 超采样尺寸 (SS=1 时即 main)
+  let render = main, rctx = mctx;
+  if (SS > 1) {
+    render = document.createElement('canvas'); render.width = RW; render.height = RH;
+    const rc = render.getContext('2d', { alpha: false });
+    if (!rc) throw new Error('canvas 2d 不可用');
+    rctx = rc;
+  }
+  const scratch = document.createElement('canvas'); scratch.width = RW; scratch.height = RH;
+  const sctx = scratch.getContext('2d', { alpha: true });   // crossfade head 层 (跟 render 同尺寸)
+  if (!sctx) throw new Error('canvas 2d 不可用');
 
   const [{ default: GIF }, workerUrlMod] = await Promise.all([
     import('gif.js'),
     import('gif.js/dist/gif.worker.js?url'),
   ]);
-  const gif = new GIF({ workers: 2, quality: 10, width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#000000', repeat: 0 });
+  // 画质优化: quality 10→5 (NeuQuant 调色板更准) + FloydSteinberg 抖动 (人脸照片渐变更顺) + 白底 (跟画板一致) + 4 workers 抵消 quality 开销
+  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0 };
+  const gif = new GIF(gifOpts as ConstructorParameters<typeof GIF>[0]);
 
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
   const delayMs = Math.round(1000 / fps);
-  const motionAt = makeLoopMotionAt(D, W);
+  const motionAt = makeLoopMotionAt(D, RW, RH);  // 动作幅度按渲染尺寸 (2× 同步放大, 缩回后视觉一致)
   for (let i = 0; i < specs.length; i++) {
-    renderLoopFrame(mctx, specs[i], project, W, H, imgCache, motionAt, sctx);
+    renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx);
+    if (SS > 1) mctx.drawImage(render, 0, 0, W, H);  // 超采样缩回目标尺寸 (高质量插值)
     gif.addFrame(main, { copy: true, delay: delayMs });
     if (i % 4 === 0) onProgress(0.5 * (i / specs.length));
     if (i % 8 === 0) await new Promise(r => setTimeout(r, 0));

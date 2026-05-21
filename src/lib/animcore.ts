@@ -70,13 +70,14 @@ export interface GifPreset {
   maxDuration: number;
   note: string;
 }
+// fps 提到流畅区间 (≥15 才不卡顿; 动效/弹跳尤其需要). 编码加抖动+超采样后画质提升, 见 gifloop encodeGIFBlob.
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 12, defaultDuration: 2.5, maxDuration: 3,  note: '微信表情 · ≤500KB · 240×240 · 12fps · 严格' },
-  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 12, defaultDuration: 4,   maxDuration: 5,  note: '朋友圈微博 · ≤2MB · 400×400 · 12fps' },
+  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 15, defaultDuration: 2.5, maxDuration: 3,  note: '微信表情 · ≤500KB · 240×240 · 15fps' },
+  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 16, defaultDuration: 4,   maxDuration: 5,  note: '朋友圈微博 · ≤2MB · 400×400 · 16fps' },
   { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 3,  note: 'Telegram · ≤256KB · 512×512 · 24fps' },
-  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 15, defaultDuration: 4,   maxDuration: 6,  note: '通用 · ≤1MB · 360×360 · 15fps' },
-  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 18, defaultDuration: 6,   maxDuration: 12, note: 'X/Twitter · ≤15MB · 480×480 · 18fps' },
-  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 15, defaultDuration: 6,   maxDuration: 15, note: '自由 · 上限 15s · 480×360 · 15fps' },
+  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 18, defaultDuration: 4,   maxDuration: 6,  note: '通用 · ≤1MB · 360×360 · 18fps' },
+  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 20, defaultDuration: 6,   maxDuration: 12, note: 'X/Twitter · ≤15MB · 480×480 · 20fps' },
+  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 20, defaultDuration: 6,   maxDuration: 15, note: '自由 · 上限 15s · 480×360 · 20fps' },
 ];
 export const GIF_MAX_DURATION = 15; // s, 总上限 (业界 GIF 通常 ≤15s, 微信/Telegram 表情 ≤3s, 见 GIF_PRESETS)
 export const GIF_MIN_DURATION = 1;
@@ -100,8 +101,12 @@ export interface GifFrameEdit {
 }
 // 循环安全动作 — 相位锁定归一化 u=(t/D)mod1 + 整数周期 → f(0)==f(1) 必然闭环.
 // (区别于 computeFx 的 shake/pulse: 那些锁 enterT, t=D 不归零). loopMotionDelta 在 gifloop.ts 算.
-export type LoopMotionKind = 'none' | 'bob' | 'shimmy' | 'sway' | 'breathe' | 'pulseLoop' | 'spin360' | 'float';
-export interface LoopMotion { kind: LoopMotionKind; amp: number; cycles: number; }
+export type LoopMotionKind = 'none' | 'bob' | 'shimmy' | 'sway' | 'breathe' | 'pulseLoop' | 'spin360' | 'float' | 'bounce' | 'orbit'
+  // v25: 更"动"的鬼畜系 — hop 来回横跳 / wobble 果冻晃 / jitter 疯狂抖(intensify) / punch 怼脸放大 / swing 钟摆荡
+  | 'hop' | 'wobble' | 'jitter' | 'punch' | 'swing'
+  | 'customMove';
+// customMove: A = clip.transform, B = to. 引擎乒乓 A→B→A (首尾无缝). clip.fx 保持 'none' 防与 move-FX lerp 双叠加.
+export interface LoopMotion { kind: LoopMotionKind; amp: number; cycles: number; to?: Transform; }
 // renderExportFrame 的 motionAt 回调返回值 — 叠加在 clip transform 之上
 export interface MotionDelta { dx: number; dy: number; dScale: number; dRot: number; }
 
@@ -530,10 +535,17 @@ export function drawCaption(
 ): void {
   if (!text) return;
   if (entranceState.opacity <= 0.01) return;  // v23-k: 完全透明 skip 绘制
-  const fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
+  let fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
   // meme/bar 默认白字, panel 默认黑字
   const color = capColor ?? (style === 'panel' ? '#000000' : '#ffffff');
   ctx.font = `bold ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+  // 自动缩字防溢出 — 确保基本文本一行装下 (超 92% 画宽就等比缩; 只缩不放, 不影响本就合适的字幕; video/gif 通用)
+  const maxTextW = W * 0.92;
+  const measuredW = ctx.measureText(text).width;
+  if (measuredW > maxTextW && measuredW > 0) {
+    fontSize = Math.max(8, Math.floor(fontSize * maxTextW / measuredW));
+    ctx.font = `bold ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+  }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   // transform.x/y 都是 % of stage, 跟预览 'left: 50+x%' 'top: 50+y%' 对齐
