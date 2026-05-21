@@ -3252,6 +3252,7 @@ export function AnimateMode() {
 
   return (
     <div className={'am-root' + (isMobile ? ' am-root-mobile' : '')}>
+      {view === 'video' ? (<>
       <AnimateToolbar
         duration={project.duration}
         clipCount={project.clips.length}
@@ -3284,7 +3285,6 @@ export function AnimateMode() {
           try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ }
         }}
       />
-      {view === 'video' ? (<>
       <div className="am-workspace">
         <LeftPane
           mode={project.mode ?? 'video'}
@@ -3357,7 +3357,7 @@ export function AnimateMode() {
         onClipContextMenu={onClipContextMenu}
       />
       </>) : (
-        <GifMode />
+        <GifMode view={view} onSwitchView={(m) => { setView(m); try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ } }} />
       )}
       {ctxMenu.render()}
       {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}

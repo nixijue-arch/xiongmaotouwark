@@ -112,12 +112,13 @@ export function renderLoopFrame(
   H: number,
   cache: Map<string, MediaAsset>,
   motionAt?: (clip: ImageClip, t: number) => MotionDelta,
-  scratch?: CanvasRenderingContext2D,   // crossfade 的 head 层 (alpha:true canvas)
+  scratch?: CanvasRenderingContext2D,   // crossfade 的 head 层
+  bgColor: string = '#ffffff',          // GIF 画板默认白 (跟视频预览画板一致). 白底 crossfade 仍正确 (溶解透过白)
 ): void {
-  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt);
+  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor);
   if (spec.blendWith === undefined || spec.blendAlpha === undefined || !scratch) return;
   // crossfade: head 层渲到 scratch, 按 alpha 叠到主层
-  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt);
+  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt, bgColor);
   ctx.save();
   ctx.globalAlpha = spec.blendAlpha;
   ctx.drawImage(scratch.canvas, 0, 0, W, H);

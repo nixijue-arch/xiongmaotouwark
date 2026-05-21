@@ -1,4 +1,4 @@
-// gifmode.tsx — GIF 循环编辑器 (独立板块, 与 animate 视频编辑器完全隔离)
+// gifmode.tsx — GIF 循环编辑器 (融入 animate 的 "GIF 视图", 复用 am-* 外壳与视频视图高度一致)
 // 范式: 循环优先. clips 全是 [0,duration] 全幅图层 (无时间轴), 循环本身取代时间轴.
 // 复用 animcore 纯渲染核心 + gifloop 循环引擎. 绝不 import animatemode (避免拉起 audio 单例).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +11,7 @@ import {
   loadMedia, GIF_PRESETS, GIF_MAX_DURATION, GIF_MIN_DURATION,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform,
-  type GifPresetId, type LoopMotionKind,
+  type GifPresetId, type LoopMotionKind, type ProjectMode,
 } from '@/lib/animcore';
 import {
   type GifProject, type GifLoopMode, type GifVariant, DEFAULT_LOOP_CONFIG,
@@ -33,10 +33,10 @@ const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string }[] = [
   { kind: 'float', label: '8字漂', emoji: '🎈' },
 ];
 
-const LOOP_MODES: { mode: GifLoopMode; label: string; hint: string }[] = [
-  { mode: 'normal', label: '直接循环', hint: '播完跳回头 (适合本来就闭环的动作)' },
-  { mode: 'boomerang', label: 'Boomerang 乒乓', hint: '正放→倒放, 任何动作都首尾无缝' },
-  { mode: 'crossfade', label: 'Crossfade 溶解', hint: '尾段溶进开头, 接缝淡化 (适合无法做成循环的内容)' },
+const LOOP_MODES: { mode: GifLoopMode; short: string; hint: string }[] = [
+  { mode: 'normal', short: '直接', hint: '直接循环 — 播完跳回头 (适合本来就闭环的动作)' },
+  { mode: 'boomerang', short: '乒乓', hint: 'Boomerang — 正放→倒放, 任何动作都首尾无缝' },
+  { mode: 'crossfade', short: '溶解', hint: 'Crossfade — 尾段溶进开头, 接缝淡化' },
 ];
 
 function makeDefaultGifProject(): GifProject {
@@ -57,7 +57,7 @@ function makeDefaultGifProject(): GifProject {
   };
 }
 
-export function GifMode() {
+export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchView: (v: ProjectMode) => void }) {
   const isMobile = useIsMobile();
   const [project, setProject] = useState<GifProject>(() => makeDefaultGifProject());
   const [hydrated, setHydrated] = useState(false);
@@ -129,7 +129,7 @@ export function GifMode() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.clips]);
 
-  // rAF 连续循环预览 (mount-once, 读 ref)
+  // rAF 连续循环预览 (mount-once, 读 ref). 白底 (renderLoopFrame 默认 #fff) 跟视频预览画板一致.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -145,16 +145,15 @@ export function GifMode() {
       const playPos = playingRef.current ? (now - startRef.current) / 1000 : frozenRef.current;
       const t = loopTimeMap(playPos, dd, p.loop.mode);
       const motionAt = makeLoopMotionAt(dd, w);
-      // crossfade 预览: head 层 scratch (alpha:true)
       let bctx: CanvasRenderingContext2D | undefined;
       if (p.loop.mode === 'crossfade') {
         if (!blendRef.current) blendRef.current = document.createElement('canvas');
         const bc = blendRef.current;
         if (bc.width !== w || bc.height !== h) { bc.width = w; bc.height = h; }
-        bctx = bc.getContext('2d', { alpha: true }) ?? undefined;
+        bctx = bc.getContext('2d', { alpha: false }) ?? undefined;
       }
       renderLoopFrame(ctx, loopSpecAt(t, dd, p.loop), p, w, h, cacheRef.current, motionAt, bctx);
-      // 洋葱皮: 首帧用 lighten 叠 (不压黑底, 看动作对齐)
+      // 洋葱皮: 首帧用 multiply 叠 (白底上压暗显示重影, 看动作对齐)
       if (p.loop.onionSkin && p.loop.mode !== 'boomerang') {
         if (!onionRef.current) onionRef.current = document.createElement('canvas');
         const oc = onionRef.current;
@@ -163,8 +162,8 @@ export function GifMode() {
         if (octx) {
           renderLoopFrame(octx, { t: 0 }, p, w, h, cacheRef.current, motionAt);
           ctx.save();
-          ctx.globalAlpha = 0.3;
-          ctx.globalCompositeOperation = 'lighten';
+          ctx.globalAlpha = 0.28;
+          ctx.globalCompositeOperation = 'multiply';
           ctx.drawImage(oc, 0, 0, w, h);
           ctx.restore();
         }
@@ -219,7 +218,6 @@ export function GifMode() {
         src: m.src, label: m.labelCn, fx: 'none',
         transform: { ...DEFAULT_TRANSFORM }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
       };
-      // 新主体放最上层 (lane 0), 其余下移
       const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 1 } as Clip : c));
       return { ...p, clips: [...bumped, clip] };
     });
@@ -329,55 +327,65 @@ export function GifMode() {
   const selImg = selected && selected.trackId === 'image' ? (selected as ImageClip) : null;
   const selCap = selected && selected.trackId === 'caption' ? (selected as CaptionClip) : null;
   const tr = selImg?.transform ?? DEFAULT_TRANSFORM;
+  const maxDur = Math.min(GIF_MAX_DURATION, preset.maxDuration);
 
   return (
-    <div className={`gm-root${isMobile ? ' gm-mobile' : ''}`}>
-      {/* ===== 顶栏 ===== */}
-      <div className="gm-topbar">
-        <div className="gm-presets">
-          {GIF_PRESETS.map(p => (
-            <button key={p.id} title={p.note}
-              className={`gm-chip${project.preset === p.id ? ' active' : ''}`}
-              onClick={() => setPresetId(p.id)}>{p.label}</button>
-          ))}
+    <>
+      {/* ===== 顶栏 — 复用 am-toolbar 蓝色 titlebar, 跟视频视图同一条 ===== */}
+      <div className="am-toolbar win7-titlebar gm-toolbar">
+        <div className="am-toolbar-name">
+          <span className="am-toolbar-name-ic">🔁</span>
+          <span className="am-toolbar-name-text">GIF 循环</span>
         </div>
-        <div className="gm-dur">
-          <span>{D.toFixed(1)}s</span>
-          <input type="range" min={GIF_MIN_DURATION} max={Math.min(GIF_MAX_DURATION, preset.maxDuration)} step={0.5}
-            value={D} onChange={e => setDuration(Number(e.target.value))} />
+        {/* 视频/GIF 切换 — 跟视频视图 toolbar 同位置同款金色 toggle */}
+        <div className="am-tb-mode" role="tablist" aria-label="输出模式">
+          <button type="button" role="tab" aria-selected={view === 'video'}
+            className={'am-tb-mode-btn' + (view === 'video' ? ' is-active' : '')}
+            onClick={() => onSwitchView('video')} title="视频模式 — 含声音 + 长时长 + MP4">🎬 视频</button>
+          <button type="button" role="tab" aria-selected={view === 'gif'}
+            className={'am-tb-mode-btn' + (view === 'gif' ? ' is-active' : '')}
+            onClick={() => onSwitchView('gif')} title="GIF 模式 — 无声 + 短时长 + 循环直出">🎞️ GIF</button>
         </div>
-        <div className="gm-loopmode">
+        <select className="gm-tb-select" value={project.preset} title="尺寸预设"
+          onChange={e => setPresetId(e.target.value as GifPresetId)}>
+          {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+        <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`}>
+          ⏱<input type="number" min={GIF_MIN_DURATION} max={maxDur} step={0.5}
+            value={Number(D.toFixed(1))} onChange={e => setDuration(Number(e.target.value || '1'))} /><span>s</span>
+        </label>
+        <div className="gm-tb-loopgroup" role="tablist" aria-label="循环方式">
           {LOOP_MODES.map(m => (
             <button key={m.mode} title={m.hint}
-              className={`gm-chip${project.loop.mode === m.mode ? ' active' : ''}`}
-              onClick={() => setLoopMode(m.mode)}>{m.label}</button>
+              className={'gm-tb-loop' + (project.loop.mode === m.mode ? ' is-active' : '')}
+              onClick={() => setLoopMode(m.mode)}>{m.short}</button>
           ))}
         </div>
         {project.loop.mode === 'crossfade' && (
-          <div className="gm-dur" title="溶解时长">
-            <span>溶{project.loop.crossfadeSec.toFixed(2)}s</span>
-            <input type="range" min={0.05} max={Math.max(0.1, D * 0.4)} step={0.05}
-              value={project.loop.crossfadeSec}
-              onChange={e => setProject(p => ({ ...p, loop: { ...p.loop, crossfadeSec: Number(e.target.value) } }))} />
-          </div>
+          <label className="gm-tb-num" title="溶解时长">
+            溶<input type="number" min={0.05} max={Math.max(0.1, D * 0.4)} step={0.05}
+              value={Number(project.loop.crossfadeSec.toFixed(2))}
+              onChange={e => setProject(p => ({ ...p, loop: { ...p.loop, crossfadeSec: Number(e.target.value || '0.05') } }))} /><span>s</span>
+          </label>
         )}
-        <button className={`gm-chip${project.loop.onionSkin ? ' active' : ''}`}
+        <div className="am-toolbar-spacer" />
+        <button className={'am-tb-btn' + (project.loop.onionSkin ? ' am-tb-btn-primary' : '')}
           title="洋葱皮: 首帧半透明叠当前帧, 看动作对齐"
           onClick={() => setProject(p => ({ ...p, loop: { ...p.loop, onionSkin: !p.loop.onionSkin } }))}>
-          <Eye size={13} /> 洋葱皮
+          <Eye size={13} /> <span>洋葱皮</span>
         </button>
-        <button className="gm-variants-btn" onClick={openVariants} disabled={variantBusy} title="渲染 normal/boomerang/crossfade 并排对比">
-          <Layers size={14} /> 对比变体
+        <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓/溶解 三变体并排对比">
+          <Layers size={13} /> <span>对比变体</span>
         </button>
-        <button className="gm-export" onClick={onExport} disabled={exporting}>
-          {exporting ? <Loader2 size={15} className="gm-spin" /> : <Download size={15} />}
-          {exporting ? '生成中' : '导出 GIF'}
+        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
+          {exporting ? <Loader2 size={13} className="gm-spin" /> : <Download size={13} />} <span>{exporting ? '生成中' : '导出 GIF'}</span>
         </button>
       </div>
 
-      <div className="gm-body">
-        {/* ===== 左: 主体 + 动作 + 字幕 ===== */}
-        <aside className="gm-left">
+      {/* ===== 工作区 — 复用 am-workspace 网格 (左 340 / 预览 1fr / 右 300) ===== */}
+      <div className={'am-workspace gm-workspace' + (isMobile ? ' gm-mobile' : '')}>
+        {/* 左: 主体库 + 循环动作 + 字幕 */}
+        <aside className="gm-pane gm-pane-left">
           <div className="gm-sec-title">主体</div>
           <div className="gm-subtabs">
             <button className={subjectTab === 'panda' ? 'active' : ''} onClick={() => setSubjectTab('panda')}>熊猫头</button>
@@ -393,7 +401,6 @@ export function GifMode() {
               </button>
             ))}
           </div>
-
           <div className="gm-sec-title">循环动作 <span className="gm-hint">(选中主体后点)</span></div>
           <div className="gm-motions">
             {LOOP_MOTIONS.map(m => (
@@ -404,24 +411,24 @@ export function GifMode() {
               </button>
             ))}
           </div>
-
           <button className="gm-addcap" onClick={addCaption}><TypeIcon size={14} /> 加字幕</button>
         </aside>
 
-        {/* ===== 中: 预览 ===== */}
-        <main className="gm-center">
-          <div className="gm-stage">
-            <canvas ref={canvasRef} className="gm-canvas" style={{ aspectRatio: `${preset.width}/${preset.height}` }} />
+        {/* 中: 预览 — 复用 am-preview-pane (白画板) */}
+        <main className="am-preview-pane gm-preview">
+          <div className="am-preview-head">
+            <span className="am-preview-title">GIF 预览</span>
             {project.loop.showSeamScore && seam !== null && (
-              <div className={`gm-seam${seam <= 6 ? ' good' : seam <= 18 ? ' ok' : ' bad'}`}>
-                {project.loop.mode === 'boomerang'
-                  ? 'Boomerang · 首尾完美'
-                  : `循环顺滑度 ${Math.max(0, 100 - seam)}/100`}
-              </div>
+              <span className={`gm-seam${seam <= 6 ? ' good' : seam <= 18 ? ' ok' : ' bad'}`}>
+                {project.loop.mode === 'boomerang' ? 'Boomerang · 首尾完美' : `循环顺滑度 ${Math.max(0, 100 - seam)}/100`}
+              </span>
             )}
           </div>
+          <div className="am-preview-stage">
+            <canvas ref={canvasRef} className="gm-canvas" style={{ aspectRatio: `${preset.width}/${preset.height}` }} />
+          </div>
           <div className="gm-transport">
-            <button onClick={togglePlay}>{playing ? <Pause size={18} /> : <Play size={18} />}</button>
+            <button className="gm-play" onClick={togglePlay}>{playing ? <Pause size={18} /> : <Play size={18} />}</button>
             <input className="gm-scrub" type="range" min={0} max={D} step={1 / preset.fps} value={scrubT}
               title="拖动检查任意帧 (会暂停)"
               onChange={e => { const v = Number(e.target.value); setScrubT(v); frozenRef.current = v; if (playing) setPlaying(false); }} />
@@ -429,8 +436,8 @@ export function GifMode() {
           </div>
         </main>
 
-        {/* ===== 右: 图层 + 检视 ===== */}
-        <aside className="gm-right">
+        {/* 右: 图层 + 检视 */}
+        <aside className="gm-pane gm-pane-right">
           <div className="gm-sec-title">图层</div>
           <div className="gm-layers">
             {project.clips.length === 0 && <div className="gm-empty">空 — 左侧加个主体</div>}
@@ -496,7 +503,7 @@ export function GifMode() {
                   <div key={v.mode} className="gm-variant">
                     <img src={url} alt={v.mode} />
                     <div className="gm-variant-meta">
-                      <b>{LOOP_MODES.find(m => m.mode === v.mode)?.label ?? v.mode}</b>
+                      <b>{LOOP_MODES.find(m => m.mode === v.mode)?.short ?? v.mode}</b>
                       <span>{(v.size / 1024).toFixed(0)}KB · {v.frameCount}帧</span>
                     </div>
                     <button onClick={() => downloadBlob(v.blob, `熊猫头循环-${v.mode}`)}><Download size={13} /> 下载</button>
@@ -507,7 +514,7 @@ export function GifMode() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

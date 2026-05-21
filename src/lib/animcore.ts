@@ -408,8 +408,9 @@ export function renderExportFrame(
   H: number,
   imgCache: Map<string, MediaAsset>,
   motionAt?: (clip: ImageClip, t: number) => MotionDelta,  // P0: 循环安全动作注入 (gifmode 用; video 不传 = 行为不变)
+  bgColor: string = '#000000',  // 画板底色. video 默认黑; GIF 传白 (#fff) 跟视频预览画板一致
 ) {
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, W, H);
   // v23-i: 删 scene 强制最底 — 用户痛点 "改 lane 没变化". 纯按 lane 排 (lane 大 = 底层, lane 0 = 顶层)
   // scene 仍按 lane 排, 但 cover 全屏性质保留. 想让 scene 当背景 → 把 scene 放高 lane (e.g. lane 1+)
