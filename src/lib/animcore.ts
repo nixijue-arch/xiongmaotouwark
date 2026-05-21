@@ -1,0 +1,583 @@
+// animcore.ts — 纯渲染核心 (从 animatemode.tsx P0 抽取)
+// 零 React / 零 audioEngine 依赖. 视频编辑器 + GIF 板块共享.
+// 含: 类型 / GIF 解码 (gifuct-js 动态 import) / FX 引擎 / renderExportFrame 合成器 / 字幕绘制
+// P0 新增: GifFrameEdit + LoopMotion + MotionDelta 类型; gifFrameAt 接 edit; renderExportFrame 接 motionAt.
+
+export type TrackType = 'image' | 'caption' | 'fx' | 'tts' | 'bgm';
+// 已有微动效 (作用范围: clip 内部 micro-FX) + 场景运镜 (作用整 clip duration, 大幅 pan/zoom) + 移动 (跨首尾帧 tween)
+export type ImageFx =
+  | 'none'
+  // 微动效 (短促入场感)
+  | 'shake' | 'zoom' | 'flash' | 'fade-in' | 'fade-out' | 'slide-l' | 'slide-r' | 'bounce' | 'spin' | 'pulse' | 'glitch'
+  // 场景运镜 (持续整 clip, 大幅 pan/zoom)
+  | 'pan-l' | 'pan-r' | 'pan-u' | 'pan-d' | 'zoom-in' | 'zoom-out' | 'ken-burns'
+  // 移动 (lerp clip.transform → clip.endTransform; 首尾帧 tween)
+  | 'move';
+export type AspectId = '16:9' | '9:16' | '1:1';
+
+export interface Transform { x: number; y: number; scale: number; rotation: number; flipX: boolean; }
+export const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0, flipX: false };
+
+export interface BaseClip { id: string; trackId: TrackType; lane: number; start: number; end: number; }
+// kind?: 'scene' — 场景背景图 (全屏 cover, 跟普通 image 短边 60% contain 区分)
+// endTransform — 'move' 特效用首尾帧 tween. lerp clip.transform → endTransform 按 t/duration
+export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; }
+export interface CaptionTransform { x: number; y: number; }
+export const DEFAULT_CAPTION_TRANSFORM: CaptionTransform = { x: 0, y: 35 };
+// 'meme' = 白字 + 黑描边 (跟编辑器对齐, meme 经典款); 'panel' = 白底黑框; 'bar' = 黑底白字
+export type CaptionStyle = 'meme' | 'panel' | 'bar';
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = 'meme';
+// v23-k Phase A: entranceFx — 字幕入场动效 (沙雕动画核心, 加入场感)
+export type CaptionEntranceFx = 'none' | 'fade' | 'pop' | 'slam' | 'typewriter';
+export interface CaptionClip extends BaseClip { trackId: 'caption'; text: string; fontSize?: number; color?: string; style?: CaptionStyle; transform?: CaptionTransform; linkedTTSId?: string /* v23-e: caption ⇌ tts 1:1 双向 link, caption.start/end/text 改 → tts 自动同步 */; entranceFx?: CaptionEntranceFx; entranceDuration?: number; }
+// v23-e: TTSClip + linkedCaptionId (双向 link) + playbackRate (clip 级倍速 0.5-3.0, 优先于 voice 级)
+// v23-k: audioDuration (原始 audio 时长, resize 时自动算 rate fit)
+export interface TTSClip extends BaseClip { trackId: 'tts'; text: string; voice: string; audioSrc?: string; audioDuration?: number; genFailed?: boolean; audioEngine?: 'youdao' | 'baidu'; linkedCaptionId?: string; playbackRate?: number; }
+export interface BGMClip extends BaseClip { trackId: 'bgm'; bgmId: string; name: string; volume: number; }
+// 特效独立轨 — 可绑定到某 image clip 或全局生效 (targetClipId 空)
+// 跟 ImageClip.fx 同时存在: FXClip 优先, 旧 image.fx 是 fallback
+// v23-h: 'move' 用 startTransform/endTransform · v23-j (phase 2): 其他 FX 也接参数
+// strength: 强度 0-3 倍 (默认 1) — shake/flash/pulse/glitch/pan/slide
+// zoomFrom/zoomTo: zoom-in/out 起始/结束 scale (默认 1.0/1.25)
+// spinTurns: spin 圈数 (默认 1)
+// 老 image.fx='move' + image.endTransform 仍兼容渲染 (fallback path)
+export interface FXClip extends BaseClip {
+  trackId: 'fx';
+  fx: ImageFx;
+  targetClipId?: string;
+  startTransform?: Transform;
+  endTransform?: Transform;
+  strength?: number;
+  zoomFrom?: number;
+  zoomTo?: number;
+  spinTurns?: number;
+}
+export type Clip = ImageClip | CaptionClip | TTSClip | BGMClip | FXClip;
+export type LaneCount = Record<TrackType, number>;
+// v23-l: 项目模式 — 视频 (有声 + 长时长 + MP4) / GIF (无声 + 短时长 + 直出 GIF + 社媒尺寸预设)
+export type ProjectMode = 'video' | 'gif';
+
+// v24: GIF 社媒预设 (尺寸 + 时长 + fps). 业界标准化 — 微信表情严格 ≤500KB ≤3s, TG ≤256KB,
+// 朋友圈 ≤2MB, X ≤15MB. 全局上限 15s (业界通用 GIF 最长). 老 ID 'wechat'/'x'/'tg'/'custom' 保留向后兼容.
+export type GifPresetId = 'wechat' | 'moments' | 'tg' | 'quick-share' | 'x' | 'custom';
+export interface GifPreset {
+  id: GifPresetId;
+  label: string;
+  width: number;
+  height: number;
+  fps: number;
+  defaultDuration: number; // s
+  maxDuration: number;
+  note: string;
+}
+export const GIF_PRESETS: GifPreset[] = [
+  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 12, defaultDuration: 2.5, maxDuration: 3,  note: '微信表情 · ≤500KB · 240×240 · 12fps · 严格' },
+  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 12, defaultDuration: 4,   maxDuration: 5,  note: '朋友圈微博 · ≤2MB · 400×400 · 12fps' },
+  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 3,  note: 'Telegram · ≤256KB · 512×512 · 24fps' },
+  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 15, defaultDuration: 4,   maxDuration: 6,  note: '通用 · ≤1MB · 360×360 · 15fps' },
+  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 18, defaultDuration: 6,   maxDuration: 12, note: 'X/Twitter · ≤15MB · 480×480 · 18fps' },
+  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 15, defaultDuration: 6,   maxDuration: 15, note: '自由 · 上限 15s · 480×360 · 15fps' },
+];
+export const GIF_MAX_DURATION = 15; // s, 总上限 (业界 GIF 通常 ≤15s, 微信/Telegram 表情 ≤3s, 见 GIF_PRESETS)
+export const GIF_MIN_DURATION = 1;
+
+export interface ProjectState {
+  clips: Clip[];
+  lanes: LaneCount;
+  duration: number;
+  mode?: ProjectMode;       // 'video' (默认) / 'gif'. optional 兼容旧 project
+  gifPresetId?: GifPresetId; // 仅 gif 模式有效
+}
+
+// ============ P0: GIF 循环编辑器共享类型 ============
+// 导入 GIF 的帧级非破坏微调 (裁首尾帧 / 反转 / 调速 / 单 clip 乒乓). gifFrameAt 取帧时套用.
+export interface GifFrameEdit {
+  trimStartFrame: number;    // 含, 默认 0
+  trimEndFrame: number;      // 不含, 默认帧数
+  reverse: boolean;
+  speed: number;             // 1=原速, 2=快一倍, 0.5=半速 (缩放有效 delay)
+  perClipBoomerang: boolean; // 该主体在自己 trim 范围内乒乓
+}
+// 循环安全动作 — 相位锁定归一化 u=(t/D)mod1 + 整数周期 → f(0)==f(1) 必然闭环.
+// (区别于 computeFx 的 shake/pulse: 那些锁 enterT, t=D 不归零). loopMotionDelta 在 gifloop.ts 算.
+export type LoopMotionKind = 'none' | 'bob' | 'shimmy' | 'sway' | 'breathe' | 'pulseLoop' | 'spin360' | 'float';
+export interface LoopMotion { kind: LoopMotionKind; amp: number; cycles: number; }
+// renderExportFrame 的 motionAt 回调返回值 — 叠加在 clip transform 之上
+export interface MotionDelta { dx: number; dy: number; dScale: number; dRot: number; }
+
+export function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
+
+// 在时间 t 计算 image clip 实际应渲染的 transform
+//   - 没 endTransform + 不是 move fx → 直接返回 clip.transform
+//   - 有 endTransform 且 effective fx 是 'move' → lerp clip.transform → endTransform 按 t/duration
+// effectiveFx 通常已经 resolve 过 (FX track 优先 + image.fx fallback)
+// 当 fx 不是 move 时不 lerp (即使设了 endTransform), 让用户能"录终态"暂留待用
+export function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
+// v23-h: 接受 effectiveFxFor 完整返回值, 优先用 FX 'move' clip 的 startTransform/endTransform
+// fallback: 老 image.fx='move' + image.endTransform (兼容旧 project)
+export function computeLiveTransform(c: ImageClip, t: number, eff: { fx: ImageFx; fxClip: FXClip | null; fxStart: number; fxDur: number }): Transform {
+  const tr = c.transform ?? DEFAULT_TRANSFORM;
+  // v23-h 新路径: FX 'move' clip 持 transforms
+  if (eff.fx === 'move' && eff.fxClip?.startTransform && eff.fxClip?.endTransform) {
+    const dur = Math.max(0.001, eff.fxClip.end - eff.fxClip.start);
+    const p = clamp((t - eff.fxClip.start) / dur, 0, 1);
+    const st = eff.fxClip.startTransform;
+    const et = eff.fxClip.endTransform;
+    return {
+      x: lerp(st.x, et.x, p),
+      y: lerp(st.y, et.y, p),
+      scale: lerp(st.scale, et.scale, p),
+      rotation: lerp(st.rotation, et.rotation, p),
+      flipX: p < 0.5 ? st.flipX : et.flipX,
+    };
+  }
+  // 老路径兼容: image.fx='move' + image.endTransform
+  if (!c.endTransform || eff.fx !== 'move') return tr;
+  const dur = Math.max(0.001, c.end - c.start);
+  const p = clamp((t - c.start) / dur, 0, 1);
+  const et = c.endTransform;
+  return {
+    x: lerp(tr.x, et.x, p),
+    y: lerp(tr.y, et.y, p),
+    scale: lerp(tr.scale, et.scale, p),
+    rotation: lerp(tr.rotation, et.rotation, p),
+    flipX: p < 0.5 ? tr.flipX : et.flipX,
+  };
+}
+
+export async function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`load failed: ${src}`));
+    img.crossOrigin = 'anonymous';
+    img.src = src;
+  });
+}
+
+// ============ GIF 真动画支持 (v23-l) ============
+// 用 gifuct-js decode .gif → 多帧 canvas, render 时按 (t-clipStart) % gifDur 算当前帧.
+// PreviewPane / PreviewModal 用 <img src> DOM 渲染 GIF 自带动画, 不需要 decoder.
+// 仅 export pipeline (canvas-based drawImage) 需要 — 否则只画首帧.
+
+export interface GifFrames {
+  type: 'gif';
+  width: number;
+  height: number;
+  frames: { canvas: HTMLCanvasElement; delayMs: number }[];
+  totalDurMs: number;
+}
+
+export type MediaAsset = HTMLImageElement | GifFrames;
+
+export function isGifFrames(m: MediaAsset | undefined | null): m is GifFrames {
+  return !!m && (m as GifFrames).type === 'gif';
+}
+
+export function isGifSrc(src: string): boolean {
+  if (!src) return false;
+  if (src.startsWith('data:image/gif')) return true;
+  const lower = src.toLowerCase();
+  return lower.endsWith('.gif') || lower.includes('.gif?');
+}
+
+export async function loadGifFrames(src: string): Promise<GifFrames> {
+  const { parseGIF, decompressFrames } = await import('gifuct-js');
+  const resp = await fetch(src);
+  if (!resp.ok) throw new Error(`gif fetch failed: ${resp.status}`);
+  const buf = await resp.arrayBuffer();
+  const parsed = parseGIF(buf);
+  const decoded = decompressFrames(parsed, true);
+  if (decoded.length === 0) throw new Error('gif empty');
+
+  const W = parsed.lsd.width;
+  const H = parsed.lsd.height;
+  const composed: { canvas: HTMLCanvasElement; delayMs: number }[] = [];
+
+  // gifuct-js 帧数据是 patch (局部更新), 需按 disposalType 累积合成完整帧.
+  // disposal: 0/1=保留前帧, 2=clear to bg, 3=restore prev (罕见, 简化 = 视为 1)
+  const prev = document.createElement('canvas');
+  prev.width = W; prev.height = H;
+  const prevCtx = prev.getContext('2d');
+  if (!prevCtx) throw new Error('canvas 2d unavailable');
+
+  for (const f of decoded) {
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d unavailable');
+    ctx.drawImage(prev, 0, 0);
+
+    // f.patch 是 RGBA Uint8ClampedArray, dims 是局部 bbox
+    const patchData = new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height);
+    const tmp = document.createElement('canvas');
+    tmp.width = f.dims.width; tmp.height = f.dims.height;
+    const tmpCtx = tmp.getContext('2d');
+    if (!tmpCtx) throw new Error('canvas 2d unavailable');
+    tmpCtx.putImageData(patchData, 0, 0);
+    ctx.drawImage(tmp, f.dims.left, f.dims.top);
+
+    composed.push({ canvas, delayMs: Math.max(20, f.delay || 100) });
+
+    // 更新 prev
+    if (f.disposalType === 2) {
+      prevCtx.clearRect(0, 0, W, H);
+    } else {
+      prevCtx.clearRect(0, 0, W, H);
+      prevCtx.drawImage(canvas, 0, 0);
+    }
+  }
+
+  const totalDurMs = composed.reduce((s, f) => s + f.delayMs, 0);
+  return { type: 'gif', width: W, height: H, frames: composed, totalDurMs };
+}
+
+export async function loadMedia(src: string): Promise<MediaAsset> {
+  if (isGifSrc(src)) {
+    try {
+      return await loadGifFrames(src);
+    } catch (e) {
+      // gif decode 失败 fallback 走 <img> 加载 (至少首帧能显)
+      console.warn('[gif] decode failed, fallback to <img>:', e);
+      return await loadImage(src);
+    }
+  }
+  return await loadImage(src);
+}
+
+export function gifFrameAt(g: GifFrames, t: number, clipStart: number, edit?: GifFrameEdit): HTMLCanvasElement {
+  if (!edit) {
+    // 默认路径 — 与抽取前字节级一致 (零行为变化)
+    if (g.frames.length === 1 || g.totalDurMs <= 0) return g.frames[0].canvas;
+    const localMs = (((t - clipStart) * 1000) % g.totalDurMs + g.totalDurMs) % g.totalDurMs;
+    let acc = 0;
+    for (const f of g.frames) {
+      acc += f.delayMs;
+      if (localMs < acc) return f.canvas;
+    }
+    return g.frames[g.frames.length - 1].canvas;
+  }
+  // P0: 帧级微调 (非破坏) — trim 子帧 / reverse / speed / 单 clip 乒乓. UI 在 P3 接.
+  const start = clamp(Math.round(edit.trimStartFrame), 0, g.frames.length - 1);
+  const end = clamp(Math.round(edit.trimEndFrame), start + 1, g.frames.length);
+  const sub = g.frames.slice(start, end);
+  if (sub.length === 1) return sub[0].canvas;
+  const speed = Math.max(0.05, edit.speed || 1);
+  const ordered = edit.reverse ? sub.slice().reverse() : sub;
+  const subDurMs = ordered.reduce((s, f) => s + f.delayMs, 0) / speed;
+  if (subDurMs <= 0) return ordered[0].canvas;
+  let localMs: number;
+  if (edit.perClipBoomerang) {
+    const full = subDurMs * 2;
+    const p = (((t - clipStart) * 1000) % full + full) % full;
+    localMs = p < subDurMs ? p : full - p;
+  } else {
+    localMs = (((t - clipStart) * 1000) % subDurMs + subDurMs) % subDurMs;
+  }
+  let acc = 0;
+  for (const f of ordered) {
+    acc += f.delayMs / speed;
+    if (localMs < acc) return f.canvas;
+  }
+  return ordered[ordered.length - 1].canvas;
+}
+
+export function mediaWH(m: MediaAsset): { w: number; h: number } {
+  if (isGifFrames(m)) return { w: m.width, h: m.height };
+  return { w: m.naturalWidth || m.width, h: m.naturalHeight || m.height };
+}
+
+export function drawableAt(m: MediaAsset, t: number, clipStart: number, edit?: GifFrameEdit): CanvasImageSource {
+  if (isGifFrames(m)) return gifFrameAt(m, t, clipStart, edit);
+  return m;
+}
+
+// 决定某 image clip 在时间 t 实际应用的 fx 名:
+// FX track 优先 — 找 active 的 FXClip, 若 targetClipId 匹配 / 为空 (全局) 都生效, 否则用 image.fx
+export function effectiveFxFor(clip: ImageClip, t: number, allClips: Clip[]): { fx: ImageFx; fxStart: number; fxDur: number; fxClip: FXClip | null } {
+  const fxClip = allClips.find(c =>
+    c.trackId === 'fx' && t >= c.start && t < c.end && (!c.targetClipId || c.targetClipId === clip.id)
+  ) as FXClip | undefined;
+  if (fxClip) return { fx: fxClip.fx, fxStart: fxClip.start, fxDur: fxClip.end - fxClip.start, fxClip };
+  return { fx: clip.fx, fxStart: clip.start, fxDur: clip.end - clip.start, fxClip: null };
+}
+
+// 计算 fx 在 t 时刻的具体 transform 偏移 / 缩放 / 旋转 / 透明度 / 滤镜
+// 跟 export canvas render 同算法 → preview 跟 export 视觉一致, 也不依赖 CSS animation (避免漂移)
+// move fx 的 transform tween 走 computeLiveTransform — 这里 FxApply 不重复处理
+export interface FxApply { offsetX: number; offsetY: number; scaleMul: number; rotateAdd: number; alpha: number; filter: string; }
+// easeInOutCubic — 让运镜更柔, 不死板线性
+export function ease(p: number): number { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+// v23-j (phase 2): FX clip 创建时按 fx 种类初始化默认 strength/zoom/spin 参数
+export function initFXDefaults(fxClip: FXClip, targetTr: Transform): void {
+  const fx = fxClip.fx;
+  if (fx === 'move') {
+    fxClip.startTransform = { ...targetTr };
+    fxClip.endTransform = { ...targetTr };
+  } else if (fx === 'zoom-in') {
+    fxClip.zoomFrom = 1.0;
+    fxClip.zoomTo = 1.25;
+  } else if (fx === 'zoom-out') {
+    fxClip.zoomFrom = 1.25;
+    fxClip.zoomTo = 1.0;
+  } else if (fx === 'zoom') {
+    // 入场弹大: 从 0.3 缩放到 1.0
+    fxClip.zoomFrom = 0.3;
+  } else if (fx === 'spin') {
+    fxClip.spinTurns = 1;
+    fxClip.strength = 1;
+  } else if (fx === 'pan-l' || fx === 'pan-r' || fx === 'pan-u' || fx === 'pan-d') {
+    fxClip.strength = 1;
+  } else if (fx === 'ken-burns') {
+    fxClip.strength = 1;
+  } else {
+    // shake/flash/pulse/glitch/slide/bounce - 通用 strength 默认 1
+    fxClip.strength = 1;
+  }
+}
+
+// v23-j (phase 2): computeFx 接 FXClip object — 用户调的 strength/zoomFrom/zoomTo/spinTurns 真生效
+export function computeFx(fx: ImageFx, fxStart: number, fxDur: number, t: number, W: number, fxClip?: FXClip | null): FxApply {
+  const out: FxApply = { offsetX: 0, offsetY: 0, scaleMul: 1, rotateAdd: 0, alpha: 1, filter: '' };
+  if (fx === 'none' || fx === 'move') return out;
+  const enterT = t - fxStart;
+  const dur = Math.max(0.2, fxDur);
+  const progress = Math.min(1, Math.max(0, enterT / dur));
+  // v23-j: strength 默认 1.0, 用户可调 0~3 (0=不动, 1=默认, 3=超强)
+  const k = fxClip?.strength ?? 1.0;
+  const zoomFrom = fxClip?.zoomFrom ?? 1.0;
+  const zoomTo = fxClip?.zoomTo ?? 1.25;
+  const spinTurns = fxClip?.spinTurns ?? 1;
+  if (fx === 'shake') {
+    out.offsetX = Math.sin(enterT * 60) * 6 * k;
+    out.offsetY = Math.cos(enterT * 60) * 4 * k;
+  } else if (fx === 'zoom') {
+    // 入场弹大 — zoomFrom (默认 0.3) → 1.0
+    const fromScale = fxClip?.zoomFrom ?? 0.3;
+    out.scaleMul = fromScale + (1 - fromScale) * Math.pow(progress, 0.7);
+  } else if (fx === 'flash') {
+    out.filter = `brightness(${1 + Math.max(0, Math.sin(enterT * Math.PI * 4)) * 1.5 * k})`;
+  } else if (fx === 'fade-in') {
+    out.alpha = Math.min(1, progress);
+  } else if (fx === 'fade-out') {
+    out.alpha = Math.max(0, 1 - progress);
+  } else if (fx === 'slide-l') {
+    out.offsetX = -W * k * (1 - Math.min(1, progress * 1.2));
+  } else if (fx === 'slide-r') {
+    out.offsetX = W * k * (1 - Math.min(1, progress * 1.2));
+  } else if (fx === 'bounce') {
+    out.offsetY = -Math.abs(Math.sin(progress * Math.PI * 2.5)) * 30 * k * (1 - progress);
+  } else if (fx === 'spin') {
+    out.rotateAdd = progress * 360 * spinTurns;
+  } else if (fx === 'pulse') {
+    out.scaleMul = 1 + 0.15 * k * Math.sin(progress * Math.PI * 4);
+  } else if (fx === 'glitch') {
+    const phase = Math.floor(enterT * 12) % 4;
+    out.offsetX = (phase - 1.5) * 8 * k;
+    out.filter = `brightness(${1 + Math.sin(enterT * 30) * 0.4 * k})`;
+  }
+  // 场景运镜 — pan/zoom — 用户可调强度 (panStrength 默认 1)
+  else if (fx === 'pan-l') {
+    out.offsetX = -W * 0.16 * k * ease(progress);
+  } else if (fx === 'pan-r') {
+    out.offsetX = W * 0.16 * k * ease(progress);
+  } else if (fx === 'pan-u') {
+    out.offsetY = -W * 0.10 * k * ease(progress);
+  } else if (fx === 'pan-d') {
+    out.offsetY = W * 0.10 * k * ease(progress);
+  } else if (fx === 'zoom-in') {
+    // 用 zoomFrom→zoomTo (默认 1.0→1.25), 用户可调极端
+    out.scaleMul = zoomFrom + (zoomTo - zoomFrom) * ease(progress);
+  } else if (fx === 'zoom-out') {
+    // 用 zoomFrom→zoomTo (默认 1.25→1.0). 反向 — 用户 set zoomFrom=1.5, zoomTo=1 等
+    const zFrom = fxClip?.zoomFrom ?? 1.25;
+    const zTo = fxClip?.zoomTo ?? 1.0;
+    out.scaleMul = zFrom + (zTo - zFrom) * ease(progress);
+  } else if (fx === 'ken-burns') {
+    out.scaleMul = 1 + 0.18 * k * ease(progress);
+    out.offsetX = W * 0.08 * k * ease(progress);
+  }
+  return out;
+}
+
+export function renderExportFrame(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  project: { clips: Clip[] },   // P0: 收窄到只读 clips → ProjectState / GifProject 都可直接传
+  W: number,
+  H: number,
+  imgCache: Map<string, MediaAsset>,
+  motionAt?: (clip: ImageClip, t: number) => MotionDelta,  // P0: 循环安全动作注入 (gifmode 用; video 不传 = 行为不变)
+) {
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+  // v23-i: 删 scene 强制最底 — 用户痛点 "改 lane 没变化". 纯按 lane 排 (lane 大 = 底层, lane 0 = 顶层)
+  // scene 仍按 lane 排, 但 cover 全屏性质保留. 想让 scene 当背景 → 把 scene 放高 lane (e.g. lane 1+)
+  const active = (project.clips.filter(c => c.trackId === 'image' && t >= c.start && t < c.end) as ImageClip[])
+    .sort((a, b) => b.lane - a.lane);
+
+  for (let idx = 0; idx < active.length; idx++) {
+    const c = active[idx];
+    const media = imgCache.get(c.src);
+    if (!media) continue;
+    const { w: naturalW, h: naturalH } = mediaWH(media);
+    const eff = effectiveFxFor(c, t, project.clips);
+    const tr = computeLiveTransform(c, t, eff);
+    const isScene = c.kind === 'scene';
+    let iw: number, ih: number;
+    if (isScene) {
+      const coverR = Math.max(W / naturalW, H / naturalH);
+      iw = naturalW * coverR * tr.scale;
+      ih = naturalH * coverR * tr.scale;
+    } else {
+      // 删"副图自动缩"baseScale 机制 — 永远 1.0. 多 image 叠加时用户自己 transform.scale 调
+      const baseSize = Math.min(W, H) * 0.6;
+      const r = baseSize / naturalW;
+      const maxRenderH = H * 0.85;
+      iw = naturalW * r * tr.scale;
+      ih = naturalH * r * tr.scale;
+      if (ih > maxRenderH) {
+        const shrink = maxRenderH / ih;
+        iw *= shrink;
+        ih *= shrink;
+      }
+    }
+    const cx = W / 2 + (tr.x / 100) * W;
+    const cy = H / 2 + (tr.y / 100) * H;
+
+    const fxA = computeFx(eff.fx, eff.fxStart, eff.fxDur, t, W, eff.fxClip);
+    iw *= fxA.scaleMul;
+    ih *= fxA.scaleMul;
+    // P0: 循环安全动作 (motionAt 注入). video 编辑器不传 → md=null → 完全不影响.
+    const md = motionAt ? motionAt(c, t) : null;
+    if (md) { iw *= md.dScale; ih *= md.dScale; }
+
+    ctx.save();
+    ctx.globalAlpha = fxA.alpha;
+    if (fxA.filter) ctx.filter = fxA.filter;
+    ctx.translate(cx + fxA.offsetX + (md ? md.dx : 0), cy + fxA.offsetY + (md ? md.dy : 0));
+    ctx.rotate((tr.rotation + fxA.rotateAdd + (md ? md.dRot : 0)) * Math.PI / 180);
+    ctx.scale(tr.flipX ? -1 : 1, 1);
+    // GIF: 按 (t-clipStart) % gifDur 取当前帧 (+gifEdit 帧级微调); 静图: HTMLImageElement 自身
+    ctx.drawImage(drawableAt(media, t, c.start, c.gifEdit), -iw / 2, -ih / 2, iw, ih);
+    ctx.restore();
+  }
+
+  // caption: 优先 caption track active clip, fallback image.caption
+  // 渲染所有 active caption clips (按 transform 位置), 单 caption fallback 走 image.caption
+  const top = active[active.length - 1];
+  const activeCaps = project.clips.filter(c => c.trackId === 'caption' && t >= c.start && t < c.end) as CaptionClip[];
+  if (activeCaps.length === 0 && top?.caption) {
+    drawCaption(ctx, top.caption, W, H, undefined, undefined, undefined, DEFAULT_CAPTION_TRANSFORM);
+  } else {
+    for (const cap of activeCaps) {
+      // v23-k: 加入场动效 — typewriter 截字 / fade pop slam 动画
+      const ent = computeCaptionEntrance(cap, t);
+      drawCaption(ctx, ent.visibleText, W, H, cap.fontSize, cap.color, cap.style ?? DEFAULT_CAPTION_STYLE, cap.transform ?? DEFAULT_CAPTION_TRANSFORM, { opacity: ent.opacity, scale: ent.scale });
+    }
+  }
+  // 仅没录音 + 没 active caption 的 TTS 才烧字幕
+  // (有 caption 时不重复; 有 audioSrc 时进真音轨不烧)
+  const activeTTS = project.clips.find(c => c.trackId === 'tts' && t >= c.start && t < c.end) as TTSClip | undefined;
+  if (activeTTS?.text && !activeTTS.audioSrc && activeCaps.length === 0) {
+    drawCaption(
+      ctx, activeTTS.text, W, H,
+      Math.max(24, Math.round(W * 0.028)),
+      '#ffffff', 'bar',
+      { x: 0, y: -38 },
+    );
+  }
+}
+
+// v23-k Phase A: 字幕入场动效 helper — 算出当前 t 时的 { opacity, scale, visibleText }
+export function computeCaptionEntrance(
+  c: { start: number; end: number; text: string; entranceFx?: CaptionEntranceFx; entranceDuration?: number },
+  time: number,
+): { opacity: number; scale: number; visibleText: string } {
+  const fx = c.entranceFx ?? 'none';
+  if (fx === 'none') return { opacity: 1, scale: 1, visibleText: c.text };
+  const dur = Math.max(0.05, c.entranceDuration ?? (fx === 'typewriter' ? Math.min(c.end - c.start, c.text.length * 0.06) : 0.4));
+  const p = Math.max(0, Math.min(1, (time - c.start) / dur));
+  if (fx === 'fade') return { opacity: p, scale: 1, visibleText: c.text };
+  if (fx === 'pop') {
+    const easeOut = 1 - Math.pow(1 - p, 3);
+    const overshoot = p < 1 ? easeOut * 1.1 - 0.1 * (1 - p) : 1;
+    return { opacity: Math.min(1, p * 2), scale: overshoot, visibleText: c.text };
+  }
+  if (fx === 'slam') {
+    const easeOut = 1 - Math.pow(1 - p, 4);
+    const scale = 2 - easeOut * 1;
+    return { opacity: Math.min(1, p * 2.5), scale, visibleText: c.text };
+  }
+  if (fx === 'typewriter') {
+    const n = Math.max(1, Math.floor(p * c.text.length));
+    return { opacity: 1, scale: 1, visibleText: c.text.slice(0, n) };
+  }
+  return { opacity: 1, scale: 1, visibleText: c.text };
+}
+
+export function drawCaption(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  W: number,
+  H: number,
+  capFontSize: number | undefined,
+  capColor: string | undefined,
+  style: CaptionStyle = DEFAULT_CAPTION_STYLE,
+  tr: CaptionTransform = DEFAULT_CAPTION_TRANSFORM,
+  entranceState: { opacity: number; scale: number } = { opacity: 1, scale: 1 },
+): void {
+  if (!text) return;
+  if (entranceState.opacity <= 0.01) return;  // v23-k: 完全透明 skip 绘制
+  const fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
+  // meme/bar 默认白字, panel 默认黑字
+  const color = capColor ?? (style === 'panel' ? '#000000' : '#ffffff');
+  ctx.font = `bold ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // transform.x/y 都是 % of stage, 跟预览 'left: 50+x%' 'top: 50+y%' 对齐
+  const cx = W * (0.5 + tr.x / 100);
+  const cy = H * (0.5 + tr.y / 100);
+  // v23-k: entranceState (opacity + scale) — 用 ctx.save/translate/scale/globalAlpha 包裹后续绘制
+  const needsXform = entranceState.opacity < 1 || Math.abs(entranceState.scale - 1) > 0.01;
+  if (needsXform) {
+    ctx.save();
+    ctx.globalAlpha = entranceState.opacity;
+    ctx.translate(cx, cy);
+    ctx.scale(entranceState.scale, entranceState.scale);
+    ctx.translate(-cx, -cy);
+  }
+
+  if (style === 'panel') {
+    const metrics = ctx.measureText(text);
+    const padX = 16, padY = 6;
+    const boxW = metrics.width + padX * 2;
+    const boxH = fontSize * 1.3;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
+    ctx.fillStyle = color;
+    ctx.fillText(text, cx, cy + padY * 0.2);
+  } else if (style === 'bar') {
+    const metrics = ctx.measureText(text);
+    const padX = 18, padY = 8;
+    const boxW = metrics.width + padX * 2;
+    const boxH = fontSize * 1.35;
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
+    ctx.fillStyle = color;
+    ctx.fillText(text, cx, cy + padY * 0.1);
+  } else {
+    // meme: 白字 + 黑描边 (跟编辑器 + 草图卡片一致)
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(4, fontSize * 0.18);
+    ctx.strokeStyle = '#000000';
+    ctx.strokeText(text, cx, cy);
+    ctx.fillStyle = color;
+    ctx.fillText(text, cx, cy);
+  }
+  if (needsXform) ctx.restore();
+}
+
