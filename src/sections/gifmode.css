@@ -73,6 +73,24 @@
 .gm-capstyles button { flex: 1; padding: 5px; font-size: 11px; border: 1px solid #3a3f48; background: #2a2e35; color: #cfcfcf; border-radius: 6px; cursor: pointer; }
 .gm-capstyles button.active { background: rgba(255,94,0,0.18); border-color: #FF5E00; color: #FF8a3c; }
 
+/* P2: 变体按钮 / scrubber / 多变体 modal */
+.gm-variants-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #FF5E00; border-radius: 8px; background: transparent; color: #FF8a3c; font-weight: 600; cursor: pointer; }
+.gm-variants-btn:hover { background: rgba(255,94,0,0.12); }
+.gm-variants-btn:disabled { opacity: 0.5; cursor: default; }
+.gm-scrub { flex: 1; max-width: 320px; }
+.gm-modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.66); padding: 16px; }
+.gm-modal-box { width: min(760px, 96vw); max-height: 88vh; overflow: auto; background: #20232a; border: 1px solid #3a3f48; border-radius: 12px; }
+.gm-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #34383f; font-weight: 700; font-size: 13px; }
+.gm-modal-head button { border: none; background: transparent; color: #aaa; cursor: pointer; }
+.gm-variant-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 16px; }
+.gm-variant { display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 10px; border: 1px solid #34383f; border-radius: 8px; background: #15171b; }
+.gm-variant img { width: 100%; max-width: 200px; border-radius: 6px; background: #000; }
+.gm-variant-meta { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; }
+.gm-variant-meta b { color: #FF8a3c; }
+.gm-variant-meta span { color: #8b909a; }
+.gm-variant button { display: flex; align-items: center; gap: 5px; padding: 5px 14px; border: none; border-radius: 6px; background: #FF5E00; color: #fff; font-size: 12px; cursor: pointer; }
+@media (max-width: 768px) { .gm-variant-grid { grid-template-columns: 1fr; } }
+
 /* 移动端: 堆叠 */
 .gm-mobile .gm-body { flex-direction: column; overflow-y: auto; }
 .gm-mobile .gm-left, .gm-mobile .gm-right { width: auto; border: none; border-top: 1px solid #34383f; }

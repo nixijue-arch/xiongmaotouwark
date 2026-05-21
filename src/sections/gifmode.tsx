@@ -2,7 +2,7 @@
 // 范式: 循环优先. clips 全是 [0,duration] 全幅图层 (无时间轴), 循环本身取代时间轴.
 // 复用 animcore 纯渲染核心 + gifloop 循环引擎. 绝不 import animatemode (避免拉起 audio 单例).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, Download, Repeat, Trash2, Upload, Loader2, FlipHorizontal, Type as TypeIcon } from 'lucide-react';
+import { Play, Pause, Download, Repeat, Trash2, Upload, Loader2, FlipHorizontal, Type as TypeIcon, Eye, Layers, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import { ALL_PANDAS, ALL_FACES, type Material } from '@/data/materials';
@@ -14,8 +14,8 @@ import {
   type GifPresetId, type LoopMotionKind,
 } from '@/lib/animcore';
 import {
-  type GifProject, type GifLoopMode, DEFAULT_LOOP_CONFIG,
-  loopTimeMap, renderLoopFrame, makeLoopMotionAt, loopSeamScore, exportGIFLoop,
+  type GifProject, type GifLoopMode, type GifVariant, DEFAULT_LOOP_CONFIG,
+  loopTimeMap, loopSpecAt, renderLoopFrame, makeLoopMotionAt, loopSeamScore, exportGIFLoop, exportGIFVariants, downloadBlob,
 } from '@/lib/gifloop';
 import './gifmode.css';
 
@@ -36,6 +36,7 @@ const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string }[] = [
 const LOOP_MODES: { mode: GifLoopMode; label: string; hint: string }[] = [
   { mode: 'normal', label: '直接循环', hint: '播完跳回头 (适合本来就闭环的动作)' },
   { mode: 'boomerang', label: 'Boomerang 乒乓', hint: '正放→倒放, 任何动作都首尾无缝' },
+  { mode: 'crossfade', label: 'Crossfade 溶解', hint: '尾段溶进开头, 接缝淡化 (适合无法做成循环的内容)' },
 ];
 
 function makeDefaultGifProject(): GifProject {
@@ -65,11 +66,17 @@ export function GifMode() {
   const [exporting, setExporting] = useState(false);
   const [seam, setSeam] = useState<number | null>(null);
   const [subjectTab, setSubjectTab] = useState<'panda' | 'face'>('panda');
+  const [scrubT, setScrubT] = useState(0);
+  const [variantOpen, setVariantOpen] = useState(false);
+  const [variants, setVariants] = useState<{ v: GifVariant; url: string }[] | null>(null);
+  const [variantBusy, setVariantBusy] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cacheRef = useRef<Map<string, MediaAsset>>(new Map());
   const [cacheVer, setCacheVer] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const blendRef = useRef<HTMLCanvasElement | null>(null);
+  const onionRef = useRef<HTMLCanvasElement | null>(null);
 
   // rAF 用 ref 读最新值, 避免每次编辑都拆/重建动画循环
   const projectRef = useRef(project); projectRef.current = project;
@@ -137,7 +144,31 @@ export function GifMode() {
       const now = performance.now();
       const playPos = playingRef.current ? (now - startRef.current) / 1000 : frozenRef.current;
       const t = loopTimeMap(playPos, dd, p.loop.mode);
-      renderLoopFrame(ctx, { t }, p, w, h, cacheRef.current, makeLoopMotionAt(dd, w));
+      const motionAt = makeLoopMotionAt(dd, w);
+      // crossfade 预览: head 层 scratch (alpha:true)
+      let bctx: CanvasRenderingContext2D | undefined;
+      if (p.loop.mode === 'crossfade') {
+        if (!blendRef.current) blendRef.current = document.createElement('canvas');
+        const bc = blendRef.current;
+        if (bc.width !== w || bc.height !== h) { bc.width = w; bc.height = h; }
+        bctx = bc.getContext('2d', { alpha: true }) ?? undefined;
+      }
+      renderLoopFrame(ctx, loopSpecAt(t, dd, p.loop), p, w, h, cacheRef.current, motionAt, bctx);
+      // 洋葱皮: 首帧用 lighten 叠 (不压黑底, 看动作对齐)
+      if (p.loop.onionSkin && p.loop.mode !== 'boomerang') {
+        if (!onionRef.current) onionRef.current = document.createElement('canvas');
+        const oc = onionRef.current;
+        if (oc.width !== w || oc.height !== h) { oc.width = w; oc.height = h; }
+        const octx = oc.getContext('2d', { alpha: false });
+        if (octx) {
+          renderLoopFrame(octx, { t: 0 }, p, w, h, cacheRef.current, motionAt);
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.globalCompositeOperation = 'lighten';
+          ctx.drawImage(oc, 0, 0, w, h);
+          ctx.restore();
+        }
+      }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -277,6 +308,24 @@ export function GifMode() {
     }
   }, [project, exporting]);
 
+  const openVariants = useCallback(async () => {
+    if (variantBusy) return;
+    setVariantBusy(true); setVariantOpen(true); setVariants(null);
+    try {
+      const vs = await exportGIFVariants(project, () => {});
+      setVariants(vs.map(v => ({ v, url: URL.createObjectURL(v.blob) })));
+    } catch (e) {
+      toast.error('变体生成失败: ' + (e instanceof Error ? e.message : ''));
+      setVariantOpen(false);
+    } finally {
+      setVariantBusy(false);
+    }
+  }, [project, variantBusy]);
+  const closeVariants = useCallback(() => {
+    setVariants(prev => { prev?.forEach(x => URL.revokeObjectURL(x.url)); return null; });
+    setVariantOpen(false);
+  }, []);
+
   const selImg = selected && selected.trackId === 'image' ? (selected as ImageClip) : null;
   const selCap = selected && selected.trackId === 'caption' ? (selected as CaptionClip) : null;
   const tr = selImg?.transform ?? DEFAULT_TRANSFORM;
@@ -305,6 +354,22 @@ export function GifMode() {
               onClick={() => setLoopMode(m.mode)}>{m.label}</button>
           ))}
         </div>
+        {project.loop.mode === 'crossfade' && (
+          <div className="gm-dur" title="溶解时长">
+            <span>溶{project.loop.crossfadeSec.toFixed(2)}s</span>
+            <input type="range" min={0.05} max={Math.max(0.1, D * 0.4)} step={0.05}
+              value={project.loop.crossfadeSec}
+              onChange={e => setProject(p => ({ ...p, loop: { ...p.loop, crossfadeSec: Number(e.target.value) } }))} />
+          </div>
+        )}
+        <button className={`gm-chip${project.loop.onionSkin ? ' active' : ''}`}
+          title="洋葱皮: 首帧半透明叠当前帧, 看动作对齐"
+          onClick={() => setProject(p => ({ ...p, loop: { ...p.loop, onionSkin: !p.loop.onionSkin } }))}>
+          <Eye size={13} /> 洋葱皮
+        </button>
+        <button className="gm-variants-btn" onClick={openVariants} disabled={variantBusy} title="渲染 normal/boomerang/crossfade 并排对比">
+          <Layers size={14} /> 对比变体
+        </button>
         <button className="gm-export" onClick={onExport} disabled={exporting}>
           {exporting ? <Loader2 size={15} className="gm-spin" /> : <Download size={15} />}
           {exporting ? '生成中' : '导出 GIF'}
@@ -358,6 +423,9 @@ export function GifMode() {
           </div>
           <div className="gm-transport">
             <button onClick={togglePlay}>{playing ? <Pause size={18} /> : <Play size={18} />}</button>
+            <input className="gm-scrub" type="range" min={0} max={D} step={1 / preset.fps} value={scrubT}
+              title="拖动检查任意帧 (会暂停)"
+              onChange={e => { const v = Number(e.target.value); setScrubT(v); frozenRef.current = v; if (playing) setPlaying(false); }} />
             <span className="gm-meta">{preset.width}×{preset.height} · {preset.fps}fps · ~{exportFrames}帧{project.loop.mode === 'boomerang' ? ' (乒乓)' : ''}</span>
           </div>
         </main>
@@ -414,6 +482,32 @@ export function GifMode() {
           {!selected && <div className="gm-inspect"><div className="gm-empty">选一个图层来编辑</div></div>}
         </aside>
       </div>
+
+      {variantOpen && (
+        <div className="gm-modal" onClick={closeVariants}>
+          <div className="gm-modal-box" onClick={e => e.stopPropagation()}>
+            <div className="gm-modal-head">
+              <span>三种循环变体 — 挑文件最小 / 最顺的下载</span>
+              <button onClick={closeVariants}><X size={16} /></button>
+            </div>
+            {variantBusy && <div className="gm-empty" style={{ padding: 24 }}>生成中… (串行渲 3 个, 稍等)</div>}
+            {variants && (
+              <div className="gm-variant-grid">
+                {variants.map(({ v, url }) => (
+                  <div key={v.mode} className="gm-variant">
+                    <img src={url} alt={v.mode} />
+                    <div className="gm-variant-meta">
+                      <b>{LOOP_MODES.find(m => m.mode === v.mode)?.label ?? v.mode}</b>
+                      <span>{(v.size / 1024).toFixed(0)}KB · {v.frameCount}帧</span>
+                    </div>
+                    <button onClick={() => downloadBlob(v.blob, `熊猫头循环-${v.mode}`)}><Download size={13} /> 下载</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
