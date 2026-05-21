@@ -1,0 +1,82 @@
+/* gifmode.css — GIF 循环编辑器布局 (独立板块) */
+.gm-root { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #1b1d22; color: #e6e6e6; overflow: hidden; }
+
+/* 顶栏 */
+.gm-topbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #23262d; border-bottom: 1px solid #34383f; flex-wrap: wrap; }
+.gm-brand { display: flex; align-items: center; gap: 6px; font-weight: 700; color: #FF5E00; white-space: nowrap; }
+.gm-presets, .gm-loopmode { display: flex; gap: 4px; flex-wrap: wrap; }
+.gm-chip { padding: 4px 10px; border-radius: 6px; border: 1px solid #3a3f48; background: #2a2e35; color: #cfcfcf; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.gm-chip:hover { background: #333842; }
+.gm-chip.active { background: rgba(255,94,0,0.18); border-color: #FF5E00; color: #FF8a3c; }
+.gm-dur { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; }
+.gm-dur input { width: 120px; }
+.gm-dur span { width: 34px; text-align: right; }
+.gm-export { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 7px 16px; border: none; border-radius: 8px; background: #FF5E00; color: #fff; font-weight: 700; cursor: pointer; }
+.gm-export:disabled { opacity: 0.6; cursor: default; }
+.gm-spin { animation: gm-rot 0.9s linear infinite; }
+@keyframes gm-rot { to { transform: rotate(360deg); } }
+
+/* 三栏 */
+.gm-body { flex: 1; display: flex; min-height: 0; }
+.gm-left, .gm-right { width: 252px; flex-shrink: 0; background: #20232a; overflow-y: auto; padding: 10px; }
+.gm-left { border-right: 1px solid #34383f; }
+.gm-right { border-left: 1px solid #34383f; }
+.gm-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; min-width: 0; background: #15171b; }
+
+.gm-sec-title { font-size: 12px; font-weight: 700; color: #9aa0aa; margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.gm-sec-title:first-child { margin-top: 0; }
+.gm-hint { font-weight: 400; text-transform: none; color: #6b7280; letter-spacing: 0; }
+
+/* 主体 */
+.gm-subtabs { display: flex; gap: 4px; margin-bottom: 6px; }
+.gm-subtabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 5px; font-size: 12px; border: 1px solid #3a3f48; background: #2a2e35; color: #cfcfcf; border-radius: 6px; cursor: pointer; }
+.gm-subtabs button.active { background: rgba(255,94,0,0.18); border-color: #FF5E00; color: #FF8a3c; }
+.gm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.gm-mat { aspect-ratio: 1; padding: 3px; border: 1px solid #34383f; border-radius: 6px; background: #2a2e35; cursor: pointer; overflow: hidden; }
+.gm-mat:hover { border-color: #FF5E00; }
+.gm-mat img { width: 100%; height: 100%; object-fit: contain; }
+
+/* 循环动作 */
+.gm-motions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+.gm-motion { display: flex; align-items: center; gap: 5px; padding: 7px 8px; font-size: 12px; border: 1px solid #3a3f48; background: #2a2e35; color: #d4d4d4; border-radius: 6px; cursor: pointer; }
+.gm-motion:hover { background: #333842; }
+.gm-motion.active { background: rgba(255,94,0,0.18); border-color: #FF5E00; color: #FF8a3c; }
+.gm-motion-emoji { font-size: 14px; }
+.gm-addcap { width: 100%; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: 1px dashed #4a4f58; background: transparent; color: #cfcfcf; border-radius: 8px; cursor: pointer; }
+.gm-addcap:hover { border-color: #FF5E00; color: #FF8a3c; }
+
+/* 预览 */
+.gm-stage { position: relative; display: flex; align-items: center; justify-content: center; max-width: 100%; }
+.gm-canvas { max-width: min(100%, 460px); max-height: 60vh; width: auto; height: auto; background: #000; border-radius: 8px; box-shadow: 0 6px 30px rgba(0,0,0,0.5); image-rendering: auto; }
+.gm-seam { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+.gm-seam.good { color: #4ade80; } .gm-seam.ok { color: #fbbf24; } .gm-seam.bad { color: #f87171; }
+.gm-transport { display: flex; align-items: center; gap: 12px; }
+.gm-transport button { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border: none; border-radius: 50%; background: #FF5E00; color: #fff; cursor: pointer; }
+.gm-meta { font-size: 12px; color: #8b909a; }
+
+/* 图层 + 检视 */
+.gm-layers { display: flex; flex-direction: column; gap: 4px; }
+.gm-layer { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid #34383f; background: #2a2e35; border-radius: 6px; cursor: pointer; }
+.gm-layer.active { border-color: #FF5E00; background: rgba(255,94,0,0.12); }
+.gm-layer-name { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-del { border: none; background: transparent; color: #8b909a; cursor: pointer; padding: 2px; }
+.gm-del:hover { color: #f87171; }
+.gm-empty { font-size: 12px; color: #6b7280; padding: 8px 2px; }
+.gm-inspect { margin-top: 8px; }
+.gm-range { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; font-size: 11px; color: #aaa; }
+.gm-range span { display: flex; justify-content: space-between; }
+.gm-range b { color: #e6e6e6; }
+.gm-range input { width: 100%; }
+.gm-flip { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px; font-size: 12px; border: 1px solid #3a3f48; background: #2a2e35; color: #cfcfcf; border-radius: 6px; cursor: pointer; margin-bottom: 8px; }
+.gm-capinput { width: 100%; box-sizing: border-box; background: #2a2e35; border: 1px solid #3a3f48; color: #e6e6e6; border-radius: 6px; padding: 6px; font-size: 13px; resize: vertical; }
+.gm-capstyles { display: flex; gap: 4px; margin: 6px 0; }
+.gm-capstyles button { flex: 1; padding: 5px; font-size: 11px; border: 1px solid #3a3f48; background: #2a2e35; color: #cfcfcf; border-radius: 6px; cursor: pointer; }
+.gm-capstyles button.active { background: rgba(255,94,0,0.18); border-color: #FF5E00; color: #FF8a3c; }
+
+/* 移动端: 堆叠 */
+.gm-mobile .gm-body { flex-direction: column; overflow-y: auto; }
+.gm-mobile .gm-left, .gm-mobile .gm-right { width: auto; border: none; border-top: 1px solid #34383f; }
+.gm-mobile .gm-center { order: -1; padding: 10px; }
+.gm-mobile .gm-canvas { max-height: 42vh; }
+.gm-mobile .gm-topbar { gap: 8px; }
+.gm-mobile .gm-dur input { width: 90px; }

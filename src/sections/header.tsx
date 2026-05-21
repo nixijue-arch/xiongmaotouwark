@@ -1,5 +1,5 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText, Menu, Film } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText, Menu, Film, Repeat } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '@/app';
 import { MobileNav } from '@/components/mobilenav';
@@ -80,6 +80,14 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
         >
           <Film size={14} />
           <span className="link-label">{state.language === 'zh' ? '沙雕动画' : 'Animation'}</span>
+        </button>
+        <button
+          onClick={() => setPage('gif')}
+          className={page === 'gif' ? activeLinkClass : 'header-link'}
+          title={state.language === 'zh' ? 'GIF 循环编辑器' : 'GIF Loop Maker'}
+        >
+          <Repeat size={14} />
+          <span className="link-label">{state.language === 'zh' ? 'GIF 循环' : 'GIF Loop'}</span>
         </button>
         <button
           onClick={() => setPage('collection')}

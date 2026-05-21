@@ -11,6 +11,7 @@ import { AboutPanda } from '@/sections/aboutpanda';
 import { QuickMode } from '@/sections/quickmode';
 import { Collection } from '@/sections/collection';
 import { AnimateMode } from '@/sections/animatemode';
+import { GifMode } from '@/sections/gifmode';
 import { Toaster } from 'sonner';
 import { AppDialogHost } from '@/components/appdialog';
 import './app.css';
@@ -27,7 +28,7 @@ const CaptionManageLazy = import.meta.env.DEV
   ? lazy(() => import('@/sections/captionmanage').then((m) => ({ default: m.CaptionManage })))
   : null;
 
-export type Page = 'quick' | 'editor' | 'animate' | 'collection' | 'museum' | 'about' | 'calibrate' | 'materials' | 'captions';
+export type Page = 'quick' | 'editor' | 'animate' | 'gif' | 'collection' | 'museum' | 'about' | 'calibrate' | 'materials' | 'captions';
 
 function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -35,7 +36,7 @@ function App() {
     if (import.meta.env.DEV) {
       const url = new URLSearchParams(window.location.search);
       const p = url.get('page');
-      const allowed: Page[] = ['quick', 'editor', 'animate', 'collection', 'museum', 'about', 'calibrate', 'materials', 'captions'];
+      const allowed: Page[] = ['quick', 'editor', 'animate', 'gif', 'collection', 'museum', 'about', 'calibrate', 'materials', 'captions'];
       if (p && (allowed as string[]).includes(p)) {
         return p as Page;
       }
@@ -59,6 +60,8 @@ function App() {
           <QuickMode onOpenEditor={() => setPage('editor')} />
         ) : page === 'animate' ? (
           <AnimateMode />
+        ) : page === 'gif' ? (
+          <GifMode />
         ) : page === 'collection' ? (
           <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
         ) : page === 'editor' ? (
