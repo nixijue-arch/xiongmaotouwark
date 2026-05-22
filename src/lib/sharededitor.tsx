@@ -5,7 +5,7 @@
 //        animatemode / gifmode (animate 已 import gifmode, 反向会成环)。
 // 组件靠 DragPayload 回调解耦: video 传 timeline 语义回调; gif 传全幅 [0,D] 回调。
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { Shuffle, Search, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { composeMeme, flattenAlphaShell } from '@/lib/composeMeme';
@@ -311,7 +311,10 @@ export function MaterialSourceButtons({ kind, onAdd }: { kind: 'panda' | 'face';
   );
 }
 
-export function MaterialCardClip({ item, kind, onQuickAdd, onDelete }: {
+// memo: 播放时 LeftPane 每帧重渲, ~200 张素材卡只要 props (item/kind/onQuickAdd) 不变就跳过重渲.
+// 关键: onQuickAdd 必须稳定 (animatemode quickAdd 已去掉 playhead dep). video+gif 共享受益.
+export const MaterialCardClip = memo(MaterialCardClipImpl);
+function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
   item: Material; kind?: 'scene' | 'panda' | 'face' | 'upload';
   onQuickAdd: (payload: DragPayload) => void;
   onDelete?: () => void;

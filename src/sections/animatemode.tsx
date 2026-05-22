@@ -1407,6 +1407,7 @@ export function AnimateMode() {
   const isMobile = useIsMobile();
   const [project, setProject] = useState<ProjectState>(() => makeInitialProject());
   const [playhead, setPlayhead] = useState(0);
+  const playheadRef = useRef(0);  // 镜像 playhead, 供事件期 (split/插入/快捷键/snap) 读最新值 → 子组件不必每帧拿 playhead prop, 可 memo
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectHydrated, setProjectHydrated] = useState(false);
@@ -1928,6 +1929,7 @@ export function AnimateMode() {
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [isPlaying, project.duration, view]);
+  useEffect(() => { playheadRef.current = playhead; }, [playhead]);  // playheadRef 跟随 playhead (覆盖所有 setPlayhead 入口)
   // TTS / BGM 同步 — 两条路径:
   //   有 audioSrc: syncTTSPlayer 严格跟 playhead 绑 (1s/2s/3s 听到对应字, 可导出 MP4 真音轨)
   //   没 audioSrc 且 genFailed: SS 触发式 fallback (无 sync 但有声)
@@ -2460,18 +2462,18 @@ export function AnimateMode() {
     // 不跟普通 image 接末尾, 让 scene 像剪映"背景轨"独立 timeline
     if (type === 'image' && payload.kind === 'scene') {
       const newLane = project.lanes.image;
-      start = Math.max(0, Math.min(playhead, project.duration - dur));
+      start = Math.max(0, Math.min(playheadRef.current, project.duration - dur));
       end = Math.min(project.duration, start + dur);
       lane = newLane;
       commit(p => ({ ...p, lanes: { ...p.lanes, image: newLane + 1 } }));
     } else if (type === 'caption') {
-      const flex = findFlexibleSlotForCaption(project.clips, playhead, dur, project.duration);
+      const flex = findFlexibleSlotForCaption(project.clips, playheadRef.current, dur, project.duration);
       start = flex.start; end = flex.end; lane = flex.lane;
       if (lane > project.lanes.caption - 1) {
         commit(p => ({ ...p, lanes: { ...p.lanes, caption: lane + 1 } }));
       }
     } else {
-      const slot = findNextSlotOnLane0(type, project.clips, playhead, dur, project.duration);
+      const slot = findNextSlotOnLane0(type, project.clips, playheadRef.current, dur, project.duration);
       if (!slot) {
         toast.error(`时长 ${project.duration.toFixed(1)}s 内放不下, 请用 ⏱ 加长时长 / 或拖到指定轨叠加`);
         return;
@@ -2503,7 +2505,7 @@ export function AnimateMode() {
       // v23-k: 修默认 target — 优先非 scene (= panda/face) + lane 最低 (= 视觉最顶层)
       let targetImage: ImageClip | undefined = sel?.trackId === 'image' ? (sel as ImageClip) : undefined;
       if (!targetImage) {
-        const ph = playhead;
+        const ph = playheadRef.current;
         const candidates = project.clips.filter(c => c.trackId === 'image' && ph >= c.start && ph < c.end) as ImageClip[];
         targetImage = candidates.length > 0
           ? candidates.sort((a, b) => {
@@ -2547,7 +2549,7 @@ export function AnimateMode() {
     // 用 functional setState 防 race (字幕 path 可能先 commit 了 lanes+1)
     commit(p => ({ ...p, clips: [...p.clips, clip] }));
     setSelectedId(id);
-  }, [commit, playhead, project, selectedId]);
+  }, [commit, project, selectedId]);
 
   // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
@@ -2989,11 +2991,11 @@ export function AnimateMode() {
       if (e.code === 'Space') { e.preventDefault(); setIsPlaying(p => !p); return; }
       if (e.key === 'Home') { e.preventDefault(); seekPlayhead(0); return; }
       if (e.key === 'End') { e.preventDefault(); seekPlayhead(project.duration); return; }
-      if (!ctrl && e.key.toLowerCase() === 'j') { e.preventDefault(); seekPlayhead(Math.max(0, playhead - 1)); return; }
+      if (!ctrl && e.key.toLowerCase() === 'j') { e.preventDefault(); seekPlayhead(Math.max(0, playheadRef.current - 1)); return; }
       if (!ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); setIsPlaying(p => !p); return; }
-      if (!ctrl && e.key.toLowerCase() === 'l') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playhead + 1)); return; }
-      if (!ctrl && e.key === ',') { e.preventDefault(); seekPlayhead(Math.max(0, playhead - 1/30)); return; }
-      if (!ctrl && e.key === '.') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playhead + 1/30)); return; }
+      if (!ctrl && e.key.toLowerCase() === 'l') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playheadRef.current + 1)); return; }
+      if (!ctrl && e.key === ',') { e.preventDefault(); seekPlayhead(Math.max(0, playheadRef.current - 1/30)); return; }
+      if (!ctrl && e.key === '.') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playheadRef.current + 1/30)); return; }
       if (ctrl && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (ctrl && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
       if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAllClips(); return; }
@@ -3008,7 +3010,7 @@ export function AnimateMode() {
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); deleteClip(selectedId); return; }
       if (e.key === 'Escape') { setSelectedId(null); ctxMenu.close(); return; }
-      if ((e.key === 's' || e.key === 'S') && selectedId && !ctrl) { e.preventDefault(); splitAt(selectedId, playhead); return; }
+      if ((e.key === 's' || e.key === 'S') && selectedId && !ctrl) { e.preventDefault(); splitAt(selectedId, playheadRef.current); return; }
       if (e.key === 'ArrowLeft' && selectedId) {
         e.preventDefault();
         const step = e.shiftKey ? -1 : (e.altKey ? -1/30 : -0.1);
@@ -3028,7 +3030,7 @@ export function AnimateMode() {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     view,
-    selectedId, playhead, project.duration,
+    selectedId, project.duration,
     undo, redo, duplicateClip, deleteClip, splitAt, nudge, saveCurrentAsDraft,
     seekPlayhead, setIsPlaying, moveClipLane,
     copyClipToClipboard, cutClipToClipboard, pasteClipFromClipboard, selectAllClips, deleteAllClips,
