@@ -1996,7 +1996,16 @@ export function AnimateMode() {
       }
     }
     setPlayhead(t);
+    playheadRef.current = t;
   }, [project.clips]);
+
+  // 播放/暂停 — 播到末尾再按播放 = 从头播 (剪映/CapCut 直觉)
+  const togglePlay = useCallback(() => {
+    if (!isPlaying && playheadRef.current >= project.duration - 0.05) {
+      setPlayhead(0); playheadRef.current = 0;
+    }
+    setIsPlaying(p => !p);
+  }, [isPlaying, project.duration]);
 
   // Ops
   const addClip = useCallback((c: Clip) => {
@@ -2988,11 +2997,11 @@ export function AnimateMode() {
         return;
       }
       const ctrl = isMetaOrCtrl(e);
-      if (e.code === 'Space') { e.preventDefault(); setIsPlaying(p => !p); return; }
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
       if (e.key === 'Home') { e.preventDefault(); seekPlayhead(0); return; }
       if (e.key === 'End') { e.preventDefault(); seekPlayhead(project.duration); return; }
       if (!ctrl && e.key.toLowerCase() === 'j') { e.preventDefault(); seekPlayhead(Math.max(0, playheadRef.current - 1)); return; }
-      if (!ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); setIsPlaying(p => !p); return; }
+      if (!ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); togglePlay(); return; }
       if (!ctrl && e.key.toLowerCase() === 'l') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playheadRef.current + 1)); return; }
       if (!ctrl && e.key === ',') { e.preventDefault(); seekPlayhead(Math.max(0, playheadRef.current - 1/30)); return; }
       if (!ctrl && e.key === '.') { e.preventDefault(); seekPlayhead(Math.min(project.duration, playheadRef.current + 1/30)); return; }
@@ -3011,15 +3020,16 @@ export function AnimateMode() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); deleteClip(selectedId); return; }
       if (e.key === 'Escape') { setSelectedId(null); ctxMenu.close(); return; }
       if ((e.key === 's' || e.key === 'S') && selectedId && !ctrl) { e.preventDefault(); splitAt(selectedId, playheadRef.current); return; }
-      if (e.key === 'ArrowLeft' && selectedId) {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        const step = e.shiftKey ? -1 : (e.altKey ? -1/30 : -0.1);
-        nudge(selectedId, step); return;
-      }
-      if (e.key === 'ArrowRight' && selectedId) {
-        e.preventDefault();
-        const step = e.shiftKey ? 1 : (e.altKey ? 1/30 : 0.1);
-        nudge(selectedId, step); return;
+        const dir = e.key === 'ArrowLeft' ? -1 : 1;
+        if (selectedId && (e.altKey || e.shiftKey)) {
+          nudge(selectedId, dir * (e.shiftKey ? 1 : 1 / 30)); // Alt=逐帧微移选中层 · Shift=1s 大移
+        } else {
+          setIsPlaying(false); // 裸 ←/→ = 暂停 + 逐帧移动 playhead (剪映直觉)
+          seekPlayhead(Math.max(0, Math.min(project.duration, playheadRef.current + dir / 30)));
+        }
+        return;
       }
       if (e.key === 'ArrowUp' && selectedId && !ctrl) { e.preventDefault(); moveClipLane(selectedId, -1); return; }
       if (e.key === 'ArrowDown' && selectedId && !ctrl) { e.preventDefault(); moveClipLane(selectedId, 1); return; }
@@ -3032,7 +3042,7 @@ export function AnimateMode() {
     view,
     selectedId, project.duration,
     undo, redo, duplicateClip, deleteClip, splitAt, nudge, saveCurrentAsDraft,
-    seekPlayhead, setIsPlaying, moveClipLane,
+    seekPlayhead, setIsPlaying, togglePlay, moveClipLane,
     copyClipToClipboard, cutClipToClipboard, pasteClipFromClipboard, selectAllClips, deleteAllClips,
     ctxMenu,
   ]);
@@ -3093,7 +3103,7 @@ export function AnimateMode() {
           isPlaying={isPlaying}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          onPlayPause={() => setIsPlaying(p => !p)}
+          onPlayPause={togglePlay}
           onSeek={seekPlayhead}
           onTransformLive={updateTransformLive}
           onCaptionTextLive={(id, text) => updateClipLive(id, { text })}
@@ -6569,7 +6579,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      else if (e.code === 'Space') { e.preventDefault(); setIsPlaying(p => !p); }
+      else if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => { if (!prev) setPlayhead(ph => (ph >= project.duration - 0.05 ? 0 : ph)); return !prev; }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -6694,7 +6704,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
         </div>
         <div className="am-preview-modal-transport">
           <button className="am-step-btn" onClick={() => { setIsPlaying(false); setPlayhead(0); spokenRef.current.clear(); }} title="重头"><SkipBack size={16} /></button>
-          <button className="am-play-btn" onClick={() => setIsPlaying(p => !p)} title="播放/暂停 (Space)">
+          <button className="am-play-btn" onClick={() => setIsPlaying(prev => { if (!prev) setPlayhead(ph => (ph >= project.duration - 0.05 ? 0 : ph)); return !prev; })} title="播放/暂停 (Space)">
             {isPlaying ? <Pause size={20} /> : <Play size={20} />}
           </button>
           <div className="am-transport-time am-transport-time-big">

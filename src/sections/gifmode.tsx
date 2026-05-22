@@ -254,7 +254,6 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [snapLine, setSnapLine] = useState<number | null>(null);
   const [resizeTip, setResizeTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const [tlDropActive, setTlDropActive] = useState(false);
-  const [tlZoom, setTlZoom] = useState(1);          // 时间轴缩放 (跟视频一致: pxPerSec = 80 * zoom)
   const [motionPop, setMotionPop] = useState<{ id: string; bottom: number; left: number } | null>(null); // 时间轴行→动效弹层 (锚在 chip 上方)
   const [lanesW, setLanesW] = useState(800);        // 时间轴轨道区实测宽 → pxPerSec 满宽适配 (0..10s 铺满)
   const pxPerSecRef = useRef(80);                   // rAF 读最新 pxPerSec 定位 playhead
@@ -277,7 +276,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const loopInfo = LOOP_MODES.find(m => m.mode === project.loop.mode);
   const loopGlyph = project.loop.mode === 'boomerang' ? '⇄' : project.loop.mode === 'crossfade' ? '✦' : project.loop.mode === 'reverse' ? '◀' : project.loop.mode === 'rewind' ? '⏪' : '↻';
   // 满宽适配 max: zoom 1 = 0..10s 正好铺满 lanes (无横向空白, 10s 在最右); clip 等比 px (3s=30%); zoom>1 才滚动
-  const pxPerSec = Math.max(8, (lanesW / effMax) * tlZoom);
+  const pxPerSec = Math.max(8, (lanesW - 24) / effMax);   // 满宽适配: GIF (≤10s) 铺满, 留 24px 右边距给时长手柄+末尾标签 (否则 overflow:hidden 会剪掉可拖的手柄), 无横向滚动 (极简, 不缩放)
   pxPerSecRef.current = pxPerSec;
   const tlContentW = Math.round(effMax * pxPerSec);
 
@@ -1493,7 +1492,6 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         <div className="gm-tl-head">
           <span className="gm-tl-title">🎞️ 循环时间轴 · {D.toFixed(1)}s <span className="gm-hint">拖块移位 · 拖两端改时长 · 拖右缘改循环长 · 空白定位</span></span>
           <div className="gm-tl-headright">
-            <span className="gm-tl-zoom">缩放<input type="range" min={0.5} max={2} step={0.1} value={tlZoom} onChange={e => setTlZoom(parseFloat(e.target.value))} /><b>{tlZoom.toFixed(1)}x</b></span>
             <span className={'gm-tl-loopbadge gm-loop-' + project.loop.mode} title={loopInfo?.hint}>{loopGlyph} {loopInfo?.short}</span>
             <button className="am-tb-btn" onClick={applyMotionToAll} disabled={!selImg?.loopMotion || selImg.loopMotion.kind === 'none'} title="把选中主体的动作套到所有图层">动作 → 全部</button>
           </div>
