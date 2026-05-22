@@ -106,9 +106,9 @@
 .gm-tl-loopbadge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--retro-stroke, #7f9dc8); color: #0a356d; background: linear-gradient(180deg, #ffffff, #e3f0ff); white-space: nowrap; }
 .gm-tl-loopbadge.gm-loop-boomerang { color: #8a4a08; border-color: #d6a55c; background: linear-gradient(180deg, #fff4d1, #ffd97a); }
 .gm-tl-loopbadge.gm-loop-crossfade { color: #4a2070; border-color: #8a4abf; background: linear-gradient(180deg, #f3e6ff, #d8b4f8); }
-/* 固定高 38vh — 原 min/max 让时间轴随 clip 增多变高, 抢走预览垂直空间 → 画板被挤缩放"割裂".
-   固定后画板稳定 (加 clip 不再重排预览), 多 clip 时间轴内部纵向滚动 */
-.gm-tl-body { display: flex; height: 38vh; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+/* 内容高 + 封顶 38vh — 时间轴只占图层所需高度 (不再固定 38vh 留大片空白浪费).
+   画板尺寸已封顶 (fit maxScale 480px) 留余量, 加 clip 画板不缩 (不割裂); 多图层超 38vh 内部纵向滚动 */
+.gm-tl-body { display: flex; max-height: 38vh; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
 .gm-tl-labels { flex: none; width: 144px; display: flex; flex-direction: column; }
 .gm-tl-lhead { height: 24px; flex: none; border-bottom: 1px solid var(--retro-stroke, #7f9dc8); }
 .gm-tl-empty { font-size: 12px; color: var(--retro-muted, #6682a4); padding: 10px 6px; }

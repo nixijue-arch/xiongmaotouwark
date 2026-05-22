@@ -423,7 +423,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const rect = stage.getBoundingClientRect();
       const availW = Math.max(40, rect.width - 32);
       const availH = Math.max(40, rect.height - 32);
-      const scale = Math.min(availW / preset.width, availH / preset.height);
+      const maxScale = 480 / Math.max(preset.width, preset.height); // 画板封顶 480px → 预览区留余量, 时间轴内容变高时画板不缩 (稳定不割裂)
+      const scale = Math.min(availW / preset.width, availH / preset.height, maxScale);
       setFit({ w: Math.round(preset.width * scale), h: Math.round(preset.height * scale) });
     };
     recompute();
