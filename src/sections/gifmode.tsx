@@ -32,8 +32,8 @@ const GIF_DRAFTS_IDB_KEY = 'xiongmaotou.gifmode-drafts.v1';
 const GIF_DRAFT_MAX = 10;
 const GIF_UPLOADS_IDB_KEY = 'xiongmaotou.gifmode-userpool.v1'; // GIF 自己的素材池 (联网搜图/抠脸沉淀, 跟 video 数据隔离)
 const GIF_UPLOAD_MAX = 60;
-// 字幕默认字号 (1280-conv: drawCaption 按 capFontSize*W/1280 渲, 分辨率无关 → 180 ≈ 任意预设画宽的 14%, 短文本一行装下)
-const GIF_CAP_FONT = 180;
+// 字幕默认字号 (1280-conv: drawCaption 按 capFontSize*W/1280 渲) — 56 跟视频默认一致 (原 180 过大 ~3.3x, 一加就盖满画面)
+const GIF_CAP_FONT = 56;
 const GIF_CAP_MAXCHARS = 14; // 随机字幕字数上限 (跟快速/编辑器同文案池 pickRandomText, 截到能一行装下)
 const GIF_HISTORY_MAX = 50;  // 撤回栈深度 (跟视频 HISTORY_MAX 一致)
 // 历史入栈 (模块级, 避开 useCallback 依赖搅动)
@@ -850,6 +850,32 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     return () => window.removeEventListener('keydown', onKey);
   }, [view, togglePlay, undo, redo, deleteClip, selectedId, gifSplit]);
 
+  // DEV: 当前 GIF 项目 → TS 模板代码 (Ctrl+Shift+T, 跟视频 __dumpTemplate 对齐; window.__dumpGifTemplate)
+  useEffect(() => {
+    if (!import.meta.env.DEV || view !== 'gif') return;
+    const dumpTemplate = () => {
+      const p = projectRef.current;
+      const tmpl = {
+        kind: 'gif-project', preset: p.preset, duration: p.duration, lanes: p.lanes, loop: p.loop,
+        clips: p.clips.map(c => {
+          const cc = { ...c } as Record<string, unknown>;
+          const s = (c as ImageClip).src;
+          if (c.trackId === 'image' && typeof s === 'string' && s.startsWith('data:')) cc.src = '<dataURL>';
+          return cc;
+        }),
+      };
+      const code = `// GIF 模板 · ${new Date().toISOString().slice(0, 19).replace('T', ' ')}\nconst GIF_TEMPLATE = ${JSON.stringify(tmpl, null, 2)};`;
+      // eslint-disable-next-line no-console
+      console.log('📋 ===== GIF Template TS =====\n' + code);
+      try { void navigator.clipboard.writeText(code); toast.success('📋 GIF 模板代码 → 剪贴板'); } catch { toast.success('📋 GIF 模板代码 → console'); }
+    };
+    const win = window as unknown as { __dumpGifTemplate?: () => void };
+    win.__dumpGifTemplate = dumpTemplate;
+    const onKey = (e: KeyboardEvent) => { if (e.ctrlKey && e.shiftKey && (e.code === 'KeyT' || e.key === 'T' || e.key === 't')) { e.preventDefault(); dumpTemplate(); } };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); delete win.__dumpGifTemplate; };
+  }, [view]);
+
   const onUpload = useCallback((file: File) => {
     if (file.size > 30 * 1024 * 1024) { toast.error('文件超过 30MB'); return; }
     const reader = new FileReader();
@@ -1199,17 +1225,19 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           ⏱<input type="number" min={GIF_MIN_DURATION} max={maxDur} step={0.5}
             value={Number(D.toFixed(1))} onChange={e => setDuration(Number(e.target.value || '1'))} /><span>s</span>
         </label>
-        {/* 撤回/重做/清空 (循环方式已挪进左栏「动效」tab) */}
+        {/* 撤回/重做 (新建/清空/保存 挪到右侧动作组, 跟视频前端位置对齐) */}
         <div className="gm-tb-histgroup">
-          <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF"><FilePlus size={14} /></button>
           <button className="am-tb-btn" onClick={undo} disabled={!canUndo} title="撤回 (Ctrl+Z)"><Undo2 size={14} /></button>
           <button className="am-tb-btn" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z / Ctrl+Y)"><Redo2 size={14} /></button>
-          <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)"><Trash2 size={14} /></button>
         </div>
         <div className="am-toolbar-spacer" />
+        <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF"><FilePlus size={14} /> <span>新建</span></button>
         <button className="am-tb-btn" onClick={gifRandomize} title="随机熊猫头+表情+字幕+循环动作 (清空重来)">
           <Shuffle size={13} /> <span>随机</span>
         </button>
+        <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)"><Trash2 size={14} /> <span>清空</span></button>
+        <div className="am-tb-sep" />
+        <button className="am-tb-btn" onClick={saveGifDraft} title="保存当前为新草稿"><Save size={13} /> <span>保存</span></button>
         <div className="gm-draftwrap">
           <button className={'am-tb-btn' + (draftPopOpen ? ' am-tb-btn-primary' : '')} onClick={() => setDraftPopOpen(o => !o)} title="GIF 草稿 — 存 / 读 当前作品">
             <FolderOpen size={13} /> <span>草稿{gifDrafts.length ? ` ${gifDrafts.length}` : ''}</span>

@@ -840,7 +840,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: linear-gradient(180deg, #2a3346 0%, #18324f 100%);
+  background: linear-gradient(135deg, #f8fbff, #e8f3ff);
   border: 0;
   border-bottom: 1px solid #d8e6f8;
   padding: 0;
@@ -850,7 +850,7 @@
 }
 .am-draft-thumb-img {
   width: 100%; height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .am-draft-thumb-empty {
@@ -1120,6 +1120,8 @@
   object-fit: cover !important;
   border-radius: 6px;
 }
+/* 草稿卡预览 — 整图不裁 (cover 会切掉熊猫头顶 → "预览不全"). 草稿要看清全貌 */
+.am-img-draft { object-fit: contain; border-radius: 6px; background: linear-gradient(135deg, #f8fbff, #e8f3ff); }
 
 /* material-card 上的删除 X (仅上传卡片显示) */
 .am-card {

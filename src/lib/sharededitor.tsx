@@ -432,7 +432,7 @@ export function DraftCardClip({ slot, onAddDraftAsClips }: {
       title={`点击加入: ${name} — 画面 + 字幕 自动分轨`}
     >
       {previewUrl ? (
-        <img src={previewUrl} alt={name} className="material-img am-img-scene" draggable={false} loading="lazy" />
+        <img src={previewUrl} alt={name} className="material-img am-img-draft" draggable={false} loading="lazy" />
       ) : (
         <div className="material-img am-draft-blank">—</div>
       )}
