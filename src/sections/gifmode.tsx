@@ -348,6 +348,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   }, []);
 
   // rAF 循环动画 — 直接驱动 DOM am-stage-img 的 CSS transform (跟视频 DOM 编辑模型一致, 无可见 canvas; 导出/评分走离屏 canvas)
+  const lastFrameRef = useRef(new Map<string, HTMLCanvasElement>());  // 每 clip 上次画的帧 → 跳过重复 drawImage (暂停/低 fps 省 GPU)
   useEffect(() => {
     let raf = 0;
     const draw = () => {
@@ -376,8 +377,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             const cx2 = cv?.getContext('2d');
             if (cv && cx2) {
               const fr = drawableAt(gm, t, ic.start, ic.gifEdit);
-              cx2.clearRect(0, 0, cv.width, cv.height);
-              try { cx2.drawImage(fr, 0, 0, cv.width, cv.height); } catch { /* frame 尚未就绪 */ }
+              if (lastFrameRef.current.get(ic.id) !== fr) {  // 同一帧不重画 (暂停/低 fps 时省 GPU)
+                cx2.clearRect(0, 0, cv.width, cv.height);
+                try { cx2.drawImage(fr, 0, 0, cv.width, cv.height); lastFrameRef.current.set(ic.id, fr); } catch { /* frame 尚未就绪 */ }
+              }
             }
           }
         }

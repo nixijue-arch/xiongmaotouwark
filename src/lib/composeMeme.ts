@@ -126,6 +126,7 @@ export function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
   const bbox: Bbox = x2 < 0
     ? [0, 0, W, H]
     : [Math.floor(x1 * inv), Math.floor(y1 * inv), Math.min(W, Math.ceil((x2 + 1) * inv)), Math.min(H, Math.ceil((y2 + 1) * inv))];
+  if (_bboxCache.size >= 200) { const _k = _bboxCache.keys().next().value; if (_k) _bboxCache.delete(_k); }  // 上限防 dataURL key 无限涨
   _bboxCache.set(key, bbox);
   return bbox;
 }
@@ -168,6 +169,8 @@ function getPandaDarkMaskCropped(
     arr[i + 3] = isDarkOpaque ? 255 : 0;
   }
   ctx.putImageData(data, 0, 0);
+  // LRU 上限 60 — darkMask 是整张 canvas, 搜图/上传的 dataURL face 会无限涨; 淘汰时清 backing store
+  if (_darkMaskCache.size >= 60) { const _k = _darkMaskCache.keys().next().value; if (_k) { const _old = _darkMaskCache.get(_k); if (_old) { _old.width = 0; _old.height = 0; } _darkMaskCache.delete(_k); } }
   _darkMaskCache.set(key, c);
   return c;
 }
