@@ -23,6 +23,7 @@ export default defineConfig({
     ttsProxyDevPlugin(),
   ],
   server: {
+    host: true,   // 绑 0.0.0.0 → 局域网可访问 (手机/别的机器走 http://<本机LAN IP>:3000, 不必 localhost)
     port: 3000,
   },
   resolve: {
