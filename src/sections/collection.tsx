@@ -3,7 +3,7 @@
 // Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import JSZip from 'jszip';
+// JSZip 改为批量导出时动态 import (~28KB gz 不进主包, 见 packSelected)
 import { useMeme } from '@/context/memecontext';
 import type { DraftSlot, ImageElement, MemeElement, TextElement } from '@/context/memecontext';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getLiveCaptionOffset } from '@/data/materials';
@@ -130,6 +130,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
     toast.info(lang === 'zh' ? `打包 ${slotsToPack.length} 张...` : `Packing ${slotsToPack.length}...`);
 
     try {
+      const { default: JSZip } = await import('jszip');  // 动态加载, 不进主包
       const zip = new JSZip();
       const container = offscreenContainerRef.current;
       for (let i = 0; i < slotsToPack.length; i++) {
