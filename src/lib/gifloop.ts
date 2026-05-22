@@ -1,8 +1,8 @@
 // gifloop.ts — GIF 循环引擎 (P1: normal + boomerang). 纯逻辑, 在 animcore 合成器之上加
 // "时间重映射 + 帧序列 + 循环安全动作". crossfade / 多变体 / onion-skin 见 P2.
 import {
-  renderExportFrame, loadMedia, clamp, GIF_PRESETS, GIF_MAX_DURATION,
-  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform,
+  renderExportFrame, loadMedia, clamp, GIF_PRESETS, GIF_MAX_DURATION, DEFAULT_TRANSFORM,
+  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform, type FaceLocal, type BoundFaceBox,
 } from '@/lib/animcore';
 
 export type GifLoopMode = 'normal' | 'boomerang' | 'reverse' | 'rewind' | 'crossfade';
@@ -150,6 +150,63 @@ export function makeLoopMotionAt(D: number, W: number, H: number = W): (clip: Im
   return (clip, t) => loopMotionDelta(clip.loopMotion, t, D, W, H, clip.transform);
 }
 
+// 脸跟壳绑定 — 捕获 face 相对 shell 静态渲染框的局部位姿 (绑定瞬间, 不含 motion). 在 shell 未旋转坐标系下存偏移 → 之后施加 shell.rot 即可重旋.
+export function captureFaceLocal(
+  shellBox: { cx: number; cy: number; iw: number }, shellRot: number,
+  faceBox: { cx: number; cy: number; iw: number }, faceRot: number,
+): FaceLocal {
+  const half = Math.max(1, shellBox.iw / 2);
+  const dxW = faceBox.cx - shellBox.cx, dyW = faceBox.cy - shellBox.cy;
+  const cos = Math.cos(-shellRot * Math.PI / 180), sin = Math.sin(-shellRot * Math.PI / 180);
+  return {
+    dxN: (dxW * cos - dyW * sin) / half,
+    dyN: (dxW * sin + dyW * cos) / half,
+    scaleRatio: faceBox.iw / Math.max(1, shellBox.iw),
+    rotation: faceRot - shellRot,
+  };
+}
+
+// 绑定脸的世界渲染框 @t = shell 实时框(transform + shell loopMotion) ∘ faceLocal + face 自身 loopMotion. 预览+导出共用 → 不会分叉.
+export function resolveBoundFaceBox(
+  face: ImageClip, shell: ImageClip, t: number, D: number, W: number, H: number,
+  shellNaturalW: number, shellNaturalH: number, faceNaturalW: number, faceNaturalH: number,
+): BoundFaceBox {
+  const loc = face.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+  const sTr = shell.transform ?? DEFAULT_TRANSFORM;
+  const fTr = face.transform ?? DEFAULT_TRANSFORM;
+  // 1. shell 实时框 (镜像 renderExportFrame 非 scene 框算法 + 0.85H 钳 + shell loopMotion)
+  const baseSize = Math.min(W, H) * 0.6;
+  let sIw = baseSize * sTr.scale;
+  let sIh = (shellNaturalH / Math.max(1, shellNaturalW)) * sIw;
+  const maxH = H * 0.85;
+  if (sIh > maxH) { const k = maxH / sIh; sIw *= k; sIh *= k; }
+  const sMd = loopMotionDelta(shell.loopMotion, t, D, W, H, sTr);
+  sIw *= sMd.dScale;
+  const sCx = W / 2 + (sTr.x / 100) * W + sMd.dx;
+  const sCy = H / 2 + (sTr.y / 100) * H + sMd.dy;
+  const sRot = sTr.rotation + sMd.dRot;
+  // 2. face 世界位姿 = shell 框 ∘ faceLocal (偏移按 shell 半宽 + 旋到 shell 角)
+  const half = sIw / 2;
+  const rad = sRot * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  let fCx = sCx + (loc.dxN * cos - loc.dyN * sin) * half;
+  let fCy = sCy + (loc.dxN * sin + loc.dyN * cos) * half;
+  let fIw = sIw * loc.scaleRatio;
+  let fIh = fIw * (faceNaturalH / Math.max(1, faceNaturalW));
+  let fRot = sRot + loc.rotation;
+  // 3. face 自身 loopMotion (局部加, dx/dy 旋到世界)
+  const fMd = loopMotionDelta(face.loopMotion, t, D, W, H, fTr);
+  fIw *= fMd.dScale; fIh *= fMd.dScale;
+  fCx += fMd.dx * cos - fMd.dy * sin;
+  fCy += fMd.dx * sin + fMd.dy * cos;
+  fRot += fMd.dRot;
+  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: fTr.flipX };
+}
+
+export function makeBoundFaceAt(D: number, W: number, H: number) {
+  return (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number): BoundFaceBox =>
+    resolveBoundFaceBox(face, shell, t, D, W, H, sNW, sNH, fNW, fNH);
+}
+
 // 渲染一帧 (P1 无 crossfade — 直接合成器 + motionAt). spec.blendWith 留给 P2.
 export function renderLoopFrame(
   ctx: CanvasRenderingContext2D,
@@ -161,14 +218,15 @@ export function renderLoopFrame(
   motionAt?: (clip: ImageClip, t: number) => MotionDelta,
   scratch?: CanvasRenderingContext2D,   // crossfade 的 head 层
   bgColor: string = '#ffffff',          // GIF 画板默认白 (跟视频预览画板一致). 白底 crossfade 仍正确 (溶解透过白)
+  boundFaceAt?: (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number) => BoundFaceBox,  // 绑定脸跟壳
 ): void {
   if (spec.blendWith === undefined || spec.blendAlpha === undefined || !scratch) {
-    renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor);   // 非 crossfade: 整帧 (含字幕)
+    renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor, 'all', boundFaceAt);   // 非 crossfade: 整帧 (含字幕)
     return;
   }
   // crossfade: 只混"图层"(尾段溶进开头), 字幕单独在顶层画一次 — 防溶解时字幕重影 (双帧各画一次字幕)
-  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor, 'images');           // 主(尾)帧图层
-  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt, bgColor, 'images'); // 头帧图层 → scratch
+  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor, 'images', boundFaceAt);           // 主(尾)帧图层
+  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt, bgColor, 'images', boundFaceAt); // 头帧图层 → scratch
   ctx.save();
   ctx.globalAlpha = spec.blendAlpha;
   ctx.drawImage(scratch.canvas, 0, 0, W, H);
@@ -245,9 +303,10 @@ async function encodeGIFBlob(
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
   const delayMs = Math.round(1000 / fps);
   const motionAt = makeLoopMotionAt(D, RW, RH);  // 动作幅度按渲染尺寸 (2× 同步放大, 缩回后视觉一致)
+  const boundFaceAt = makeBoundFaceAt(D, RW, RH);  // 绑定脸跟壳 (导出与预览共用 resolver)
   let lastYield = performance.now();
   for (let i = 0; i < specs.length; i++) {
-    renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx);
+    renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx, '#ffffff', boundFaceAt);
     if (SS > 1) mctx.drawImage(render, 0, 0, W, H);  // 超采样缩回目标尺寸 (高质量插值)
     gif.addFrame(main, { copy: true, delay: delayMs });
     if (i % 4 === 0) onProgress(0.5 * (i / specs.length));

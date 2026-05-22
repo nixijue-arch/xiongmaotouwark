@@ -21,7 +21,10 @@ export const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0,
 export interface BaseClip { id: string; trackId: TrackType; lane: number; start: number; end: number; }
 // kind?: 'scene' — 场景背景图 (全屏 cover, 跟普通 image 短边 60% contain 区分)
 // endTransform — 'move' 特效用首尾帧 tween. lerp clip.transform → endTransform 按 t/duration
-export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; }
+// 脸跟壳绑定: boundTo = 此 face 绑定的 shell(熊猫头) clip id; faceLocal = 绑定时 face 相对 shell 渲染框的局部位姿 (dxN/dyN 按 shell 半宽归一, scaleRatio=face/shell, rotation=相对角). face 渲染时 = shell 实时框(transform+loopMotion) ∘ faceLocal + face 自身 loopMotion.
+export interface FaceLocal { dxN: number; dyN: number; scaleRatio: number; rotation: number; }
+export interface BoundFaceBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; }
+export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; }
 export interface CaptionTransform { x: number; y: number; }
 export const DEFAULT_CAPTION_TRANSFORM: CaptionTransform = { x: 0, y: 35 };
 // 'meme' = 白字 + 黑描边 (跟编辑器对齐, meme 经典款); 'panel' = 白底黑框; 'bar' = 黑底白字
@@ -423,6 +426,7 @@ export function renderExportFrame(
   motionAt?: (clip: ImageClip, t: number) => MotionDelta,  // P0: 循环安全动作注入 (gifmode 用; video 不传 = 行为不变)
   bgColor: string = '#000000',  // 画板底色. video 默认黑; GIF 传白 (#fff) 跟视频预览画板一致
   layer: 'all' | 'images' | 'captions' = 'all',  // crossfade 只混图层不混字幕 → 字幕单独画一次 (修溶解字幕重影, 预览+导出)
+  boundFaceAt?: (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number) => BoundFaceBox,  // 绑定脸跟壳 (gifmode 注入; video 不传 = 无绑定, 行为不变)
 ) {
   if (layer !== 'captions') {
     ctx.fillStyle = bgColor;
@@ -438,6 +442,22 @@ export function renderExportFrame(
     const media = imgCache.get(c.src);
     if (!media) continue;
     const { w: naturalW, h: naturalH } = mediaWH(media);
+    // 绑定脸: 从 shell 实时框 ∘ faceLocal 推导 (跟 shell 移动/旋转/缩放 + 自身 loopMotion), 不走 fx/motionAt. shell 按 id 在全 clips 找 (不限 active/lane).
+    if (c.boundTo && boundFaceAt) {
+      const shell = project.clips.find(s => s.id === c.boundTo && s.trackId === 'image') as ImageClip | undefined;
+      const sMedia = shell ? imgCache.get(shell.src) : undefined;
+      if (shell && sMedia) {
+        const sWH = mediaWH(sMedia);
+        const bf = boundFaceAt(c, shell, t, sWH.w, sWH.h, naturalW, naturalH);
+        ctx.save();
+        ctx.translate(bf.cx, bf.cy);
+        ctx.rotate(bf.rotation * Math.PI / 180);
+        ctx.scale(bf.flipX ? -1 : 1, 1);
+        ctx.drawImage(drawableAt(media, t, c.start, c.gifEdit), -bf.iw / 2, -bf.ih / 2, bf.iw, bf.ih);
+        ctx.restore();
+        continue;
+      }
+    }
     const eff = effectiveFxFor(c, t, project.clips);
     const tr = computeLiveTransform(c, t, eff);
     const isScene = c.kind === 'scene';

@@ -18,12 +18,12 @@ import {
 } from '@/lib/animcore';
 import {
   type GifProject, type GifLoopMode, type GifVariant, DEFAULT_LOOP_CONFIG,
-  loopTimeMap, loopSpecAt, renderLoopFrame, makeLoopMotionAt, loopMotionDelta, loopSeamScore, exportGIFLoop, exportGIFVariants, downloadBlob,
+  loopTimeMap, loopSpecAt, renderLoopFrame, makeLoopMotionAt, makeBoundFaceAt, resolveBoundFaceBox, captureFaceLocal, loopMotionDelta, loopSeamScore, exportGIFLoop, exportGIFVariants, downloadBlob,
 } from '@/lib/gifloop';
 import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp } from 'lucide-react';
+import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off } from 'lucide-react';
 import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
 import './gifmode.css';
 
@@ -367,9 +367,27 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         el.style.display = '';
         if (c.trackId === 'image') {
           const ic = c as ImageClip;
-          const md = loopMotionDelta(ic.loopMotion, t, dd, w, h, ic.transform);
-          const baseRot = ic.transform?.rotation ?? 0;
-          el.style.transform = `translate(${(md.dx * sx).toFixed(2)}px, ${(md.dy * sy).toFixed(2)}px) rotate(${(baseRot + md.dRot).toFixed(2)}deg) scale(${md.dScale.toFixed(4)})`;
+          let boundDone = false;
+          if (ic.boundTo) {  // 绑定脸: 静态框=resolveBoundFaceBox(0), 每帧 transform = 相对 rest 的 delta → 跟随 shell 移动/旋转/缩放 + 自身 loopMotion
+            const shell = p.clips.find(s => s.id === ic.boundTo && s.trackId === 'image') as ImageClip | undefined;
+            const sm = shell ? cacheRef.current.get(shell.src) : undefined;
+            const fm = cacheRef.current.get(ic.src);
+            if (shell && sm && fm) {
+              const sWH = mediaWH(sm), fWH = mediaWH(fm);
+              const r0 = resolveBoundFaceBox(ic, shell, 0, dd, w, h, sWH.w, sWH.h, fWH.w, fWH.h);
+              const rc = resolveBoundFaceBox(ic, shell, t, dd, w, h, sWH.w, sWH.h, fWH.w, fWH.h);
+              if (Number.isFinite(rc.cx) && Number.isFinite(rc.cy) && Number.isFinite(rc.rotation) && Number.isFinite(r0.cx) && Number.isFinite(r0.cy) && r0.iw > 0) {
+                const ds = Number.isFinite(rc.iw) ? rc.iw / r0.iw : 1;
+                el.style.transform = `translate(${((rc.cx - r0.cx) * sx).toFixed(2)}px, ${((rc.cy - r0.cy) * sy).toFixed(2)}px) rotate(${rc.rotation.toFixed(2)}deg) scale(${ds.toFixed(4)})`;
+                boundDone = true;
+              }
+            }
+          }
+          if (!boundDone) {
+            const md = loopMotionDelta(ic.loopMotion, t, dd, w, h, ic.transform);
+            const baseRot = ic.transform?.rotation ?? 0;
+            el.style.transform = `translate(${(md.dx * sx).toFixed(2)}px, ${(md.dy * sy).toFixed(2)}px) rotate(${(baseRot + md.dRot).toFixed(2)}deg) scale(${md.dScale.toFixed(4)})`;
+          }
           // 导入 GIF: 当前帧 (按 gifEdit 反转/调速/裁帧) 画到 clip canvas — 跟循环 + 微调同步 (WYSIWYG)
           const gm = cacheRef.current.get(ic.src);
           if (gm && isGifFrames(gm)) {
@@ -407,8 +425,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         const x1 = c1.getContext('2d', { alpha: false });
         if (!x0 || !x1) return;
         const motionAt = makeLoopMotionAt(D, w, h);
-        renderLoopFrame(x0, { t: 0 }, project, w, h, cacheRef.current, motionAt);
-        renderLoopFrame(x1, { t: Math.max(0, D - 1 / preset.fps) }, project, w, h, cacheRef.current, motionAt);
+        const bfa = makeBoundFaceAt(D, w, h);
+        renderLoopFrame(x0, { t: 0 }, project, w, h, cacheRef.current, motionAt, undefined, '#ffffff', bfa);
+        renderLoopFrame(x1, { t: Math.max(0, D - 1 / preset.fps) }, project, w, h, cacheRef.current, motionAt, undefined, '#ffffff', bfa);
         setSeam(loopSeamScore(c0, c1));
       } catch { /* ignore */ }
     }, 200);
@@ -507,6 +526,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         y: ((fcy - 250) * K) / H * 100 * fillScale,
         scale: (fl.width / box.w) * fillScale,
       };
+      // 绑定脸跟壳 (默认绑定): 捕获 face 相对 shell 局部位姿 → shell 移动/旋转/缩放时脸自动跟随
+      let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
+      const faceLocal = captureFaceLocal({ cx: W / 2, cy: H / 2, iw: _sIw }, 0, { cx: W / 2 + (faceTransform.x / 100) * W, cy: H / 2 + (faceTransform.y / 100) * H, iw: baseSize * faceTransform.scale }, 0);
       const pandaId = uid('img'), faceId = uid('img');
       setProject(p => {
         const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 2 } as Clip : c));
@@ -519,6 +541,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           id: faceId, trackId: 'image', lane: 0, start: 0, end: p.duration,
           src: face.src, label: face.labelCn + '·脸', fx: 'none',
           transform: faceTransform, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
+          boundTo: pandaId, faceLocal,
         };
         return { ...p, clips: [...bumped, pandaClip, faceClip] };
       });
@@ -1034,7 +1057,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const pr = GIF_PRESETS.find(x => x.id === p.preset) ?? GIF_PRESETS[0];
       const D = p.duration;
       const t = loopTimeMap((performance.now() - t0) / 1000, D, p.loop.mode);
-      renderLoopFrame(ctx, loopSpecAt(t, D, p.loop, pr.fps), p, pr.width, pr.height, cacheRef.current, makeLoopMotionAt(D, pr.width, pr.height), sctx);
+      renderLoopFrame(ctx, loopSpecAt(t, D, p.loop, pr.fps), p, pr.width, pr.height, cacheRef.current, makeLoopMotionAt(D, pr.width, pr.height), sctx, '#ffffff', makeBoundFaceAt(D, pr.width, pr.height));
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -1069,11 +1092,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const fillScale = 1.5 * Math.min(1, box.w / box.h);  // 填满画板 (跟 addCombo 一致, 减留白)
       const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
       const faceT: Transform = { ...DEFAULT_TRANSFORM, x: ((fcx - 250) * K) / W * 100 * fillScale, y: ((fcy - 250) * K) / H * 100 * fillScale, scale: (fl.width / box.w) * fillScale };
+      let _sIwR = baseSize * fillScale; const _sIhR = (box.h / box.w) * _sIwR; if (_sIhR > H * 0.85) _sIwR *= (H * 0.85) / _sIhR;
+      const faceLocalR = captureFaceLocal({ cx: W / 2, cy: H / 2, iw: _sIwR }, 0, { cx: W / 2 + (faceT.x / 100) * W, cy: H / 2 + (faceT.y / 100) * H, iw: baseSize * faceT.scale }, 0);
       const pid = uid('img'), fid = uid('img');
       setProject(p => {
         const clips: Clip[] = [
           { id: pid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
-          { id: fid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles } } as ImageClip,
+          { id: fid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
         return { ...p, clips, loop: { ...p.loop, mode: loopMode } };
@@ -1087,6 +1112,38 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     }
   }, [preset]);
 
+  // 脸跟壳 绑定/解绑 (默认绑定; 解绑时把当前世界位姿烘焙回 transform 防跳)
+  const bindFace = useCallback((faceId: string) => {
+    const p = projectRef.current;
+    const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
+    if (!face) return;
+    const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
+    if (others.length === 0) { toast('没有可绑定的熊猫头壳'); return; }
+    const shell = others.slice().sort((a, b) => b.lane - a.lane)[0];  // 最底层 = 熊猫头壳
+    const sMedia = cacheRef.current.get(shell.src), fMedia = cacheRef.current.get(face.src);
+    if (!sMedia || !fMedia) { toast('素材还在加载, 稍后再绑'); return; }
+    const W = preset.width, H = preset.height;
+    const sb = imageRenderBox(shell, sMedia, W, H), fb = imageRenderBox(face, fMedia, W, H);
+    const faceLocal = captureFaceLocal({ cx: sb.cx, cy: sb.cy, iw: sb.iw }, shell.transform?.rotation ?? 0, { cx: fb.cx, cy: fb.cy, iw: fb.iw }, face.transform?.rotation ?? 0);
+    setProject(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, boundTo: shell.id, faceLocal } as Clip) : c) }));
+    toast.success('已绑定 — 表情跟随熊猫头壳');
+  }, [preset]);
+  const unbindFace = useCallback((faceId: string) => {
+    const p = projectRef.current;
+    const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
+    if (!face?.boundTo) return;
+    const shell = p.clips.find(c => c.id === face.boundTo && c.trackId === 'image') as ImageClip | undefined;
+    const sMedia = shell ? cacheRef.current.get(shell.src) : undefined, fMedia = cacheRef.current.get(face.src);
+    let baked = face.transform ?? DEFAULT_TRANSFORM;
+    if (shell && sMedia && fMedia) {
+      const sWH = mediaWH(sMedia), fWH = mediaWH(fMedia);
+      const fb = resolveBoundFaceBox(face, shell, 0, p.duration, preset.width, preset.height, sWH.w, sWH.h, fWH.w, fWH.h);
+      const baseSize = Math.min(preset.width, preset.height) * 0.6;
+      baked = { x: (fb.cx - preset.width / 2) / preset.width * 100, y: (fb.cy - preset.height / 2) / preset.height * 100, scale: fb.iw / baseSize, rotation: fb.rotation, flipX: fb.flipX };
+    }
+    setProject(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, transform: baked, boundTo: undefined, faceLocal: undefined } as Clip) : c) }));
+    toast('已解绑 — 表情现在独立');
+  }, [preset]);
   const selImg = selected && selected.trackId === 'image' ? (selected as ImageClip) : null;
   const selCap = selected && selected.trackId === 'caption' ? (selected as CaptionClip) : null;
   const tr = selImg?.transform ?? DEFAULT_TRANSFORM;
@@ -1426,7 +1483,16 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               {imageClips.slice().sort((a, b) => b.lane - a.lane).map(c => {
                 const media = cacheRef.current.get(c.src);
                 if (!media) return null;
-                const b = imageRenderBox(c, media, preset.width, preset.height);
+                let b = imageRenderBox(c, media, preset.width, preset.height);
+                if (c.boundTo) {  // 绑定脸: 静态框 = resolveBoundFaceBox(t=0) (跟随 shell 当前 transform); rAF 加每帧 delta
+                  const shellC = imageClips.find(s => s.id === c.boundTo);
+                  const sMediaC = shellC ? cacheRef.current.get(shellC.src) : undefined;
+                  if (shellC && sMediaC) {
+                    const sWHc = mediaWH(sMediaC), fWHc = mediaWH(media);
+                    const fb0 = resolveBoundFaceBox(c, shellC, 0, project.duration, preset.width, preset.height, sWHc.w, sWHc.h, fWHc.w, fWHc.h);
+                    if (Number.isFinite(fb0.cx) && Number.isFinite(fb0.iw) && fb0.iw > 0) b = { cx: fb0.cx, cy: fb0.cy, iw: fb0.iw, ih: fb0.ih };
+                  }
+                }
                 const sx = (fit.w || preset.width) / preset.width, sy = (fit.h || preset.height) / preset.height;
                 const isScene = c.kind === 'scene';
                 return (
@@ -1550,6 +1616,20 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               <Field label="翻转">
                 <button className={'am-chip' + (tr.flipX ? ' is-active' : '')} onClick={() => patchTransform(selImg.id, { flipX: !tr.flipX })} type="button"><FlipHorizontal size={12} /> 水平翻转</button>
               </Field>
+              {selImg.kind !== 'scene' && (() => {
+                const others = imageClips.filter(c => c.id !== selImg.id && c.kind !== 'scene');
+                if (!selImg.boundTo && others.length === 0) return null;
+                const bound = !!selImg.boundTo && others.some(c => c.id === selImg.boundTo);
+                return (
+                  <Field label="跟随熊猫头">
+                    <button type="button" className={'am-chip' + (bound ? ' is-active' : '')}
+                      title={bound ? '已绑定 — 移动/旋转/缩放熊猫头壳时表情自动跟随. 点击解绑' : '绑定到熊猫头壳 — 表情自动跟随壳的移动/旋转/缩放, 不用手动对齐'}
+                      onClick={() => bound ? unbindFace(selImg.id) : bindFace(selImg.id)}>
+                      {bound ? <Link2 size={12} /> : <Link2Off size={12} />} {bound ? '已跟随 · 点击解绑' : '跟随熊猫头'}
+                    </button>
+                  </Field>
+                );
+              })()}
               <Field label="标签">
                 <input className="am-input" value={selImg.label || ''} onChange={e => patchClip(selImg.id, { label: e.target.value })} placeholder="图层标签…" />
               </Field>
