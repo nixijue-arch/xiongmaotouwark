@@ -1,5 +1,5 @@
 // QuickMode v2 — 简易"点选 + 立即出图"模式（完整移植 PandaHead 功能）
-// Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
+// Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 //
 // v2 增强 (vs v1)：
 //   + face rotation 状态 + RotationDot 拖动条 + 在 preview 上滚轮微调

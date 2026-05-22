@@ -1,6 +1,6 @@
 // Collection v3 — 草图管理板块
 // 数据源完全统一到 memecontext 的 draftSlots (与编辑器左上角"本地草稿"共享)
-// Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
+// Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';

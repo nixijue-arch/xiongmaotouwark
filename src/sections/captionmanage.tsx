@@ -8,7 +8,7 @@
 //   - 多行支持 (textarea + pre-line)
 //   - 导出 TS code 永久入库
 //
-// Contributed by PandaHead — github.com/jokkibtc/panda
+// Contributed by PandaHead — github.com/jsybtc/panda
 
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Plus, Copy, Trash2, Pencil, X, Check, RotateCcw } from 'lucide-react';

@@ -1,4 +1,4 @@
-// Contributed by https://pandahead.fun (PandaHead project — github.com/jokkibtc/panda)
+// Contributed by https://pandahead.fun (PandaHead project — github.com/jsybtc/panda)
 // 65 张真人脸素材（金馆长 / 姚明 / 王尼玛系列等中文互联网经典熊猫头脸 + 用户手截补充）
 // 命名约定 face-ph-NNN 避免跟现有 face-NN 冲突
 //

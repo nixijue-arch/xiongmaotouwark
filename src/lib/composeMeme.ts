@@ -19,7 +19,7 @@
 //   g. destination-out + dark-opaque mask (preserves sunglasses/signs)
 //   h. composite face onto cropped panda
 //
-// Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
+// Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
 const _imgCache = new Map<string, Promise<HTMLImageElement>>();
 
