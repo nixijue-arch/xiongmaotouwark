@@ -398,12 +398,13 @@ const audioEngine = (() => {
       startBGM: (_b: BGMPreset, _vol?: number, _dur?: number) => {},
       stopBGM: () => {},
       cancelAll: () => {},
+      stopPreview: () => {},
       ready: () => false,
       getDiagnostics: () => ({ count: 0, sample: [] as string[] }),
       startExportCapture: () => null as MediaStream | null,
       stopExportCapture: () => {},
       startUserBGM: (_src: string, _vol?: number) => {},
-      playTTSAudio: (_src: string, _vol?: number, _pr?: number) => {},
+      playTTSAudio: (_src: string, _vol?: number, _pr?: number, _onEnded?: () => void) => {},
       destroyAll: () => {},
       syncTTSPlayer: (_id: string, _src: string, _ph: number, _cs: number, _ip: boolean, _v?: number, _pr?: number) => {},
       preloadTTSAudios: async (_clips: { id: string; audioSrc?: string }[]) => {},
@@ -805,7 +806,7 @@ const audioEngine = (() => {
     }
     _previewAudios.clear();
   }
-  function playTTSAudio(src: string, volume = 1.0, playbackRate = 1.0): void {
+  function playTTSAudio(src: string, volume = 1.0, playbackRate = 1.0, onEnded?: () => void): void {
     const ac = getAC();
     if (!ac) return;
     if (ac.state === 'suspended') ac.resume().catch(() => {});
@@ -823,6 +824,7 @@ const audioEngine = (() => {
       const cleanup = () => {
         _previewAudios.delete(audio);
         try { node.disconnect(); gain.disconnect(); } catch {}
+        onEnded?.();
       };
       audio.addEventListener('ended', cleanup, { once: true });
       audio.addEventListener('error', cleanup, { once: true });
@@ -838,6 +840,12 @@ const audioEngine = (() => {
     _stopAllBGM();
     stopAllTTSAudio();
     stopAllUserBGM();
+    stopAllPreviewAudios();
+  }
+  // 只停"试听"音源 (SS / 预览 BGM / 一次性预览 audio), 不碰时间轴正在播的 TTS/BGM player → 给试听暂停用
+  function stopPreview() {
+    try { synth.cancel(); } catch {}
+    _stopAllBGM();
     stopAllPreviewAudios();
   }
   function destroyAll() {
@@ -923,13 +931,41 @@ const audioEngine = (() => {
     startBGM, stopBGM: _stopAllBGM, cancelAll, destroyAll,
     ready: () => getVoices().length > 0, getDiagnostics,
     startExportCapture, stopExportCapture,
-    startUserBGM, playTTSAudio,
+    startUserBGM, playTTSAudio, stopPreview,
     // 新 API: TTS 跟时间轴严格同步
     syncTTSPlayer, preloadTTSAudios, stopAllTTSAudio, destroyAllTTSPlayers,
     // 新 API: BGM (用户上传 mp3) 跟时间轴严格同步 (跟 TTS 同套机制)
     syncUserBGMPlayer, preloadUserBGMs, stopAllUserBGM, destroyAllUserBGMPlayers,
   };
 })();
+
+// ============================================================
+// 试听 (preview) 全局单态 — 同一时刻只有一个试听在响, 各 试听 按钮共享 (无 provider/prop-drill)
+// 按钮: const pk = usePreviewKey(); 播放中=pk===myKey → 显暂停; 点 = 在 previewStart/previewStop 间切
+// ============================================================
+let _previewKey: string | null = null;
+const _previewSubs = new Set<() => void>();
+function _emitPreview() { _previewSubs.forEach((f) => { try { f(); } catch { /* ignore */ } }); }
+function previewStop() { audioEngine.stopPreview(); _previewKey = null; _emitPreview(); }
+// startFn(onDone, isCurrent): onDone=自然播完后复位按钮; isCurrent()=异步 startFn(fetch 完才播) 判断用户没切走/停掉
+function previewStart(key: string, startFn: (onDone: () => void, isCurrent: () => boolean) => void) {
+  _previewKey = key;            // 先占位 → 旧 audio 的 onDone 看到 key 变了, 不会误复位新按钮
+  audioEngine.stopPreview();
+  _emitPreview();
+  startFn(
+    () => { if (_previewKey === key) { _previewKey = null; _emitPreview(); } },
+    () => _previewKey === key,
+  );
+}
+function usePreviewKey(): string | null {
+  const [k, setK] = useState<string | null>(_previewKey);
+  useEffect(() => {
+    const f = () => setK(_previewKey);
+    _previewSubs.add(f); f();
+    return () => { _previewSubs.delete(f); };
+  }, []);
+  return k;
+}
 
 // ============================================================
 // Initial Project
@@ -1897,6 +1933,7 @@ export function AnimateMode() {
   // FIX #8a: 切到其他板块时 (AnimateMode unmount), audio 还在响 — destroyAll 彻底销毁
   useEffect(() => () => {
     audioEngine.destroyAll();
+    _previewKey = null;  // 重置试听单态 — 切板块重进不残留 stale "停止"
   }, []);
 
   // Transport loop
@@ -4280,15 +4317,17 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
     e.dataTransfer.setData('application/x-meme', JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'copy';
   };
+  const pk = usePreviewKey();
+  const pkey = 'bgm:' + (item.src || item.name);
+  const previewing = pk === pkey;
   const handlePreview = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (item.kind === 'file' && item.src) {
-      audioEngine.startUserBGM(item.src, 0.7);
-      toast(`试听 ${item.name}`);
-    } else {
-      audioEngine.startBGM(item, 0.6, 6);
-      toast(`试听 ${item.name} 6 秒`);
-    }
+    if (previewing) { previewStop(); return; }
+    previewStart(pkey, (onDone) => {
+      if (item.kind === 'file' && item.src) { audioEngine.startUserBGM(item.src, 0.7); /* 循环, 等用户手动停 */ }
+      else { audioEngine.startBGM(item, 0.6, 6); setTimeout(onDone, 6000); }
+    });
+    toast(item.kind === 'file' ? `试听 ${item.name}` : `试听 ${item.name} 6 秒`);
   };
   return (
     <div
@@ -4307,8 +4346,8 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
         </div>
         <div className="am-list-row-sub">{item.mood} · {item.tempo > 0 ? `${item.tempo} BPM` : 'mp3'}</div>
       </div>
-      <button className="am-list-play" onClick={handlePreview} title="试听">
-        <Play size={10} />
+      <button className={'am-list-play' + (previewing ? ' is-playing' : '')} onClick={handlePreview} title={previewing ? '停止试听' : '试听'}>
+        {previewing ? <Pause size={10} /> : <Play size={10} />}
       </button>
       {onDelete && (
         <button className="am-list-row-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="删除">
@@ -4425,6 +4464,9 @@ function VoiceDiagBtn() {
 }
 
 function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: DragPayload) => void }) {
+  const pk = usePreviewKey();
+  const pkey = 'voice:' + item.id;
+  const previewing = pk === pkey;
   const payload: DragPayload = {
     type: 'tts', voice: item.id,
     text: item.lang.startsWith('zh') ? '点击编辑文字' : 'Click to edit text',
@@ -4456,34 +4498,39 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
       </div>
       <button
         className="am-list-play"
-        onClick={async (e) => {
+        onClick={(e) => {
           e.stopPropagation();
+          if (previewing) { previewStop(); return; }
           const rate = item.playbackRate ?? 1.0;
-          // 1. proxy 优先: 配了自部署 → 真 Neural (Azure Yunjian 等)
-          if (_userTTSProxyURL) {
-            try {
-              const dataUrl = await fetchTTSFromProxy(item.sampleText, item.azureName, 0, 0);
-              audioEngine.playTTSAudio(dataUrl, 1.0, rate);
-              return;
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.warn('[voice preview] proxy 失败,试云端:', (err as Error).message);
+          previewStart(pkey, async (onDone, isCurrent) => {
+            // 1. proxy 优先: 配了自部署 → 真 Neural (Azure Yunjian 等)
+            if (_userTTSProxyURL) {
+              try {
+                const dataUrl = await fetchTTSFromProxy(item.sampleText, item.azureName, 0, 0);
+                if (!isCurrent()) return;
+                audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
+                return;
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.warn('[voice preview] proxy 失败,试云端:', (err as Error).message);
+              }
             }
-          }
-          // 2. fetchTTSForVoice — 用 voice.preferredEngine, 失败 fallback 另一个
-          //    跟 auto-gen 完全同链路, 所听即所得 (左侧听啥 = 时间轴 audio 一致)
-          try {
-            const { dataUrl } = await fetchTTSForVoice(item.sampleText, item);
-            audioEngine.playTTSAudio(dataUrl, 1.0, rate);
-          } catch (err) {
-            // 3. 云端都挂 → SS 兜底
-            toast.error(`云端试听失败 (${(err as Error).message.slice(0, 40)}), 退化浏览器 SS`);
-            audioEngine.previewVoice(item);
-          }
+            // 2. fetchTTSForVoice — 跟 auto-gen 同链路, 所听即所得 (左侧听啥 = 时间轴一致)
+            try {
+              const { dataUrl } = await fetchTTSForVoice(item.sampleText, item);
+              if (!isCurrent()) return;
+              audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
+            } catch (err) {
+              if (!isCurrent()) return;
+              // 3. 云端都挂 → SS 兜底
+              toast.error(`云端试听失败 (${(err as Error).message.slice(0, 40)}), 退化浏览器 SS`);
+              const u = audioEngine.previewVoice(item); if (u) u.addEventListener('end', onDone); else onDone();
+            }
+          });
         }}
-        title={`试听 (${item.preferredEngine || 'youdao'} 云端) · 跟时间轴 audio 一致`}
+        title={previewing ? '停止试听' : `试听 (${item.preferredEngine || 'youdao'} 云端) · 跟时间轴 audio 一致`}
       >
-        <Play size={10} />
+        {previewing ? <Pause size={10} /> : <Play size={10} />}
       </button>
     </div>
   );
@@ -5916,6 +5963,7 @@ function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<st
 
 function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTTS }: { clip: TTSClip; onUpdate: (p: Record<string, unknown>) => void; project: ProjectState; onLinkCaptionTTS: (capId: string, ttsId: string) => void; onUnlinkCaptionTTS: (id: string) => void }) {
   const v = VOICE_BY_ID[resolveVoiceId(clip.voice)];
+  const pk = usePreviewKey();
   // v23-e: estimate 用 clip 级 rate (用户调 1.5x 倍速时, 预计时长 / 1.5)
   const estimatedBase = estimateTTSDuration(clip.text, clip.voice);
   const clipRate = clip.playbackRate ?? VOICE_BY_ID[resolveVoiceId(clip.voice)]?.playbackRate ?? 1.0;
@@ -6140,28 +6188,30 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         </div>
       </Field>
       <button
-        className="am-test-btn"
-        onClick={async () => {
+        className={'am-test-btn' + (pk === 'tts-gen:' + clip.id ? ' is-playing' : '')}
+        onClick={() => {
+          if (pk === 'tts-gen:' + clip.id) { previewStop(); return; }
           // v23-e: 试听走 clip 级 rate (听到所设倍速)
           const rate = clip.playbackRate ?? v.playbackRate ?? 1.0;
-          // 所听即所得: clip.audioSrc 已生成 → 直接播 (跟 timeline 上一摸一样)
-          if (clip.audioSrc) {
-            audioEngine.playTTSAudio(clip.audioSrc, 1.0, rate);
-            return;
-          }
-          // 没 audioSrc → fetchTTSForVoice (preferred engine + fallback), 跟 auto-gen 同链路
-          const sample = clip.text?.trim() || (v.lang.startsWith('zh') ? '这是一段试听' : 'This is a preview');
-          try {
-            const { dataUrl } = await fetchTTSForVoice(sample, v);
-            audioEngine.playTTSAudio(dataUrl, 1.0, rate);
-          } catch {
-            toast.error('云端试听失败, 退化浏览器 SS');
-            audioEngine.speak(sample, v);
-          }
+          previewStart('tts-gen:' + clip.id, async (onDone, isCurrent) => {
+            // 所听即所得: clip.audioSrc 已生成 → 直接播
+            if (clip.audioSrc) { audioEngine.playTTSAudio(clip.audioSrc, 1.0, rate, onDone); return; }
+            // 没 audioSrc → fetchTTSForVoice (preferred + fallback), 跟 auto-gen 同链路
+            const sample = clip.text?.trim() || (v.lang.startsWith('zh') ? '这是一段试听' : 'This is a preview');
+            try {
+              const { dataUrl } = await fetchTTSForVoice(sample, v);
+              if (!isCurrent()) return;
+              audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
+            } catch {
+              if (!isCurrent()) return;
+              toast.error('云端试听失败, 退化浏览器 SS');
+              const u = audioEngine.speak(sample, v); if (u) u.addEventListener('end', onDone); else onDone();
+            }
+          });
         }}
         type="button"
       >
-        <Play size={12} /> 试听
+        {pk === 'tts-gen:' + clip.id ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听</>}
       </button>
 
       <Field label="MP4 真音轨配音">
@@ -6251,8 +6301,11 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         )}
         {clip.audioSrc && !recording && (
           <div className="am-tts-record-row">
-            <button type="button" className="am-tb-btn" onClick={() => audioEngine.playTTSAudio(clip.audioSrc!, 1.0, clip.playbackRate ?? v.playbackRate ?? 1.0)}>
-              <Play size={12} /> 试听
+            <button type="button" className={'am-tb-btn' + (pk === 'tts-rec:' + clip.id ? ' is-playing' : '')} onClick={() => {
+              if (pk === 'tts-rec:' + clip.id) { previewStop(); return; }
+              previewStart('tts-rec:' + clip.id, (onDone) => audioEngine.playTTSAudio(clip.audioSrc!, 1.0, clip.playbackRate ?? v.playbackRate ?? 1.0, onDone));
+            }}>
+              {pk === 'tts-rec:' + clip.id ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听</>}
             </button>
             <button type="button" className="am-tb-btn" onClick={() => uploadInputRef.current?.click()}>
               📂 重新上传
@@ -6273,6 +6326,9 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
 }
 
 function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<string, unknown>) => void }) {
+  const pk = usePreviewKey();
+  const pkey = 'bgmclip:' + clip.id;
+  const previewing = pk === pkey;
   return (
     <>
       <Field label="曲目">
@@ -6298,14 +6354,15 @@ function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<stri
         />
       </Field>
       <button
-        className="am-test-btn"
+        className={'am-test-btn' + (previewing ? ' is-playing' : '')}
         onClick={() => {
+          if (previewing) { previewStop(); return; }
           const b = resolveBGM(clip.bgmId);
-          if (b) playBGM(b, clip.volume ?? 0.5, 8);
+          if (b) previewStart(pkey, (onDone) => { playBGM(b, clip.volume ?? 0.5, 8); setTimeout(onDone, 8000); });
         }}
         type="button"
       >
-        <Play size={12} /> 试听 8 秒
+        {previewing ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听 8 秒</>}
       </button>
     </>
   );
