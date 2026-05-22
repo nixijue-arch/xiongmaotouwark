@@ -3030,6 +3030,15 @@ export function AnimateMode() {
     setSelectedId(c.id);
     ctxMenu.open(e, buildClipMenu(c));
   }, [ctxMenu, buildClipMenu]);
+  // 空白处右键 (时间轴空白 / 画板空白) — 全局右键覆盖
+  const buildEmptyMenu = useCallback((): ContextMenuItem[] => [
+    { id: 'deselect', label: '取消选择', disabled: !selectedId, onClick: () => setSelectedId(null) },
+    { id: 'paste', label: '粘贴到 playhead', shortcut: fmtShortcut('Mod+V'), disabled: !clipboardRef.current, onClick: () => pasteClipFromClipboard() },
+    { id: 'sep', label: '', separator: true },
+    { id: 'add-img', label: '加图片轨', onClick: () => addLane('image') },
+    { id: 'add-cap', label: '加字幕轨', onClick: () => addLane('caption') },
+    { id: 'add-fx', label: '加特效轨', onClick: () => addLane('fx') },
+  ], [selectedId, pasteClipFromClipboard, addLane]);
 
   // Keyboard — 跨平台 (isMetaOrCtrl 自动 ⌘/Ctrl), 参考剪映/CapCut 常用快捷键
   // 注意: 必须放在所有 callback (copyClipToClipboard/ctxMenu 等) 之后, 避免 TDZ
@@ -3196,6 +3205,8 @@ export function AnimateMode() {
         onRemoveLane={removeLane}
         onSetDuration={setDuration}
         onClipContextMenu={onClipContextMenu}
+        onSplit={(id) => splitAt(id, playheadRef.current)}
+        onEmptyContextMenu={(e) => ctxMenu.open(e, buildEmptyMenu())}
       />
       </>) : (
         <GifMode view={view} onSwitchView={(m) => { setView(m); try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ } }} />
@@ -7079,7 +7090,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
 function Timeline({
   project, playhead, selectedId,
   onSelect, onSeek, onUpdateClipLive, onBeginDrag, onEndDrag,
-  onAddClip, onAddLane, onRemoveLane, onSetDuration, onClipContextMenu,
+  onAddClip, onAddLane, onRemoveLane, onSetDuration, onClipContextMenu, onSplit, onEmptyContextMenu,
 }: {
   project: ProjectState;
   playhead: number;
@@ -7094,10 +7105,14 @@ function Timeline({
   onRemoveLane: (type: TrackType, lane: number) => void;
   onSetDuration: (d: number) => void;
   onClipContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
+  onSplit?: (id: string) => void;
+  onEmptyContextMenu?: (e: React.MouseEvent) => void;
 }) {
   void onSetDuration;
   const [zoom, setZoom] = useState(1.0);
   const pxPerSec = Math.round(80 * zoom);
+  const selClipTL = project.clips.find(c => c.id === selectedId) ?? null;
+  const splitDisabledTL = !selClipTL || playhead <= selClipTL.start + 0.1 || playhead >= selClipTL.end - 0.1;
   // 监听全局快捷键 +/- 缩放时间轴
   useEffect(() => {
     const onZoomIn = () => setZoom(z => Math.min(2.0, +(z + 0.1).toFixed(2)));
@@ -7429,6 +7444,11 @@ function Timeline({
       <div className="am-tl-head">
         <span className="am-tl-head-title">⏱ 时间轴</span>
         <span className="am-tl-head-sub">{project.clips.length} 片段 · {totalLanes} 轨 · {project.duration.toFixed(1)}s</span>
+        <button className="am-tb-btn am-tb-btn-primary" disabled={splitDisabledTL}
+          onClick={() => selClipTL && onSplit?.(selClipTL.id)}
+          title={splitDisabledTL ? '选中片段 + 把 playhead 移到它中间, 才能切分 (快捷键 S)' : '在 playhead 处切分选中片段 (快捷键 S)'}>
+          <Scissors size={13} /> <span>切分</span>
+        </button>
         <div className="am-toolbar-spacer" />
         <div className="am-tl-zoom">
           <span>缩放</span>
@@ -7469,7 +7489,8 @@ function Timeline({
           })}
         </div>
         <div className="am-tl-tracks-wrap" ref={wrapRef} onScroll={handleScroll}>
-          <div className="am-tl-tracks" style={{ width: totalWidth, height: RULER_H + timelineBodyHeight }}>
+          <div className="am-tl-tracks" style={{ width: totalWidth, height: RULER_H + timelineBodyHeight }}
+            onContextMenu={e => { if ((e.target as HTMLElement).closest('.am-tl-clip')) return; e.preventDefault(); onEmptyContextMenu?.(e); }}>
             <div className="am-tl-ruler">
               <div className="am-tl-scrub-zone" onPointerDown={startScrub} />
               {ticks.map(t => (

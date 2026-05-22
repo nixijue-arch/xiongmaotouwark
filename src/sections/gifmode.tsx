@@ -800,6 +800,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setSelectedId(c.id);
     ctxMenu.open(e, buildGifClipMenu(c));
   }, [ctxMenu, buildGifClipMenu]);
+  // 空白处右键 (时间轴空白 / 画板空白) — 全局右键覆盖
+  const buildGifEmptyMenu = useCallback((): ContextMenuItem[] => [
+    { id: 'deselect', label: '取消选择', disabled: !selectedId, onClick: () => setSelectedId(null) },
+    { id: 'add-cap', label: '加空白字幕', icon: <TypeIcon size={12} />, onClick: () => addCaption() },
+    { id: 'sep', label: '', separator: true },
+    { id: 'clear', label: '清空画板', danger: true, disabled: project.clips.length === 0, onClick: () => clearAll() },
+  ], [selectedId, project.clips.length, addCaption, clearAll]);
 
   const setDuration = useCallback((d: number) => {
     const dd = Math.max(GIF_MIN_DURATION, Math.min(d, GIF_MAX_DURATION, preset.maxDuration));
@@ -835,11 +842,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); deleteClip(selectedId); return; }
+      if ((e.key === 's' || e.key === 'S') && !mod && selectedId) { e.preventDefault(); const dd = projectRef.current.duration; const ct = clampN(loopTimeMap(frozenRef.current, dd, projectRef.current.loop.mode), 0, dd); gifSplit(selectedId, ct); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setSelectedId(null); return; }
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, togglePlay, undo, redo, deleteClip, selectedId]);
+  }, [view, togglePlay, undo, redo, deleteClip, selectedId, gifSplit]);
 
   const onUpload = useCallback((file: File) => {
     if (file.size > 30 * 1024 * 1024) { toast.error('文件超过 30MB'); return; }
@@ -1370,7 +1379,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <div className="am-preview-stage" ref={stageRef}>
             {/* 跟视频一致: DOM 编辑舞台 (am-preview-canvas + am-stage-img/<img> + am-caption-stage), 非 canvas. 循环动画走 rAF CSS transform. */}
             <div className="am-preview-canvas gm-stage" style={{ width: fit.w || undefined, height: fit.h || undefined }}
-              onPointerDown={e => { if (e.target === e.currentTarget) setSelectedId(null); }}>
+              onPointerDown={e => { if (e.target === e.currentTarget) setSelectedId(null); }}
+              onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); ctxMenu.open(e, buildGifEmptyMenu()); } }}>
               {imageClips.slice().sort((a, b) => b.lane - a.lane).map(c => {
                 const media = cacheRef.current.get(c.src);
                 if (!media) return null;
@@ -1613,6 +1623,18 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         <div className="gm-tl-head">
           <span className="gm-tl-title">🎞️ 循环时间轴 · {D.toFixed(1)}s <span className="gm-hint">拖块移位 · 拖两端改时长 · 拖右缘改循环长 · 空白定位</span></span>
           <div className="gm-tl-headright">
+            {(() => {
+              const sel = project.clips.find(c => c.id === selectedId);
+              const cutT = clampN(loopTimeMap(scrubT, D, project.loop.mode), 0, D);
+              const canSplit = !!sel && cutT > sel.start + 0.1 && cutT < sel.end - 0.1;
+              return (
+                <button className="am-tb-btn am-tb-btn-primary gm-tl-split-btn" disabled={!canSplit}
+                  onClick={() => sel && gifSplit(sel.id, cutT)}
+                  title={canSplit ? `在游标 ${cutT.toFixed(1)}s 处切分选中图层 (快捷键 S)` : '选中图层 + 把游标拖到它中间, 才能切分 (S)'}>
+                  <Scissors size={13} /> <span>切分</span>
+                </button>
+              );
+            })()}
             <span className={'gm-tl-loopbadge gm-loop-' + project.loop.mode} title={loopInfo?.hint}>{loopGlyph} {loopInfo?.short}</span>
             <button className="am-tb-btn" onClick={applyMotionToAll} disabled={!selImg?.loopMotion || selImg.loopMotion.kind === 'none'} title="把选中主体的动作套到所有图层">动作 → 全部</button>
           </div>
@@ -1636,7 +1658,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             ))}
           </div>
           {/* 视频 pxPerSec 模型: gm-tl-lanes = 横向滚动容器, gm-tl-content = D*pxPerSec 宽; clip/ruler/playhead 全 px 定位 */}
-          <div className={'gm-tl-lanes' + (tlDropActive ? ' is-drop' : '')} ref={lanesRef} onPointerDown={tlScrub} onDragOver={tlDragOver} onDragLeave={() => setTlDropActive(false)} onDrop={tlDrop}>
+          <div className={'gm-tl-lanes' + (tlDropActive ? ' is-drop' : '')} ref={lanesRef} onPointerDown={tlScrub} onContextMenu={e => { e.preventDefault(); ctxMenu.open(e, buildGifEmptyMenu()); }} onDragOver={tlDragOver} onDragLeave={() => setTlDropActive(false)} onDrop={tlDrop}>
             <div className="gm-tl-content" style={{ width: tlContentW }}>
               <div className="am-tl-ruler">
                 {tlTicks.map(s => (
