@@ -1095,7 +1095,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const selGifTotal = selGifMedia && isGifFrames(selGifMedia) ? selGifMedia.frames.length : 0;
 
   // ---- 画板编辑 (DOM 元素拖拽, 跟视频 startStageDrag / startCaptionDrag 同款数学; canvasSize → fit 显示尺寸) ----
-  const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale') => {
+  const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
@@ -1104,15 +1104,25 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const startT = clip.transform ?? DEFAULT_TRANSFORM;
     const startX = e.clientX, startY = e.clientY;
     const cw = fit.w || preset.width, ch = fit.h || preset.height;
+    const _box = (e.currentTarget as HTMLElement).closest('.am-stage-img') as HTMLElement | null;
+    const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
+    const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
+    const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
     const onMove = (ev: PointerEvent) => {
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / cw * 100;
         const dyPct = (ev.clientY - startY) / ch * 100;
         patchTransform(clip.id, { x: Math.max(-200, Math.min(200, startT.x + dxPct)), y: Math.max(-200, Math.min(200, startT.y + dyPct)) });
-      } else {
+      } else if (kind === 'scale') {
         const baseSize = Math.min(cw, ch) * 0.6;
         const drag = Math.max(ev.clientX - startX, ev.clientY - startY);
         patchTransform(clip.id, { scale: Math.max(0.2, Math.min(4, startT.scale + (drag * 2) / Math.max(1, baseSize))) });
+      } else {
+        // 拖拽旋转 (Shift 锁 15°)
+        const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
+        let rot = startT.rotation + (a - _startAngle);
+        if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
+        patchTransform(clip.id, { rotation: Math.max(-180, Math.min(180, rot)) });
       }
     };
     const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
@@ -1433,6 +1443,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     )}
                     {c.id === selectedId && <>
                       <div className="am-stage-frame" />
+                      <div className="am-stage-rotstem" />
+                      <div className="am-stage-handle am-stage-handle-rot" onPointerDown={e => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title="拖动旋转 (Shift 锁 15°)" />
                       <div className="am-stage-handle am-stage-handle-se" onPointerDown={e => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }} title="拖动缩放" />
                     </>}
                   </div>

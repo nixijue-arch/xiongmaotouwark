@@ -225,6 +225,38 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
   );
 }
 
+function useRotateHandler(element: ImageElement, centerRef: React.RefObject<HTMLElement | null>) {
+  const { dispatch } = useMeme();
+  return useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation(); e.preventDefault();
+    const sx = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const sy = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const node = centerRef.current;
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const ccx = r.left + r.width / 2, ccy = r.top + r.height / 2;
+    const startAngle = Math.atan2(sy - ccy, sx - ccx) * 180 / Math.PI;
+    const startRot = element.rotation;
+    const onMove = (ev: MouseEvent | TouchEvent) => {
+      const px = 'touches' in ev ? ev.touches[0].clientX : ev.clientX;
+      const py = 'touches' in ev ? ev.touches[0].clientY : ev.clientY;
+      const a = Math.atan2(py - ccy, px - ccx) * 180 / Math.PI;
+      let rot = startRot + (a - startAngle);
+      if ((ev as MouseEvent).shiftKey) rot = Math.round(rot / 15) * 15;
+      rot = Math.round(((rot % 360) + 360) % 360);
+      dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { rotation: rot } });
+    };
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', cleanup);
+      window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', cleanup);
+      window.removeEventListener('touchcancel', cleanup);
+    };
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', cleanup);
+    window.addEventListener('touchmove', onMove); window.addEventListener('touchend', cleanup);
+    window.addEventListener('touchcancel', cleanup);
+  }, [element.id, element.rotation, dispatch, centerRef]);
+}
+
 function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScale, onContextMenu }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const { dispatch, state } = useMeme();
@@ -238,6 +270,8 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
   const rhSW = useResizeHandler(element, 'sw', canvasScale);
   const rhS  = useResizeHandler(element, 's', canvasScale);
   const rhSE = useResizeHandler(element, 'se', canvasScale);
+  const rotWrapRef = useRef<HTMLDivElement>(null);
+  const rotate = useRotateHandler(element, rotWrapRef);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,7 +303,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
   return (
     <Draggable
       nodeRef={nodeRef}
-      cancel="button, input, .resize-handle"
+      cancel="button, input, .resize-handle, .rotate-handle"
       position={{ x: element.x, y: element.y }}
       scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
@@ -283,7 +317,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
         onTouchStart={handleElementPointerStart}
         onContextMenu={onContextMenu ? (e) => { onSelect(); onContextMenu(e, element); } : undefined}
       >
-        <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
+        <div ref={rotWrapRef} style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
           {/* panda 元素用 mix-blend-mode: multiply
               panda 在 face 之上 (zIndex panda > face)
               panda 白色内部 × face = face (face 透过来)
@@ -312,6 +346,9 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
                 <ResizeHandle dir="sw" onStart={handleSelectionStart(rhSW)} />
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
+                <div className="absolute" style={{ left: '50%', top: -22, width: 2, height: 22, transform: 'translateX(-50%)', background: '#FF5E00', zIndex: 14, pointerEvents: 'none' }} />
+                <div className="absolute rotate-handle" style={{ left: '50%', top: -28, width: 12, height: 12, marginLeft: -6, borderRadius: '50%', background: '#fff', border: '2px solid #FF5E00', zIndex: 16, pointerEvents: 'auto', cursor: 'grab', boxSizing: 'border-box' }}
+                  onMouseDown={handleSelectionStart(rotate)} onTouchStart={handleSelectionStart(rotate)} title="拖动旋转 (Shift 锁 15°)" />
               </div>
               {/* 编辑/删除 action — base 调大 (font 14, padding 5/11, svg 13, gap 4)
                  * scale 限 max(0.6, 1/canvasScale) → canvasScale 2.0 时 visual 仍 base*0.6 = font 8.4
@@ -483,7 +520,7 @@ function DraggableText({ element, isSelected, onSelect, canvasScale, onContextMe
   return (
     <Draggable
       nodeRef={nodeRef}
-      cancel="button, input, .resize-handle"
+      cancel="button, input, .resize-handle, .rotate-handle"
       position={{ x: element.x, y: element.y }}
       scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}

@@ -3177,6 +3177,11 @@
 }
 .am-stage-handle-se { right: -10px; bottom: -10px; }
 .am-stage-handle:hover { background: #ff7a2f; transform: scale(1.15); }
+/* 旋转手柄 — 选框正上方, 拖拽旋转 (Shift 锁 15°); 视频/GIF 共用 */
+.am-stage-handle-rot { left: 50%; top: -26px; transform: translateX(-50%); cursor: grab; }
+.am-stage-handle-rot:active { cursor: grabbing; }
+.am-stage-handle-rot:hover { background: #ff7a2f; transform: translateX(-50%) scale(1.15); }
+.am-stage-rotstem { position: absolute; left: 50%; top: -20px; width: 2px; height: 16px; margin-left: -1px; background: #FF5E00; pointer-events: none; z-index: 99; }
 
 /* DEV overlay 已删 — size bug 已修 (px-based positioning) */
 

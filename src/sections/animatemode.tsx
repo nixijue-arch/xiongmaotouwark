@@ -4777,7 +4777,7 @@ function PreviewPane({
   };
 
   // 拖动 selected image clip
-  const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale') => {
+  const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -4788,6 +4788,10 @@ function PreviewPane({
     const startT = getTransform(clip);
     const startX = e.clientX;
     const startY = e.clientY;
+    const _box = (e.currentTarget as HTMLElement).closest('.am-stage-img') as HTMLElement | null;
+    const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
+    const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
+    const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
     const onMove = (ev: PointerEvent) => {
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / canvasSize.w * 100;
@@ -4798,7 +4802,7 @@ function PreviewPane({
           x: clamp(startT.x + dxPct, -200, 200),
           y: clamp(startT.y + dyPct, -200, 200),
         });
-      } else {
+      } else if (kind === 'scale') {
         // 跟手缩放 — image 边框跟随 pointer
         // image 半径 ≈ baseSize/2 * scale. 拖动 dx (右下角 handle), dx 应直接等于半径变化:
         //   newScale = startScale + (dx + dy) / baseSize (右下方向 dx+dy 同号)
@@ -4809,6 +4813,12 @@ function PreviewPane({
         const drag = Math.max(dx, dy);
         const newScale = clamp(startT.scale + (drag * 2) / Math.max(1, baseSize), 0.2, 4);
         onTransformLive(clip.id, { scale: newScale });
+      } else {
+        // 拖拽旋转 (Shift 锁 15°)
+        const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
+        let rot = startT.rotation + (a - _startAngle);
+        if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
+        onTransformLive(clip.id, { rotation: clamp(rot, -180, 180) });
       }
     };
     const onUp = () => {
@@ -4986,6 +4996,12 @@ function PreviewPane({
                 {isSel && (
                   <>
                     <div className="am-stage-frame" />
+                    <div className="am-stage-rotstem" />
+                    <div
+                      className="am-stage-handle am-stage-handle-rot"
+                      onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }}
+                      title="拖动旋转 (Shift 锁 15°)"
+                    />
                     <div
                       className="am-stage-handle am-stage-handle-se"
                       onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }}
