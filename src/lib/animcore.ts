@@ -24,7 +24,7 @@ export interface BaseClip { id: string; trackId: TrackType; lane: number; start:
 // 脸跟壳绑定: boundTo = 此 face 绑定的 shell(熊猫头) clip id; faceLocal = 绑定时 face 相对 shell 渲染框的局部位姿 (dxN/dyN 按 shell 半宽归一, scaleRatio=face/shell, rotation=相对角). face 渲染时 = shell 实时框(transform+loopMotion) ∘ faceLocal + face 自身 loopMotion.
 export interface FaceLocal { dxN: number; dyN: number; scaleRatio: number; rotation: number; }
 export interface BoundFaceBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; }
-export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; }
+export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; blend?: 'multiply'; }
 export interface CaptionTransform { x: number; y: number; }
 export const DEFAULT_CAPTION_TRANSFORM: CaptionTransform = { x: 0, y: 35 };
 // 'meme' = 白字 + 黑描边 (跟编辑器对齐, meme 经典款); 'panel' = 白底黑框; 'bar' = 黑底白字
@@ -491,6 +491,7 @@ export function renderExportFrame(
 
     ctx.save();
     ctx.globalAlpha = fxA.alpha;
+    if (c.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';  // 配套壳叠在脸上 (白内部×脸=脸透出, 黑特征如墨镜×脸=黑盖住), 跟编辑器一致
     if (fxA.filter) ctx.filter = fxA.filter;
     ctx.translate(cx + fxA.offsetX + (md ? md.dx : 0), cy + fxA.offsetY + (md ? md.dy : 0));
     ctx.rotate((tr.rotation + fxA.rotateAdd + (md ? md.dRot : 0)) * Math.PI / 180);

@@ -249,11 +249,11 @@ function useRotateHandler(element: ImageElement, centerRef: React.RefObject<HTML
     const cleanup = () => {
       window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', cleanup);
       window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', cleanup);
-      window.removeEventListener('touchcancel', cleanup);
+      window.removeEventListener('touchcancel', cleanup); window.removeEventListener('blur', cleanup);
     };
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', cleanup);
     window.addEventListener('touchmove', onMove); window.addEventListener('touchend', cleanup);
-    window.addEventListener('touchcancel', cleanup);
+    window.addEventListener('touchcancel', cleanup); window.addEventListener('blur', cleanup);  // 失焦兜底 (跟 useResizeHandler 一致, 防拖拽中 alt-tab 漏清监听)
   }, [element.id, element.rotation, dispatch, centerRef]);
 }
 

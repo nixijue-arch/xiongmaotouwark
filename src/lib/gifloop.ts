@@ -192,6 +192,7 @@ export function resolveBoundFaceBox(
   let fCy = sCy + (loc.dxN * sin + loc.dyN * cos) * half;
   let fIw = sIw * loc.scaleRatio;
   let fIh = fIw * (faceNaturalH / Math.max(1, faceNaturalW));
+  if (fIh > H * 0.85) { const fk = (H * 0.85) / fIh; fIw *= fk; fIh *= fk; }   // 跟非绑定渲染的 0.85H 钳一致 (修解绑跳变 + 预览/导出一致)
   let fRot = sRot + loc.rotation;
   // 3. face 自身 loopMotion (局部加, dx/dy 旋到世界)
   const fMd = loopMotionDelta(face.loopMotion, t, D, W, H, fTr);

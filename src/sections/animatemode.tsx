@@ -1702,6 +1702,7 @@ export function AnimateMode() {
   const ttsGenSigRef = useRef<Map<string, string>>(new Map());
   const ttsAudioCacheRef = useRef<Map<string, { audioSrc: string; duration: number }>>(new Map());
   useEffect(() => {
+    if (view !== 'video') return;   // GIF 视图不跑视频 TTS 自动生成 (GIF 默认后省无谓云端请求)
     const timer = setTimeout(async () => {
       for (const c of project.clips) {
         if (c.trackId !== 'tts') continue;
@@ -1775,7 +1776,7 @@ export function AnimateMode() {
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [project.clips, setProjectLive]);
+  }, [project.clips, setProjectLive, view]);
 
   // ========================================================
   // DEV: TTS state dump 工具 — Ctrl+Shift+D 或 console 调 __dumpTTS()

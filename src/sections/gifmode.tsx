@@ -536,12 +536,12 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       setProject(p => {
         const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 2 } as Clip : c));
         const pandaClip: ImageClip = {
-          id: pandaId, trackId: 'image', lane: 1, start: 0, end: p.duration,
-          src: box.croppedSrc, label: panda.labelCn, fx: 'none',
+          id: pandaId, trackId: 'image', lane: 0, start: 0, end: p.duration,
+          src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply',
           transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
         };
         const faceClip: ImageClip = {
-          id: faceId, trackId: 'image', lane: 0, start: 0, end: p.duration,
+          id: faceId, trackId: 'image', lane: 1, start: 0, end: p.duration,
           src: face.src, label: face.labelCn + '·脸', fx: 'none',
           transform: faceTransform, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
           boundTo: pandaId, faceLocal,
@@ -708,7 +708,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   };
 
   const deleteClip = useCallback((id: string) => {
-    setProject(p => ({ ...p, clips: p.clips.filter(c => c.id !== id) }));
+    setProject(p => ({ ...p, clips: p.clips.filter(c => c.id !== id).map(c =>  // 删壳时清掉跟随它的脸的 boundTo (防悬挂引用)
+      (c.trackId === 'image' && (c as ImageClip).boundTo === id) ? ({ ...c, boundTo: undefined, faceLocal: undefined } as Clip) : c) }));
     setSelectedId(prev => (prev === id ? null : prev));
   }, []);
 
@@ -1033,6 +1034,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           clips: (data.clips.filter(c => c && (c.trackId === 'image' || c.trackId === 'caption') && (c.trackId !== 'image' || !!(c as ImageClip).src)) as Clip[])
             .map(c => ({ ...c, start: Math.max(0, Math.min(Number.isFinite(c.start) ? c.start : 0, Math.max(0, dur - 0.1))), end: Math.max(0.1, Math.min(Number.isFinite(c.end) ? c.end : dur, dur)) } as Clip)),
         };
+        // 清掉悬挂 boundTo (引用的壳没活下来 → 防绑定脸渲染异常)
+        const liveIds = new Set(safe.clips.map(c => c.id));
+        safe.clips = safe.clips.map(c => (c.trackId === 'image' && (c as ImageClip).boundTo && !liveIds.has((c as ImageClip).boundTo!)) ? ({ ...c, boundTo: undefined, faceLocal: undefined } as Clip) : c);
         historyRef.current = { past: [], future: [] };
         skipHistRef.current = true;
         setProject(safe);
@@ -1100,8 +1104,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const pid = uid('img'), fid = uid('img');
       setProject(p => {
         const clips: Clip[] = [
-          { id: pid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
-          { id: fid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR } as ImageClip,
+          { id: pid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
+          { id: fid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
         return { ...p, clips, loop: { ...p.loop, mode: loopMode } };
@@ -1122,7 +1126,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     if (!face) return;
     const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
     if (others.length === 0) { toast('没有可绑定的熊猫头壳'); return; }
-    const shell = others.slice().sort((a, b) => b.lane - a.lane)[0];  // 最底层 = 熊猫头壳
+    const shell = others.find(o => o.blend === 'multiply') ?? others.find(o => !(o.label ?? '').endsWith('·脸')) ?? others.slice().sort((a, b) => b.lane - a.lane)[0];  // 壳 = blend multiply / 非·脸 / 兜底最底层
     const sMedia = cacheRef.current.get(shell.src), fMedia = cacheRef.current.get(face.src);
     if (!sMedia || !fMedia) { toast('素材还在加载, 稍后再绑'); return; }
     const W = preset.width, H = preset.height;
@@ -1148,7 +1152,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     toast('已解绑 — 表情现在独立');
   }, [preset]);
   // 换素材: 点 shell/face 图层弹素材网格快速换 (保留位置/动作/绑定). 区分用 label '·脸' 后缀.
-  const swapKind = (c: ImageClip): 'face' | 'panda' => (c.label ?? '').endsWith('·脸') ? 'face' : 'panda';
+  const swapKind = (c: ImageClip): 'face' | 'panda' => c.boundTo ? 'face' : c.blend === 'multiply' ? 'panda' : (c.label ?? '').endsWith('·脸') ? 'face' : 'panda';  // 稳定判别 (不靠 label, 防改名误判)
   const swapFace = useCallback((id: string, face: Material) => {
     patchClip(id, { src: face.src, label: face.labelCn + '·脸' });  // face 即插即换, 绑定/位置不动
     toast.success(`已换表情 · ${face.labelCn}`);
@@ -1540,10 +1544,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     onPointerDown={e => startStageDrag(e, c, 'move')} onContextMenu={e => onGifClipContextMenu(e, c)} onDragStart={e => e.preventDefault()}>
                     {isGifSrc(c.src) ? (
                       <canvas ref={el => { if (el) gifCanvasRefs.current.set(c.id, el); else gifCanvasRefs.current.delete(c.id); }} width={mediaWH(media).w} height={mediaWH(media).h}
-                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined }} />
+                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined }} />
                     ) : (
                       <img src={c.src} alt={c.label} draggable={false}
-                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined }} />
+                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined }} />
                     )}
                     {c.id === selectedId && <>
                       <div className="am-stage-frame" />
