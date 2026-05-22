@@ -3885,13 +3885,13 @@
 .am-caption-stage {
   position: absolute;
   transform: translate(-50%, -50%);
-  font-weight: 800;
+  font-weight: 900;
   text-align: center;
-  white-space: nowrap;
-  max-width: 90%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 92%;
+  overflow: visible;
+  line-height: 1.28;
   font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
   user-select: none;
   z-index: 50;

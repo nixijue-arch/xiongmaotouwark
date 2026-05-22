@@ -554,6 +554,22 @@ export function computeCaptionEntrance(
   return { opacity: 1, scale: 1, visibleText: c.text };
 }
 
+// 按最大宽度换行 (该分行分行) — 硬换行 \n 优先, 再按宽度断 (中文无空格故逐字断, 跟浏览器 word-break 近似). 调用前须先设好 ctx.font.
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  if (!text) return [''];
+  const out: string[] = [];
+  for (const seg of text.split('\n')) {
+    let line = '';
+    for (const ch of seg) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line) { out.push(line); line = ch; }
+      else line = test;
+    }
+    out.push(line);
+  }
+  return out.length ? out : [''];
+}
+
 export function drawCaption(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -567,23 +583,21 @@ export function drawCaption(
 ): void {
   if (!text) return;
   if (entranceState.opacity <= 0.01) return;  // v23-k: 完全透明 skip 绘制
-  let fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
+  const fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
   // meme/bar 默认白字, panel 默认黑字
   const color = capColor ?? (style === 'panel' ? '#000000' : '#ffffff');
-  ctx.font = `bold ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
-  // 自动缩字防溢出 — 确保基本文本一行装下 (超 92% 画宽就等比缩; 只缩不放, 不影响本就合适的字幕; video/gif 通用)
-  const maxTextW = W * 0.92;
-  const measuredW = ctx.measureText(text).width;
-  if (measuredW > maxTextW && measuredW > 0) {
-    fontSize = Math.max(8, Math.floor(fontSize * maxTextW / measuredW));
-    ctx.font = `bold ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
-  }
+  ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;  // 900 黑体 = 更醒目 (原 bold)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // 自动按 92% 画宽换行 (该分行分行; 跟预览 white-space:pre-wrap 对齐 → 导出≈预览). 不再单行缩字/省略.
+  const maxTextW = W * 0.92;
+  const lines = wrapLines(ctx, text, maxTextW);
+  const lineH = fontSize * 1.28;
   // transform.x/y 都是 % of stage, 跟预览 'left: 50+x%' 'top: 50+y%' 对齐
   const cx = W * (0.5 + tr.x / 100);
   const cy = H * (0.5 + tr.y / 100);
-  // v23-k: entranceState (opacity + scale) — 用 ctx.save/translate/scale/globalAlpha 包裹后续绘制
+  const y0 = cy - ((lines.length - 1) / 2) * lineH;   // 多行垂直居中
+  // v23-k: entranceState (opacity + scale)
   const needsXform = entranceState.opacity < 1 || Math.abs(entranceState.scale - 1) > 0.01;
   if (needsXform) {
     ctx.save();
@@ -592,36 +606,31 @@ export function drawCaption(
     ctx.scale(entranceState.scale, entranceState.scale);
     ctx.translate(-cx, -cy);
   }
+  const widest = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 1);
 
   if (style === 'panel') {
-    const metrics = ctx.measureText(text);
-    const padX = 16, padY = 6;
-    const boxW = metrics.width + padX * 2;
-    const boxH = fontSize * 1.3;
+    const padX = 16, padY = 8;
+    const boxW = widest + padX * 2, boxH = lines.length * lineH + padY * 2;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
     ctx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
     ctx.fillStyle = color;
-    ctx.fillText(text, cx, cy + padY * 0.2);
+    lines.forEach((ln, i) => ctx.fillText(ln, cx, y0 + i * lineH));
   } else if (style === 'bar') {
-    const metrics = ctx.measureText(text);
-    const padX = 18, padY = 8;
-    const boxW = metrics.width + padX * 2;
-    const boxH = fontSize * 1.35;
+    const padX = 18, padY = 10;
+    const boxW = widest + padX * 2, boxH = lines.length * lineH + padY * 2;
     ctx.fillStyle = 'rgba(0,0,0,0.78)';
     ctx.fillRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
     ctx.fillStyle = color;
-    ctx.fillText(text, cx, cy + padY * 0.1);
+    lines.forEach((ln, i) => ctx.fillText(ln, cx, y0 + i * lineH));
   } else {
-    // meme: 白字 + 黑描边 (跟编辑器 + 草图卡片一致)
+    // meme: 白字 + 粗黑描边 (更醒目 — 描边 0.18→0.22)
     ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(4, fontSize * 0.18);
+    ctx.lineWidth = Math.max(5, fontSize * 0.22);
     ctx.strokeStyle = '#000000';
-    ctx.strokeText(text, cx, cy);
     ctx.fillStyle = color;
-    ctx.fillText(text, cx, cy);
+    lines.forEach((ln, i) => { const ly = y0 + i * lineH; ctx.strokeText(ln, cx, ly); ctx.fillText(ln, cx, ly); });
   }
   if (needsXform) ctx.restore();
 }
