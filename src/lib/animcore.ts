@@ -70,14 +70,14 @@ export interface GifPreset {
   maxDuration: number;
   note: string;
 }
-// fps 提到流畅区间 (≥15 才不卡顿; 动效/弹跳尤其需要). 编码加抖动+超采样后画质提升, 见 gifloop encodeGIFBlob.
+// fps 提到流畅区间 (微信 20 控体积; 其余 25 = 整数 cs 延时无漂移, 接近预览流畅度). 编码加抖动+超采样画质提升, 见 gifloop.
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 15, defaultDuration: 2.5, maxDuration: 10, note: '微信表情 · ≤500KB · 240×240 · 15fps' },
-  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 16, defaultDuration: 4,   maxDuration: 10, note: '朋友圈微博 · ≤2MB · 400×400 · 16fps' },
-  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 10, note: 'Telegram · ≤256KB · 512×512 · 24fps' },
-  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 18, defaultDuration: 4,   maxDuration: 10, note: '通用 · ≤1MB · 360×360 · 18fps' },
-  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 20, defaultDuration: 6,   maxDuration: 10, note: 'X/Twitter · ≤15MB · 480×480 · 20fps' },
-  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 20, defaultDuration: 6,   maxDuration: 10, note: '自由 · 上限 10s · 480×360 · 20fps' },
+  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '微信表情 · ≤500KB · 240×240 · 20fps' },
+  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 20, defaultDuration: 4,   maxDuration: 10, note: '朋友圈微博 · ≤2MB · 400×400 · 20fps' },
+  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 25, defaultDuration: 2.5, maxDuration: 10, note: 'Telegram · ≤256KB · 512×512 · 25fps' },
+  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '通用 · ≤1MB · 360×360 · 25fps' },
+  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 25, defaultDuration: 6,   maxDuration: 10, note: 'X/Twitter · ≤15MB · 480×480 · 25fps' },
+  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 25, defaultDuration: 6,   maxDuration: 10, note: '自由 · 上限 10s · 480×360 · 25fps' },
 ];
 export const GIF_MAX_DURATION = 10; // s, GIF 总上限 (用户定 10s; 时间轴满宽=0..10s, 10s 在最右)
 export const GIF_MIN_DURATION = 1;

@@ -1458,7 +1458,7 @@ export function AnimateMode() {
   const [mobileSheet, setMobileSheet] = useState<'assets' | 'caption' | 'fx' | 'inspector' | null>(null);
   // 视频/GIF 视图 (融入: GIF 是 animate 内的视图, 非独立板块). localStorage 持久.
   const [view, setView] = useState<'video' | 'gif'>(() => {
-    try { return localStorage.getItem('xmw.animate-view') === 'gif' ? 'gif' : 'video'; } catch { return 'video'; }
+    try { const v = localStorage.getItem('xmw.animate-view'); return v === 'video' ? 'video' : 'gif'; } catch { return 'gif'; }  // 默认 GIF (视频太复杂, 多数人首选 GIF); 只有显式选过视频才记住视频
   });
   // v23-l audit-fix: sheet drag-to-dismiss (leftover #4). 之前 cursor:grab 撒谎 — 现在 PointerDown/Move/Up 真支持向下拖关.
   const sheetRef = useRef<HTMLDivElement | null>(null);

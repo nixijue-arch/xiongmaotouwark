@@ -130,7 +130,9 @@ export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number,
     // 自定义移动 A→B 乒乓 — w 三角波 0→1→0, 首尾 w=0 必无缝. A=base(clip.transform), B=m.to
     case 'customMove': {
       if (!m.to || !base) return ZERO_DELTA;
-      const w = u < 0.5 ? u * 2 : (1 - u) * 2;
+      // cycles(速度): 每循环往返 n 次 (三角波频率 n, u=0/1 必 w=0 闭环); amp(幅度): 缩放 A→B 位移 (1=到B, 1.5=过冲, 0.5=半程)
+      const cu = (n * u) % 1;
+      const w = (cu < 0.5 ? cu * 2 : (1 - cu) * 2) * A;
       return {
         dx: ((m.to.x - base.x) / 100) * W * w,
         dy: ((m.to.y - base.y) / 100) * H * w,
@@ -210,7 +212,7 @@ async function encodeGIFBlob(
   const D = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
   // 超采样: 小尺寸渲 2× 再缩 → 边缘/字幕/人脸抗锯齿更顺 (大尺寸不必, 省内存/时间)
-  const SS = W <= 420 ? 2 : 1;
+  const SS = W <= 512 ? 2 : 1;   // 超采样阈值提到 512 → TG(512)/X(480) 也 2× 渲染, 边缘/字幕/人脸更顺 (画质接近预览)
   const RW = W * SS, RH = H * SS;
   // 编码画布 = 目标尺寸 (gif.js 按此编码输出)
   const main = document.createElement('canvas'); main.width = W; main.height = H;
