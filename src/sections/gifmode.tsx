@@ -498,12 +498,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const W = preset.width, H = preset.height;
       const baseSize = Math.min(W, H) * 0.6;
       const K = baseSize / box.w;
+      // 填满画板: 让 panda 较长边占 ~90% 画板 (原 0.6=只占 60%, 留白太多). 宽 panda→1.5x; 高 panda 按高比缩防溢出裁切. 脸跟着缩放+移位
+      const fillScale = 1.5 * Math.min(1, box.w / box.h);
       const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
       const faceTransform: Transform = {
         ...DEFAULT_TRANSFORM,
-        x: ((fcx - 250) * K) / W * 100,
-        y: ((fcy - 250) * K) / H * 100,
-        scale: fl.width / box.w,
+        x: ((fcx - 250) * K) / W * 100 * fillScale,
+        y: ((fcy - 250) * K) / H * 100 * fillScale,
+        scale: (fl.width / box.w) * fillScale,
       };
       const pandaId = uid('img'), faceId = uid('img');
       setProject(p => {
@@ -511,7 +513,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         const pandaClip: ImageClip = {
           id: pandaId, trackId: 'image', lane: 1, start: 0, end: p.duration,
           src: box.croppedSrc, label: panda.labelCn, fx: 'none',
-          transform: { ...DEFAULT_TRANSFORM }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
+          transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
         };
         const faceClip: ImageClip = {
           id: faceId, trackId: 'image', lane: 0, start: 0, end: p.duration,
@@ -1064,12 +1066,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       });
       const W = preset.width, H = preset.height;
       const baseSize = Math.min(W, H) * 0.6; const K = baseSize / box.w;
+      const fillScale = 1.5 * Math.min(1, box.w / box.h);  // 填满画板 (跟 addCombo 一致, 减留白)
       const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
-      const faceT: Transform = { ...DEFAULT_TRANSFORM, x: ((fcx - 250) * K) / W * 100, y: ((fcy - 250) * K) / H * 100, scale: fl.width / box.w };
+      const faceT: Transform = { ...DEFAULT_TRANSFORM, x: ((fcx - 250) * K) / W * 100 * fillScale, y: ((fcy - 250) * K) / H * 100 * fillScale, scale: (fl.width / box.w) * fillScale };
       const pid = uid('img'), fid = uid('img');
       setProject(p => {
         const clips: Clip[] = [
-          { id: pid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', transform: { ...DEFAULT_TRANSFORM }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
+          { id: pid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
           { id: fid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles } } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
