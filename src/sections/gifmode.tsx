@@ -13,7 +13,7 @@ import { pickRandomText } from '@/data/quickModeTexts';
 import {
   loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, GIF_MAX_DURATION, GIF_MIN_DURATION,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
-  type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform,
+  type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
   type GifPresetId, type LoopMotionKind, type ProjectMode, type GifFrameEdit,
 } from '@/lib/animcore';
 import {
@@ -173,6 +173,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [swapPop, setSwapPop] = useState<{ id: string; kind: 'panda' | 'face' } | null>(null);  // 点图层换素材弹窗
+  const [swapQ, setSwapQ] = useState('');
+  const [swapBusy, setSwapBusy] = useState(false);
 
   // rAF 用 ref 读最新值, 避免每次编辑都拆/重建动画循环
   const projectRef = useRef(project); projectRef.current = project;
@@ -1144,6 +1147,41 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setProject(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, transform: baked, boundTo: undefined, faceLocal: undefined } as Clip) : c) }));
     toast('已解绑 — 表情现在独立');
   }, [preset]);
+  // 换素材: 点 shell/face 图层弹素材网格快速换 (保留位置/动作/绑定). 区分用 label '·脸' 后缀.
+  const swapKind = (c: ImageClip): 'face' | 'panda' => (c.label ?? '').endsWith('·脸') ? 'face' : 'panda';
+  const swapFace = useCallback((id: string, face: Material) => {
+    patchClip(id, { src: face.src, label: face.labelCn + '·脸' });  // face 即插即换, 绑定/位置不动
+    toast.success(`已换表情 · ${face.labelCn}`);
+    setSwapPop(null);
+  }, []);
+  const swapShell = useCallback(async (id: string, panda: Material) => {
+    setSwapBusy(true);
+    const tid = toast.loading('换熊猫头…');
+    try {
+      const box = await getEditorPandaBox(panda.src, { fillShell: true });
+      const W = preset.width, H = preset.height;
+      const baseSize = Math.min(W, H) * 0.6, K = baseSize / box.w, fillScale = 1.5 * Math.min(1, box.w / box.h);
+      let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
+      // 重算绑定脸到新熊猫头脸洞 (脸跟壳: 换壳后脸自动对齐新脸洞, 不用手动调)
+      const faces = projectRef.current.clips.filter(c => c.trackId === 'image' && (c as ImageClip).boundTo === id) as ImageClip[];
+      const upd = new Map<string, { transform: Transform; faceLocal: FaceLocal }>();
+      for (const f of faces) {
+        const fl = await calcEditorFaceLayout({ pandaSrc: panda.src, faceSrc: f.src, faceOffset350: panda.faceOffset, panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h });
+        const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
+        const ft: Transform = { ...DEFAULT_TRANSFORM, x: ((fcx - 250) * K) / W * 100 * fillScale, y: ((fcy - 250) * K) / H * 100 * fillScale, scale: (fl.width / box.w) * fillScale };
+        const faceLocal = captureFaceLocal({ cx: W / 2, cy: H / 2, iw: _sIw }, 0, { cx: W / 2 + (ft.x / 100) * W, cy: H / 2 + (ft.y / 100) * H, iw: baseSize * ft.scale }, 0);
+        upd.set(f.id, { transform: ft, faceLocal });
+      }
+      setProject(pp => ({ ...pp, clips: pp.clips.map(c => {
+        if (c.id === id) return { ...c, src: box.croppedSrc, label: panda.labelCn } as Clip;
+        const u = upd.get(c.id);
+        return u ? ({ ...c, transform: u.transform, faceLocal: u.faceLocal } as Clip) : c;
+      }) }));
+      toast.success(`已换熊猫头 · ${panda.labelCn}`, { id: tid });
+      setSwapPop(null);
+    } catch { toast.error('换熊猫头失败', { id: tid }); }
+    finally { setSwapBusy(false); }
+  }, [preset]);
   const selImg = selected && selected.trackId === 'image' ? (selected as ImageClip) : null;
   const selCap = selected && selected.trackId === 'caption' ? (selected as CaptionClip) : null;
   const tr = selImg?.transform ?? DEFAULT_TRANSFORM;
@@ -1633,6 +1671,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               <Field label="标签">
                 <input className="am-input" value={selImg.label || ''} onChange={e => patchClip(selImg.id, { label: e.target.value })} placeholder="图层标签…" />
               </Field>
+              {selImg.kind !== 'scene' && !isGifSrc(selImg.src) && (
+                <Field label="换素材">
+                  <button className="am-chip" type="button" onClick={() => setSwapPop({ id: selImg.id, kind: swapKind(selImg) })}>
+                    <ArrowLeftRight size={12} /> 换{swapKind(selImg) === 'face' ? '表情' : '熊猫头'}
+                  </button>
+                </Field>
+              )}
               <Field label={`时段 · ${selImg.start.toFixed(1)}–${selImg.end.toFixed(1)}s (时间轴可拖)`}>
                 <div className="am-row">
                   <NumberInput label="起 s" value={selImg.start} step={0.1} min={0} max={D} onChange={v => patchClip(selImg.id, { start: Math.max(0, Math.min(v, selImg.end - 0.1)) })} />
@@ -1843,6 +1888,35 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       </div>
 
       {/* 时间轴行 → 动效弹层 (Option A): 图标网格 + 幅度/速度 + 自定义; 锚在 chip 上方 (时间轴在底部→向上弹) */}
+      {swapPop && (() => {
+        const all = swapPop.kind === 'panda' ? ALL_PANDAS : ALL_FACES;
+        const k = swapQ.trim().toLowerCase();
+        const list = all.filter(m => !k || m.labelCn.toLowerCase().includes(k) || m.labelEn.toLowerCase().includes(k) || m.tags.some(tg => tg.toLowerCase().includes(k)));
+        const cur = project.clips.find(c => c.id === swapPop.id) as ImageClip | undefined;
+        return (
+          <div className="am-combo-picker-overlay" onClick={() => !swapBusy && setSwapPop(null)}>
+            <div className="am-combo-picker win7-panel" onClick={e => e.stopPropagation()}>
+              <div className="am-combo-picker-head">
+                <span>换{swapPop.kind === 'panda' ? '熊猫头' : '表情'} · 保留位置/动作{swapPop.kind === 'panda' ? '/绑定脸自动对齐' : ''} · {list.length}/{all.length}</span>
+                <button className="am-popover-close" onClick={() => setSwapPop(null)} type="button"><X size={14} /></button>
+              </div>
+              <div className="am-combo-picker-search material-search-box">
+                <Search size={12} color="#888" />
+                <input autoFocus type="text" className="material-search-input" placeholder={`搜${swapPop.kind === 'panda' ? '熊猫头' : '表情'}…`} value={swapQ} onChange={e => setSwapQ(e.target.value)} />
+              </div>
+              <div className="am-combo-picker-grid">
+                {list.map(m => (
+                  <button key={m.id} type="button" disabled={swapBusy} className={'am-combo-picker-card' + (cur && m.src === cur.src ? ' is-active' : '')} onClick={() => swapPop.kind === 'panda' ? void swapShell(swapPop.id, m) : swapFace(swapPop.id, m)} title={m.labelCn}>
+                    <img src={m.src} alt={m.labelCn} className="am-combo-picker-thumb" loading="lazy" draggable={false} />
+                    <span className="am-combo-picker-name">{m.labelCn}</span>
+                  </button>
+                ))}
+                {list.length === 0 && <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {motionPop && (() => {
         const mc = project.clips.find(c => c.id === motionPop.id) as ImageClip | undefined;
         if (!mc || mc.trackId !== 'image') return null;
