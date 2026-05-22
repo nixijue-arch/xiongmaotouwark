@@ -72,14 +72,14 @@ export interface GifPreset {
 }
 // fps 提到流畅区间 (≥15 才不卡顿; 动效/弹跳尤其需要). 编码加抖动+超采样后画质提升, 见 gifloop encodeGIFBlob.
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 15, defaultDuration: 2.5, maxDuration: 3,  note: '微信表情 · ≤500KB · 240×240 · 15fps' },
-  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 16, defaultDuration: 4,   maxDuration: 5,  note: '朋友圈微博 · ≤2MB · 400×400 · 16fps' },
-  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 3,  note: 'Telegram · ≤256KB · 512×512 · 24fps' },
-  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 18, defaultDuration: 4,   maxDuration: 6,  note: '通用 · ≤1MB · 360×360 · 18fps' },
-  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 20, defaultDuration: 6,   maxDuration: 12, note: 'X/Twitter · ≤15MB · 480×480 · 20fps' },
-  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 20, defaultDuration: 6,   maxDuration: 15, note: '自由 · 上限 15s · 480×360 · 20fps' },
+  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 15, defaultDuration: 2.5, maxDuration: 10, note: '微信表情 · ≤500KB · 240×240 · 15fps' },
+  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 16, defaultDuration: 4,   maxDuration: 10, note: '朋友圈微博 · ≤2MB · 400×400 · 16fps' },
+  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 24, defaultDuration: 2.5, maxDuration: 10, note: 'Telegram · ≤256KB · 512×512 · 24fps' },
+  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 18, defaultDuration: 4,   maxDuration: 10, note: '通用 · ≤1MB · 360×360 · 18fps' },
+  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 20, defaultDuration: 6,   maxDuration: 10, note: 'X/Twitter · ≤15MB · 480×480 · 20fps' },
+  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 20, defaultDuration: 6,   maxDuration: 10, note: '自由 · 上限 10s · 480×360 · 20fps' },
 ];
-export const GIF_MAX_DURATION = 15; // s, 总上限 (业界 GIF 通常 ≤15s, 微信/Telegram 表情 ≤3s, 见 GIF_PRESETS)
+export const GIF_MAX_DURATION = 10; // s, GIF 总上限 (用户定 10s; 时间轴满宽=0..10s, 10s 在最右)
 export const GIF_MIN_DURATION = 1;
 
 export interface ProjectState {
@@ -414,15 +414,18 @@ export function renderExportFrame(
   imgCache: Map<string, MediaAsset>,
   motionAt?: (clip: ImageClip, t: number) => MotionDelta,  // P0: 循环安全动作注入 (gifmode 用; video 不传 = 行为不变)
   bgColor: string = '#000000',  // 画板底色. video 默认黑; GIF 传白 (#fff) 跟视频预览画板一致
+  layer: 'all' | 'images' | 'captions' = 'all',  // crossfade 只混图层不混字幕 → 字幕单独画一次 (修溶解字幕重影, 预览+导出)
 ) {
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, W, H);
+  if (layer !== 'captions') {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, W, H);
+  }
   // v23-i: 删 scene 强制最底 — 用户痛点 "改 lane 没变化". 纯按 lane 排 (lane 大 = 底层, lane 0 = 顶层)
   // scene 仍按 lane 排, 但 cover 全屏性质保留. 想让 scene 当背景 → 把 scene 放高 lane (e.g. lane 1+)
   const active = (project.clips.filter(c => c.trackId === 'image' && t >= c.start && t < c.end) as ImageClip[])
     .sort((a, b) => b.lane - a.lane);
 
-  for (let idx = 0; idx < active.length; idx++) {
+  for (let idx = 0; layer !== 'captions' && idx < active.length; idx++) {
     const c = active[idx];
     const media = imgCache.get(c.src);
     if (!media) continue;
@@ -469,6 +472,7 @@ export function renderExportFrame(
     ctx.restore();
   }
 
+  if (layer === 'images') return;   // images-only (crossfade 混层): 字幕由调用方单独画一次, 防重影
   // caption: 优先 caption track active clip, fallback image.caption
   // 渲染所有 active caption clips (按 transform 位置), 单 caption fallback 走 image.caption
   const top = active[active.length - 1];

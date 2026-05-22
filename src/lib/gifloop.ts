@@ -5,7 +5,7 @@ import {
   type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform,
 } from '@/lib/animcore';
 
-export type GifLoopMode = 'normal' | 'boomerang' | 'crossfade';
+export type GifLoopMode = 'normal' | 'boomerang' | 'reverse' | 'rewind' | 'crossfade';
 export interface GifLoopConfig {
   mode: GifLoopMode;
   crossfadeSec: number;   // 仅 crossfade 用 (P2)
@@ -39,6 +39,17 @@ export function loopTimeMap(playPos: number, D: number, mode: GifLoopMode): numb
     const p = ((playPos % period) + period) % period;
     return p <= D ? p : 2 * D - p;
   }
+  if (mode === 'reverse') {
+    // 整段倒着放: 显示时间从 D→0 循环
+    return D - (((playPos % D) + D) % D);
+  }
+  if (mode === 'rewind') {
+    // 正放 D + 急速倒带 rewindD (回开头), 强"卡带"节奏
+    const rewindD = D * 0.28;
+    const period = D + rewindD;
+    const p = ((playPos % period) + period) % period;
+    return p < D ? p : D * (1 - (p - D) / rewindD);
+  }
   return ((playPos % D) + D) % D;
 }
 
@@ -64,14 +75,26 @@ export function buildExportFrameTimes(D: number, fps: number, config: GifLoopCon
     }
     return out;
   }
+  if (config.mode === 'reverse') {
+    for (let i = n - 1; i >= 0; i--) out.push({ t: i * dt });     // 整段倒放
+    return out;
+  }
+  if (config.mode === 'rewind' && n > 2) {
+    for (let i = 0; i < n; i++) out.push({ t: i * dt });          // 正放
+    for (let i = n - 1; i >= 0; i -= 3) out.push({ t: i * dt });  // 急退: 抽 1/3 帧 (同 delay 显得快)
+    return out;
+  }
   for (let i = 0; i < n; i++) out.push({ t: i * dt });           // normal
   return out;
 }
 
 // 预览用 — 某显示时间 t 的 spec (crossfade 尾段返回 blend 信息). normal/boomerang 直接 {t}.
-export function loopSpecAt(t: number, D: number, config: GifLoopConfig): LoopFrameSpec {
+// fps 传入跟导出对齐 (n<=2 不溶解 + xf 下限=1帧), 防"预览溶解但导出直放"的所见非所得.
+export function loopSpecAt(t: number, D: number, config: GifLoopConfig, fps = 30): LoopFrameSpec {
   if (config.mode === 'crossfade' && D > 0) {
-    const xf = clamp(config.crossfadeSec, 0.01, D * 0.4);
+    const dt = 1 / fps;
+    if (Math.max(1, Math.round(D * fps)) <= 2) return { t };  // 跟 buildExportFrameTimes 的 n>2 guard 一致
+    const xf = clamp(config.crossfadeSec, dt, D * 0.4);        // 下限 dt 跟导出一致
     const tailStart = D - xf;
     if (t >= tailStart) return { t, blendWith: t - tailStart, blendAlpha: (t - tailStart) / xf };
   }
@@ -137,14 +160,18 @@ export function renderLoopFrame(
   scratch?: CanvasRenderingContext2D,   // crossfade 的 head 层
   bgColor: string = '#ffffff',          // GIF 画板默认白 (跟视频预览画板一致). 白底 crossfade 仍正确 (溶解透过白)
 ): void {
-  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor);
-  if (spec.blendWith === undefined || spec.blendAlpha === undefined || !scratch) return;
-  // crossfade: head 层渲到 scratch, 按 alpha 叠到主层
-  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt, bgColor);
+  if (spec.blendWith === undefined || spec.blendAlpha === undefined || !scratch) {
+    renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor);   // 非 crossfade: 整帧 (含字幕)
+    return;
+  }
+  // crossfade: 只混"图层"(尾段溶进开头), 字幕单独在顶层画一次 — 防溶解时字幕重影 (双帧各画一次字幕)
+  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor, 'images');           // 主(尾)帧图层
+  renderExportFrame(scratch, spec.blendWith, project, W, H, cache, motionAt, bgColor, 'images'); // 头帧图层 → scratch
   ctx.save();
   ctx.globalAlpha = spec.blendAlpha;
   ctx.drawImage(scratch.canvas, 0, 0, W, H);
   ctx.restore();
+  renderExportFrame(ctx, spec.t, project, W, H, cache, motionAt, bgColor, 'captions');         // 字幕只画一次, 顶层不参与溶解
 }
 
 // 循环质量 0(完美闭环)..100(差). 把首帧/尾帧下采样到 32×32 算 RGB 平均绝对差.
