@@ -4592,8 +4592,8 @@
   .am-pane-left.desktop-sidebar-left,
   .am-pane-right.desktop-sidebar-right { display: none; }
 
-  /* Preview: top 35vh */
-  .am-pane-preview {
+  /* Preview: top 35vh (类名是 am-preview-pane, 之前误写 am-pane-preview = 死规则, 预览高度一直没生效) */
+  .am-preview-pane {
     flex: 0 0 auto;
     height: 35vh;
     min-height: 200px;
@@ -4616,12 +4616,15 @@
   .am-tl-clip { min-height: 32px; }   /* 大触点 */
   .am-tl-body { font-size: 11px; }
 
-  /* 给底栏让出空间 (74px = 60 + safe-bottom) */
-  .am-root::after {
+  /* 给底栏让出空间 (74px = 60 + safe-bottom). gate 到非 GIF — GIF 视图自己有 am-root--gif::after, 否则双垫片 */
+  .am-root:not(.am-root--gif)::after {
     content: '';
     flex: 0 0 60px;
     flex: 0 0 calc(60px + env(safe-area-inset-bottom, 0px));
   }
+  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成滚动 (视频时间轴 clip/handle + 画板) */
+  .am-tl-clip, .am-tl-handle, .am-preview-canvas { touch-action: none; }
+  .am-tb-mode-btn { min-width: 0; }
 
   /* 底栏 4 大 tab — 浮在底部, 按下展开 sheet */
   .am-mobile-bottombar {

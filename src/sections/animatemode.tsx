@@ -29,6 +29,8 @@ import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, type Material } from '@/
 // v23-d: 内置 SVG scene preset 删除 — 用户嫌 cheesy, 改成纯用户上传 (任意位图/jpg/png/gif)
 // import { ANIMATE_SCENES } from '@/data/animateScenes';  // 保留 file 备查, 不再 import
 import { composeMeme } from '@/lib/composeMeme';
+import { makeDraftThumb } from '@/lib/thumbutil';
+import { encodeGIFBlobFromProject, downloadBlob } from '@/lib/gifloop';
 import { useMeme, type DraftSlot, type ImageElement, type TextElement, type MemeElement } from '@/context/memecontext';
 import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_LABELS } from '@/data/quickModeTexts';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -1391,78 +1393,11 @@ export async function exportGIF(
   onProgress: (p: number) => void,
   presetId: GifPresetId = 'wechat',
 ): Promise<{ ext: string; size: number; width: number; height: number; fps: number; frameCount: number; durationSec: number }> {
-  const preset = GIF_PRESETS.find(p => p.id === presetId) ?? GIF_PRESETS[0];
-  const { width: W, height: H, fps } = preset;
-  // v24: cap 在三方 min (项目时长 / 全局上限 / preset.maxDuration). 防止微信 preset (≤3s) 但 project=5s 实际导出 5s 上传被拒.
-  const durationSec = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('canvas 2d 不可用');
-
-  // 预加载所有 image (含 GIF decoder)
-  const allSrcs = Array.from(new Set(project.clips.filter(c => c.trackId === 'image').map(c => (c as ImageClip).src)));
-  const imgCache = new Map<string, MediaAsset>();
-  await Promise.all(allSrcs.map(async src => {
-    try { imgCache.set(src, await loadMedia(src)); } catch {}
-  }));
-
-  // 动态 import gif.js + worker (减 prod bundle, 用户没点 GIF 导出就不加载)
-  const [{ default: GIF }, workerUrlMod] = await Promise.all([
-    import('gif.js'),
-    // gif.js 的 worker. Vite ?url import 拿到资源 URL, 不进 main bundle
-    import('gif.js/dist/gif.worker.js?url'),
-  ]);
-  const workerScript = (workerUrlMod as { default: string }).default;
-
-  // GIF quality 1=highest, 30=lowest. 10 是常用甜点 (微信表情包 ≤500KB 可达)
-  // workers 2 个: 主线程 + worker 并行 quantize
-  const gif = new GIF({
-    workers: 2,
-    quality: 10,
-    width: W,
-    height: H,
-    workerScript,
-    background: '#000000',
-    repeat: 0,  // 0 = infinite loop
-  });
-
-  const frameCount = Math.max(1, Math.round(durationSec * fps));
-  const delayMs = Math.round(1000 / fps);
-
-  // 同步逐帧渲染 + addFrame (gif.js encode 后续 async)
-  for (let i = 0; i < frameCount; i++) {
-    const t = (i / fps);
-    renderExportFrame(ctx, t, project, W, H, imgCache);
-    gif.addFrame(canvas, { copy: true, delay: delayMs });
-    // 进度: render 阶段占 50% (encode 阶段占 50%, gif.on('progress'))
-    if (i % 4 === 0) onProgress(0.5 * (i / frameCount));
-    // 让出主线程 (防 UI 卡死)
-    if (i % 8 === 0) await new Promise(r => setTimeout(r, 0));
-  }
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    gif.on('finished', (b: Blob) => resolve(b));
-    gif.on('progress', (p: number) => {
-      onProgress(0.5 + 0.5 * p);
-    });
-    gif.on('abort', () => reject(new Error('GIF encode aborted')));
-    gif.render();
-  });
-
-  // 触发下载
-  const safe = (name || '我的GIF').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${safe}.gif`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-  return { ext: 'gif', size: blob.size, width: W, height: H, fps, frameCount, durationSec };
+  // 委托 gifloop 统一编码器 — 跟 GIF 板块同 quality5 + FloydSteinberg 抖动 + 超采样 + 白底,
+  // 且自带 releaseImgCache (帧画布用完即放). 视频 GIF 导出 = normal 循环, 无 loopMotion → 线性渲染 (等价旧逻辑).
+  const r = await encodeGIFBlobFromProject(project, presetId, onProgress);
+  downloadBlob(r.blob, name);
+  return { ext: 'gif', size: r.blob.size, width: r.W, height: r.H, fps: r.fps, frameCount: r.frameCount, durationSec: r.durationSec };
 }
 
 // ============================================================
@@ -1764,7 +1699,10 @@ export function AnimateMode() {
           const duration = await getAudioDuration(dataUrl);
           if (ttsGenSigRef.current.get(ts.id) !== `pending:${sig}`) continue;
           const wallDuration = duration / rate;
-          ttsAudioCacheRef.current.set(cacheKey, { audioSrc: dataUrl, duration });
+          // FIFO 上限 80 (每条 mp3 dataURL ~30-80KB, 长 session 防无限涨; 源在 clip.audioSrc 上, 淘汰只多一次重生成)
+          const _ttsCache = ttsAudioCacheRef.current;
+          if (_ttsCache.size >= 80 && !_ttsCache.has(cacheKey)) { const _old = _ttsCache.keys().next().value; if (_old) _ttsCache.delete(_old); }
+          _ttsCache.set(cacheKey, { audioSrc: dataUrl, duration });
           ttsGenSigRef.current.set(ts.id, `done:${sig}`);
           setProjectLive(p => ({
             ...p,
@@ -2704,15 +2642,16 @@ export function AnimateMode() {
     setDrafts(next);
     idbSet(AM_DRAFT_IDB_KEY, next).catch(() => {});
   }, []);
-  const saveCurrentAsDraft = useCallback((name?: string) => {
-    // v23-b: 取首张 image clip src 作缩略图 (草稿列表一眼可辨)
+  const saveCurrentAsDraft = useCallback(async (name?: string) => {
+    // v23-b: 取首张 image clip src 作缩略图 (草稿列表一眼可辨); 缩到 96px webp 省 IDB
     const firstImage = project.clips.find(c => c.trackId === 'image') as ImageClip | undefined;
+    const thumbSrc = firstImage?.src ? await makeDraftThumb(firstImage.src) : undefined;
     const slot: AnimateDraftSlot = {
       id: uid('amd'),
       name: name || `草稿${drafts.length + 1}`,
       updatedAt: Date.now(),
       project: JSON.parse(JSON.stringify(project)),
-      thumbSrc: firstImage?.src,
+      thumbSrc,
     };
     persistDrafts([slot, ...drafts].slice(0, AM_DRAFT_MAX));
     toast.success(`已保存为 ${slot.name}`);
@@ -3097,7 +3036,7 @@ export function AnimateMode() {
   ]);
 
   return (
-    <div className={'am-root' + (isMobile ? ' am-root-mobile' : '')}>
+    <div className={'am-root' + (isMobile ? ' am-root-mobile' : '') + (view === 'gif' ? ' am-root--gif' : '')}>
       {view === 'video' ? (<>
       <AnimateToolbar
         duration={project.duration}
@@ -7320,7 +7259,7 @@ function Timeline({
       // v23-h: timeline drop — 同 quickAdd 路径, fx='move' 时 init transforms from 同时段最上层 image
       // v23-k: 修默认 target 优先非 scene + lane 最低
       const fxKind = payload.fx || 'shake';
-      const ph = (start + end) / 2;
+      const ph = start + effectiveDur / 2;
       const candidates = project.clips.filter(c => c.trackId === 'image' && ph >= c.start && ph < c.end) as ImageClip[];
       const targetImage = candidates.length > 0
         ? candidates.sort((a, b) => {
