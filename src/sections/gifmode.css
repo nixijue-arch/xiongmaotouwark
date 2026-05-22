@@ -263,20 +263,43 @@
 .gm-variant-meta span { color: var(--retro-muted, #6682a4); }
 .gm-variant button { display: flex; align-items: center; gap: 5px; padding: 5px 14px; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 800; color: #4f3400; background: linear-gradient(180deg, #ffd45e 0%, #ffb01b 100%); border: 1px solid #c28e11; }
 
-/* 移动端: am-workspace 网格 → 堆叠 */
-/* 移动端: 三栏网格 → 单列堆叠 (预览在上, 素材/字幕/动效 + 图层 + 时间轴 依次往下, 整体滚动) */
-.gm-workspace.gm-mobile { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; gap: 8px; }
-.gm-workspace.gm-mobile .gm-preview { order: -1; min-height: 0; }
-.gm-workspace.gm-mobile .am-preview-stage { max-height: 42vh; }
-.gm-workspace.gm-mobile .gm-pane-left,
-.gm-workspace.gm-mobile .gm-pane-right { display: block; max-height: none; overflow: visible; }
-.gm-workspace.gm-mobile .gm-assetbody,
-.gm-workspace.gm-mobile .gm-layerlist { max-height: none; overflow: visible; }
+/* 移动端布局全在下面的 @media (max-width:768px) 块 (预览上 + 时间轴下 + 左右栏变 sheet + 底栏 4 tab) */
+/* ─────────────── 移动端: 预览(上) + 时间轴(下) + 左右栏变底部 sheet + 底栏 4 tab ─────────────── */
 @media (max-width: 768px) {
-  .gm-toolbar { flex-wrap: wrap; height: auto; min-height: 0; padding: 6px 8px; row-gap: 5px; }
-  .gm-timeline { margin: 0 8px 8px; }
-  .gm-tl-labels { width: 104px; }
-  .gm-tl-body { max-height: 30vh; }
+  /* 工作区竖排, 只在流里留预览 (左右栏变 fixed sheet / 隐藏) */
+  .gm-workspace.gm-mobile { display: flex; flex-direction: column; flex: 0 0 auto; padding: 0; gap: 0; grid-template-columns: none; }
+  .gm-workspace.gm-mobile .am-preview-pane.gm-preview { flex: 0 0 auto; height: 36vh; min-height: 200px; padding: 4px; }
+  /* 时间轴 (am-root 的 flex 兄弟) 吃掉剩余竖向空间 */
+  .gm-timeline { flex: 1 1 auto; min-height: 0; margin: 0; border-radius: 0; display: flex; flex-direction: column; }
+  .gm-tl-body { flex: 1 1 auto; max-height: none; min-height: 0; }
+  .gm-tl-labels { width: 92px; }
+
+  /* 左/右栏 → 底部 sheet: 平时隐藏, is-open 时 fixed 上滑 */
+  .gm-pane-sheet { display: none; }
+  .gm-pane-sheet.is-open {
+    display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0;
+    width: auto; max-height: 76vh; z-index: 301; border-radius: 14px 14px 0 0;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 12px 12px calc(64px + env(safe-area-inset-bottom, 0px)); margin: 0;
+    background: linear-gradient(180deg, #f4faff 0%, #e7f1ff 100%);
+    box-shadow: 0 -10px 40px rgba(5,20,39,0.34); border-top: 1px solid rgba(255,255,255,0.85);
+    animation: gm-sheet-up 180ms ease;
+  }
+  .gm-pane-sheet.is-open .gm-assetbody, .gm-pane-sheet.is-open .gm-layerlist { max-height: none; overflow: visible; }
+  .gm-sheet-backdrop { position: fixed; inset: 0; z-index: 300; background: rgba(11,35,62,0.4); backdrop-filter: blur(2px); }
+
+  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成页面滚动 */
+  .am-tl-clip, .am-tl-handle, .gm-tl-durhandle, .gm-tl-lanes,
+  .am-stage-img, .am-caption-stage, .am-move-marker, .am-tl-playhead-handle { touch-action: none; }
+
+  /* 工具栏横滚 + 图标 only (不换行吃竖向空间) */
+  .gm-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; height: auto; min-height: 44px; padding: 6px 8px; }
+  .gm-toolbar::-webkit-scrollbar { display: none; }
   .gm-draftpop { width: min(280px, 92vw); }
+  .gm-variant-grid { grid-template-columns: 1fr; }
+  .gm-motionpop { z-index: 320; }  /* 压过 sheet (z301) */
+
+  /* GIF 底栏安全区垫片 (视频版 am-root::after 已 gate 到非 gif) */
+  .am-root-mobile.am-root--gif::after { content: ''; flex: 0 0 calc(60px + env(safe-area-inset-bottom, 0px)); }
 }
-@media (max-width: 768px) { .gm-variant-grid { grid-template-columns: 1fr; } }
+@keyframes gm-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }

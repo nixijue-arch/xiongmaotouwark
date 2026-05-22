@@ -22,6 +22,7 @@ import {
 } from '@/lib/gifloop';
 import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { showDialog } from '@/components/appdialog';
+import { makeDraftThumb } from '@/lib/thumbutil';
 import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown } from 'lucide-react';
 import './gifmode.css';
 
@@ -153,6 +154,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [exporting, setExporting] = useState(false);
   const [seam, setSeam] = useState<number | null>(null);
   const [seg, setSeg] = useState<'asset' | 'caption' | 'fx'>('asset');
+  const [gmSheet, setGmSheet] = useState<'left' | 'right' | null>(null);  // 移动端: 左/右栏变底部 sheet (CSS 重定位, 不搬 DOM)
   const [assetSub, setAssetSub] = useState<'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload'>('combo');
   const [q, setQ] = useState('');
   const [scrubT, setScrubT] = useState(0);
@@ -743,9 +745,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const onExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
-    const tid = toast.loading('正在生成 GIF…');
+    const tid = toast.loading('正在生成 GIF… 0%');
     try {
-      const r = await exportGIFLoop(project, '熊猫头循环', () => {});
+      const r = await exportGIFLoop(project, '熊猫头循环', p => {
+        toast.loading(`${p < 0.5 ? '渲染帧' : '编码'} ${Math.round(p * 100)}%…`, { id: tid });
+      });
       toast.success(`导出成功 · ${(r.size / 1024).toFixed(0)}KB · ${r.frameCount}帧 · ${r.width}×${r.height}`, { id: tid });
     } catch (e) {
       toast.error('导出失败: ' + (e instanceof Error ? e.message : '未知错误'), { id: tid });
@@ -756,12 +760,15 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
 
   const openVariants = useCallback(async () => {
     if (variantBusy) return;
-    setVariantBusy(true); setVariantOpen(true); setVariants(null);
+    setVariantBusy(true); setVariantOpen(true);
+    setVariants(prev => { prev?.forEach(x => URL.revokeObjectURL(x.url)); return null; });  // 先回收上一批 blob URL 防泄漏
+    const tid = toast.loading('生成三种变体… 0%');
     try {
-      const vs = await exportGIFVariants(project, () => {});
+      const vs = await exportGIFVariants(project, p => { toast.loading(`生成变体 ${Math.round(p * 100)}%…`, { id: tid }); });
       setVariants(vs.map(v => ({ v, url: URL.createObjectURL(v.blob) })));
+      toast.success('三种变体已就绪', { id: tid });
     } catch (e) {
-      toast.error('变体生成失败: ' + (e instanceof Error ? e.message : ''));
+      toast.error('变体生成失败: ' + (e instanceof Error ? e.message : ''), { id: tid });
       setVariantOpen(false);
     } finally {
       setVariantBusy(false);
@@ -771,17 +778,21 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setVariants(prev => { prev?.forEach(x => URL.revokeObjectURL(x.url)); return null; });
     setVariantOpen(false);
   }, []);
+  // 卸载兜底: 开着对比变体直接切走视图时回收 3 个 blob URL
+  const variantsRef = useRef(variants); variantsRef.current = variants;
+  useEffect(() => () => { variantsRef.current?.forEach(x => URL.revokeObjectURL(x.url)); }, []);
 
   // ---- GIF 草稿 (独立 IDB, 不与 video/animate 草稿混) ----
   const persistGifDrafts = useCallback((next: GifDraftSlot[]) => {
     setGifDrafts(next);
     void idbSet(GIF_DRAFTS_IDB_KEY, next).catch(() => {});
   }, []);
-  const saveGifDraft = useCallback(() => {
+  const saveGifDraft = useCallback(async () => {
     const firstImg = project.clips.find(c => c.trackId === 'image') as ImageClip | undefined;
+    const thumbSrc = firstImg?.src ? await makeDraftThumb(firstImg.src) : undefined;  // 96px webp 缩略图 (省 IDB)
     const slot: GifDraftSlot = {
       id: uid('gd'), name: `GIF草稿${gifDrafts.length + 1}`, updatedAt: Date.now(),
-      project: JSON.parse(JSON.stringify(project)) as GifProject, thumbSrc: firstImg?.src,
+      project: JSON.parse(JSON.stringify(project)) as GifProject, thumbSrc,
     };
     persistGifDrafts([slot, ...gifDrafts].slice(0, GIF_DRAFT_MAX));
     toast.success(`已保存为 ${slot.name}`);
@@ -1111,8 +1122,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
 
       {/* ===== 工作区 — 复用 am-workspace 网格 (左 340 / 预览 1fr / 右 300) ===== */}
       <div className={'am-workspace gm-workspace' + (isMobile ? ' gm-mobile' : '')}>
-        {/* 左: segment tabs (素材/字幕/动效) — 跟视频左栏一致 (无 音乐/配音) */}
-        <aside className="gm-pane gm-pane-left">
+        {/* 左: segment tabs (素材/字幕/动效) — 跟视频左栏一致 (无 音乐/配音). 移动端 gm-pane-sheet 变底部 sheet */}
+        <aside className={'gm-pane gm-pane-left' + (isMobile ? (gmSheet === 'left' ? ' gm-pane-sheet is-open' : ' gm-pane-sheet') : '')}>
           <div className="am-seg-bar gm-segbar">
             <button className={'am-seg-btn' + (seg === 'asset' ? ' is-active' : '')} type="button" onClick={() => setSeg('asset')}><span className="am-seg-ic"><ImageIcon size={14} /></span><span>素材</span></button>
             <button className={'am-seg-btn' + (seg === 'caption' ? ' is-active' : '')} type="button" onClick={() => setSeg('caption')}><span className="am-seg-ic"><MessageSquare size={14} /></span><span>字幕</span></button>
@@ -1306,7 +1317,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         </main>
 
         {/* 右: 图层 + 检视 — 对齐视频 LayerPanel / ImageProps / CaptionProps (am-* 同款) */}
-        <aside className="gm-pane gm-pane-right">
+        <aside className={'gm-pane gm-pane-right' + (isMobile ? (gmSheet === 'right' ? ' gm-pane-sheet is-open' : ' gm-pane-sheet') : '')}>
           <div className="gm-sec-title">图层 <span className="gm-hint">(拖动重排 · 上=顶层/前)</span></div>
           <div className="am-layer-list gm-layerlist">
             {project.clips.length === 0 && <div className="am-layer-empty">空 — 左侧加个主体</div>}
@@ -1636,6 +1647,32 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             )}
           </div>
         </div>
+      )}
+
+      {/* 移动端底部导航 (素材/字幕/动效 → 左栏 sheet 并切 seg; 编辑 → 右栏 sheet). 复用 am-mobile-* 样式 */}
+      {isMobile && (
+        <>
+          {gmSheet && <div className="gm-sheet-backdrop" onClick={() => setGmSheet(null)} />}
+          <div className="am-mobile-bottombar am-mobile-bottombar--4" role="tablist">
+            <button type="button" className={'am-mb-tab' + (gmSheet === 'left' && seg === 'asset' ? ' is-active' : '')}
+              onClick={() => { if (gmSheet === 'left' && seg === 'asset') setGmSheet(null); else { setSeg('asset'); setGmSheet('left'); } }}>
+              <span className="am-mb-tab-ic"><ImageIcon size={18} /></span><span className="am-mb-tab-lbl">素材</span>
+            </button>
+            <button type="button" className={'am-mb-tab' + (gmSheet === 'left' && seg === 'caption' ? ' is-active' : '')}
+              onClick={() => { if (gmSheet === 'left' && seg === 'caption') setGmSheet(null); else { setSeg('caption'); setGmSheet('left'); } }}>
+              <span className="am-mb-tab-ic"><MessageSquare size={18} /></span><span className="am-mb-tab-lbl">字幕</span>
+            </button>
+            <button type="button" className={'am-mb-tab' + (gmSheet === 'left' && seg === 'fx' ? ' is-active' : '')}
+              onClick={() => { if (gmSheet === 'left' && seg === 'fx') setGmSheet(null); else { setSeg('fx'); setGmSheet('left'); } }}>
+              <span className="am-mb-tab-ic"><Sparkles size={18} /></span><span className="am-mb-tab-lbl">动效</span>
+            </button>
+            <button type="button" disabled={!selectedId}
+              className={'am-mb-tab' + (gmSheet === 'right' ? ' is-active' : '') + (!selectedId ? ' is-disabled' : '')}
+              onClick={() => setGmSheet(s => (s === 'right' ? null : 'right'))}>
+              <span className="am-mb-tab-ic"><Layers size={18} /></span><span className="am-mb-tab-lbl">编辑</span>
+            </button>
+          </div>
+        </>
       )}
     </>
   );
