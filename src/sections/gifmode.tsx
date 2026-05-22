@@ -1655,6 +1655,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         <div className="gm-tl-head">
           <span className="gm-tl-title">🎞️ 循环时间轴 · {D.toFixed(1)}s <span className="gm-hint">拖块移位 · 拖两端改时长 · 拖右缘改循环长 · 空白定位</span></span>
           <div className="gm-tl-headright">
+            <button className="am-tb-btn" title="快速加一对随机熊猫头+表情 (从素材库)" onClick={() => { const rp = ALL_PANDAS[Math.floor(Math.random() * ALL_PANDAS.length)]; const rf = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)]; void addCombo(rp, rf); }}><ImageIcon size={13} /> <span>＋加素材</span></button>
             {(() => {
               const sel = project.clips.find(c => c.id === selectedId);
               const cutT = clampN(loopTimeMap(scrubT, D, project.loop.mode), 0, D);
@@ -1758,7 +1759,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <>
             <div className="gm-pop-overlay" onPointerDown={() => setMotionPop(null)} />
             <div className="gm-motionpop" style={{ bottom: motionPop.bottom, left: motionPop.left }} onPointerDown={e => e.stopPropagation()}>
-              <div className="gm-motionpop-head"><img className="gm-motionpop-thumb" src={mc.src} alt="" />{mc.label || '主体'} · 循环动作</div>
+              <div className="gm-motionpop-head"><img className="gm-motionpop-thumb" src={mc.src} alt="" /><span className="gm-motionpop-head-name">{mc.label || '主体'} · 循环动作</span>{lm.kind !== 'none' && <button type="button" className="gm-motionpop-clear" title="清除这层动作" onClick={() => { setLayerMotion(motionPop.id, 'none'); setCustomEdit(false); }}><X size={12} /> 清除</button>}</div>
               <div className="gm-motionpop-grid">
                 {LOOP_MOTIONS.map(m => (
                   <button key={m.kind} title={m.label}
