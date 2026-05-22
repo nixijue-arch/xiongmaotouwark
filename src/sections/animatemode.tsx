@@ -5075,9 +5075,11 @@ function PreviewPane({
                 {isEditing ? (
                   <textarea
                     autoFocus
+                    wrap="off"
+                    rows={1}
                     className="am-caption-edit"
                     value={c.text}
-                    onChange={(e) => onCaptionTextLive(c.id, e.target.value)}
+                    onChange={(e) => onCaptionTextLive(c.id, e.target.value.replace(/\n/g, ''))}
                     onBlur={() => setEditingCaptionId(null)}
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { e.preventDefault(); setEditingCaptionId(null); }

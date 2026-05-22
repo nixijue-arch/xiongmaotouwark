@@ -3042,6 +3042,7 @@
   box-shadow: 0 1px 3px rgba(20,60,110,0.15);
 }
 .am-tl-clip:active { cursor: grabbing; }
+.am-tl-clip:hover:not(.is-selected) { box-shadow: 0 2px 7px rgba(20,60,110,0.28); }
 .am-tl-clip.is-selected {
   box-shadow: 0 0 0 2px #FF5E00, 0 2px 6px rgba(255,94,0,0.3);
 }
@@ -3951,12 +3952,16 @@
   font-weight: 800;
   text-align: center;
   width: 280px;
-  min-height: 1.4em;
+  height: 1.5em;          /* 单行: 固定一行高, 不随内容增高 */
+  min-height: 1.5em;
   padding: 0;
-  white-space: normal;
-  word-break: break-word;
+  white-space: pre;       /* 单行编辑, 不换行 (全局 — GIF + 视频内联字幕编辑) */
+  overflow-x: auto;
+  overflow-y: hidden;
+  word-break: normal;
   font-family: inherit;
 }
+.am-caption-edit::-webkit-scrollbar { display: none; }
 .am-caption-edit::placeholder { color: rgba(0,0,0,0.4); }
 
 /* ============================================================
