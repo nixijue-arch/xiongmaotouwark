@@ -53,7 +53,7 @@ const _bboxCache = new Map<string, Bbox>();
 // 把 face PNG 按 alpha>50 的 bbox 抠出来 → 紧凑 dataURL, 加上 padding 防边缘 alpha-clip
 // 编辑器加 face 元素时用 — 元素尺寸 = bbox 而不是 naturalWidth 含的大量透明 padding
 // 这样 face 在 panda anchor 里精确就位, 不会因为 PNG 含 padding 撑得过大
-export async function bboxCropImage(src: string, padPx = 4, fillShell = false): Promise<{ dataUrl: string; w: number; h: number }> {
+export async function bboxCropImage(src: string, padPx = 4, fillShell = false, maxPx = 0): Promise<{ dataUrl: string; w: number; h: number }> {
   const img = await loadImage(src);
   const [x1, y1, x2, y2] = getContentBbox(img);
   const cw = Math.max(1, x2 - x1);
@@ -66,6 +66,17 @@ export async function bboxCropImage(src: string, padPx = 4, fillShell = false): 
     drawShellFilled(c.getContext('2d', { willReadFrequently: true })!, img, x1, y1, cw, ch, padPx, padPx, c.width, c.height);
   } else {
     c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  }
+  // maxPx>0 且超限: 等比缩小成品 (减 dataURL 体积/IDB 占用; w/h 同步缩, 调用方 anchor 用 box.w 一致)
+  if (maxPx > 0 && Math.max(c.width, c.height) > maxPx) {
+    const ds = maxPx / Math.max(c.width, c.height);
+    const c2 = document.createElement('canvas');
+    c2.width = Math.max(1, Math.round(c.width * ds));
+    c2.height = Math.max(1, Math.round(c.height * ds));
+    const cx2 = c2.getContext('2d')!;
+    cx2.imageSmoothingEnabled = true; cx2.imageSmoothingQuality = 'high';
+    cx2.drawImage(c, 0, 0, c2.width, c2.height);
+    return { dataUrl: c2.toDataURL('image/png'), w: c2.width, h: c2.height };
   }
   return { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height };
 }
@@ -499,7 +510,8 @@ export async function getEditorPandaBox(src: string, opts?: { fillShell?: boolea
   w: number; h: number;
 }> {
   // fillShell: GIF 两图层 panda 内部填白防场景透出 (默认 false → 编辑器/快速/校准路径零影响)
-  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false);
+  // GIF 路径顺带封顶 350px (croppedSrc 进 clip.src/IDB; box 几何用 FRAME=350 + aspect, 不受影响)
+  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false, opts?.fillShell ? 350 : 0);
   const aspect = cropped.w / Math.max(1, cropped.h);
   const FRAME = 350;
   let w = FRAME, h = FRAME;

@@ -197,44 +197,52 @@ export async function loadGifFrames(src: string): Promise<GifFrames> {
 
   const W = parsed.lsd.width;
   const H = parsed.lsd.height;
+  // 解码分辨率封顶: 渲染/预览最大只到 512 (最大 preset), 导入的大 GIF (可达 1080p) 没必要
+  // 存全分辨率帧 (N 个全帧 canvas 几十~上百 MB). 合成仍在原生尺寸 (patch 是原生像素), 只把
+  // 存进 frames 的成品帧缩到 ≤CAP. scale===1 (已 ≤512) 时零额外开销.
+  const CAP = 512;
+  const scale = Math.min(1, CAP / Math.max(W, H));
+  const outW = Math.max(1, Math.round(W * scale));
+  const outH = Math.max(1, Math.round(H * scale));
   const composed: { canvas: HTMLCanvasElement; delayMs: number }[] = [];
 
   // gifuct-js 帧数据是 patch (局部更新), 需按 disposalType 累积合成完整帧.
   // disposal: 0/1=保留前帧, 2=clear to bg, 3=restore prev (罕见, 简化 = 视为 1)
-  const prev = document.createElement('canvas');
-  prev.width = W; prev.height = H;
+  // prev/comp/tmp = 复用的原生尺寸 scratch (合成必须原生, 否则 patch 错位), 循环后释放.
+  const prev = document.createElement('canvas'); prev.width = W; prev.height = H;
   const prevCtx = prev.getContext('2d');
-  if (!prevCtx) throw new Error('canvas 2d unavailable');
+  const comp = document.createElement('canvas'); comp.width = W; comp.height = H;
+  const compCtx = comp.getContext('2d');
+  const tmp = document.createElement('canvas');
+  const tmpCtx = tmp.getContext('2d');
+  if (!prevCtx || !compCtx || !tmpCtx) throw new Error('canvas 2d unavailable');
 
   for (const f of decoded) {
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas 2d unavailable');
-    ctx.drawImage(prev, 0, 0);
-
-    // f.patch 是 RGBA Uint8ClampedArray, dims 是局部 bbox
-    const patchData = new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height);
-    const tmp = document.createElement('canvas');
+    // 合成完整帧到 comp (原生尺寸)
+    compCtx.clearRect(0, 0, W, H);
+    compCtx.drawImage(prev, 0, 0);
     tmp.width = f.dims.width; tmp.height = f.dims.height;
-    const tmpCtx = tmp.getContext('2d');
-    if (!tmpCtx) throw new Error('canvas 2d unavailable');
-    tmpCtx.putImageData(patchData, 0, 0);
-    ctx.drawImage(tmp, f.dims.left, f.dims.top);
+    tmpCtx.putImageData(new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height), 0, 0);
+    compCtx.drawImage(tmp, f.dims.left, f.dims.top);
 
-    composed.push({ canvas, delayMs: Math.max(20, f.delay || 100) });
+    // 存成品帧 (超过 CAP 则缩, 高质量插值)
+    const frame = document.createElement('canvas');
+    frame.width = outW; frame.height = outH;
+    const fctx = frame.getContext('2d');
+    if (!fctx) throw new Error('canvas 2d unavailable');
+    if (scale < 1) { fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = 'high'; }
+    fctx.drawImage(comp, 0, 0, outW, outH);
+    composed.push({ canvas: frame, delayMs: Math.max(20, f.delay || 100) });
 
-    // 更新 prev
-    if (f.disposalType === 2) {
-      prevCtx.clearRect(0, 0, W, H);
-    } else {
-      prevCtx.clearRect(0, 0, W, H);
-      prevCtx.drawImage(canvas, 0, 0);
-    }
+    // 更新 prev (从原生 comp; disposal 2 = 清空)
+    prevCtx.clearRect(0, 0, W, H);
+    if (f.disposalType !== 2) prevCtx.drawImage(comp, 0, 0);
   }
+  // 释放 scratch backing store
+  prev.width = 0; prev.height = 0; comp.width = 0; comp.height = 0; tmp.width = 0; tmp.height = 0;
 
   const totalDurMs = composed.reduce((s, f) => s + f.delayMs, 0);
-  return { type: 'gif', width: W, height: H, frames: composed, totalDurMs };
+  return { type: 'gif', width: outW, height: outH, frames: composed, totalDurMs };
 }
 
 export async function loadMedia(src: string): Promise<MediaAsset> {

@@ -225,9 +225,12 @@ async function encodeGIFBlob(
     if (!rc) throw new Error('canvas 2d 不可用');
     rctx = rc;
   }
-  const scratch = document.createElement('canvas'); scratch.width = RW; scratch.height = RH;
-  const sctx = scratch.getContext('2d', { alpha: true });   // crossfade head 层 (跟 render 同尺寸)
-  if (!sctx) throw new Error('canvas 2d 不可用');
+  // scratch (crossfade head 层) 仅溶解模式需要 — 其余模式不分配, 省一块 2× 画布内存
+  let sctx: CanvasRenderingContext2D | undefined;
+  if (mode === 'crossfade') {
+    const scratch = document.createElement('canvas'); scratch.width = RW; scratch.height = RH;
+    sctx = scratch.getContext('2d', { alpha: true }) ?? undefined;
+  }
 
   const [{ default: GIF }, workerUrlMod] = await Promise.all([
     import('gif.js'),
@@ -240,12 +243,14 @@ async function encodeGIFBlob(
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
   const delayMs = Math.round(1000 / fps);
   const motionAt = makeLoopMotionAt(D, RW, RH);  // 动作幅度按渲染尺寸 (2× 同步放大, 缩回后视觉一致)
+  let lastYield = performance.now();
   for (let i = 0; i < specs.length; i++) {
     renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx);
     if (SS > 1) mctx.drawImage(render, 0, 0, W, H);  // 超采样缩回目标尺寸 (高质量插值)
     gif.addFrame(main, { copy: true, delay: delayMs });
     if (i % 4 === 0) onProgress(0.5 * (i / specs.length));
-    if (i % 8 === 0) await new Promise(r => setTimeout(r, 0));
+    // 时间片让出: 大画布单帧重, 累计 >16ms 才让出主线程 (不卡 UI, 又不过度 await)
+    if (performance.now() - lastYield > 16) { await new Promise(r => setTimeout(r, 0)); lastYield = performance.now(); }
   }
   const blob = await new Promise<Blob>((resolve, reject) => {
     gif.on('finished', (b: Blob) => resolve(b));
@@ -265,14 +270,29 @@ export function downloadBlob(blob: Blob, name: string, ext = 'gif'): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// 释放解码的 GIF 帧画布 (每个导入 GIF 可达几十 MB), 导出完立刻调用 → 帮 GC 回收, 降客户端峰值内存
+function releaseImgCache(cache: Map<string, MediaAsset>): void {
+  for (const m of cache.values()) {
+    if (m.type === 'gif' && Array.isArray(m.frames)) {
+      for (const f of m.frames) { f.canvas.width = 0; f.canvas.height = 0; }  // 0×0 立即释放 backing store
+      m.frames.length = 0;
+    }
+  }
+  cache.clear();
+}
+
 // 导出当前 mode 的 GIF (normal / boomerang / crossfade) 并下载.
 export async function exportGIFLoop(
   project: GifProject, name: string, onProgress: (p: number) => void,
 ): Promise<{ size: number; width: number; height: number; fps: number; frameCount: number; durationSec: number }> {
   const imgCache = await preloadImgCache(project);
-  const r = await encodeGIFBlob(project, project.loop.mode, imgCache, onProgress);
-  downloadBlob(r.blob, name);
-  return { size: r.blob.size, width: r.W, height: r.H, fps: r.fps, frameCount: r.frameCount, durationSec: r.durationSec };
+  try {
+    const r = await encodeGIFBlob(project, project.loop.mode, imgCache, onProgress);
+    downloadBlob(r.blob, name);
+    return { size: r.blob.size, width: r.W, height: r.H, fps: r.fps, frameCount: r.frameCount, durationSec: r.durationSec };
+  } finally {
+    releaseImgCache(imgCache);
+  }
 }
 
 // 一键多变体: 串行渲 normal/boomerang/crossfade (共享 imgCache, 解码一次), 不自动下载.
@@ -281,9 +301,30 @@ export async function exportGIFVariants(project: GifProject, onProgress: (p: num
   const imgCache = await preloadImgCache(project);
   const modes: GifLoopMode[] = ['normal', 'boomerang', 'crossfade'];
   const out: GifVariant[] = [];
-  for (let i = 0; i < modes.length; i++) {
-    const r = await encodeGIFBlob(project, modes[i], imgCache, p => onProgress((i + p) / modes.length));
-    out.push({ mode: modes[i], blob: r.blob, size: r.blob.size, frameCount: r.frameCount });
+  try {
+    for (let i = 0; i < modes.length; i++) {
+      const r = await encodeGIFBlob(project, modes[i], imgCache, p => onProgress((i + p) / modes.length));
+      out.push({ mode: modes[i], blob: r.blob, size: r.blob.size, frameCount: r.frameCount });
+    }
+    return out;
+  } finally {
+    releaseImgCache(imgCache);
   }
-  return out;
+}
+
+// 视频板块的 GIF 导出走这里 (统一编码器 — 同 quality5/dither/超采样/白底, 且自带 releaseImgCache).
+// 视频 ProjectState 结构兼容 (clips + duration); 包成 normal 循环的 GifProject. 非 image/caption clip 被渲染器忽略。
+export async function encodeGIFBlobFromProject(
+  project: { clips: Clip[]; duration: number }, presetId: GifPresetId, onProgress: (p: number) => void,
+): Promise<{ blob: Blob; W: number; H: number; fps: number; frameCount: number; durationSec: number }> {
+  const gp: GifProject = {
+    kind: 'gif-project', version: 1, preset: presetId, duration: project.duration,
+    loop: { ...DEFAULT_LOOP_CONFIG }, lanes: { image: 1, caption: 1, fx: 1 }, clips: project.clips,
+  };
+  const imgCache = await preloadImgCache(gp);
+  try {
+    return await encodeGIFBlob(gp, 'normal', imgCache, onProgress);
+  } finally {
+    releaseImgCache(imgCache);
+  }
 }
