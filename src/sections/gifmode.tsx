@@ -23,7 +23,8 @@ import {
 import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown } from 'lucide-react';
+import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp } from 'lucide-react';
+import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
 import './gifmode.css';
 
 const GIF_PROJECT_IDB_KEY = 'xiongmaotou.gifmode-current.v1';
@@ -682,6 +683,124 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setSelectedId(prev => (prev === id ? null : prev));
   }, []);
 
+  // ============ 右键菜单 + 切分/反转 (做动作) ============
+  const ctxMenu = useContextMenu();
+  // 切分: [start,end] → [start,t] + [t,end] (B 复制 src/transform/gifEdit/loopMotion). 全走 setProject = 自动 history
+  const gifSplit = useCallback((id: string, t: number) => {
+    setProject(p => {
+      const c = p.clips.find(x => x.id === id); if (!c) return p;
+      if (t <= c.start + 0.1 || t >= c.end - 0.1) return p;
+      const base = { id: uid(c.trackId === 'image' ? 'img' : 'cap'), lane: c.lane, start: t, end: c.end };
+      const b: Clip = c.trackId === 'image'
+        ? ({ ...base, trackId: 'image', src: (c as ImageClip).src, label: (c as ImageClip).label, fx: (c as ImageClip).fx, kind: (c as ImageClip).kind,
+            transform: { ...((c as ImageClip).transform ?? DEFAULT_TRANSFORM) },
+            gifEdit: (c as ImageClip).gifEdit ? { ...(c as ImageClip).gifEdit! } : undefined,
+            loopMotion: (c as ImageClip).loopMotion ? { ...(c as ImageClip).loopMotion! } : undefined } as ImageClip)
+        : ({ ...base, trackId: 'caption', text: (c as CaptionClip).text, fontSize: (c as CaptionClip).fontSize,
+            color: (c as CaptionClip).color, style: (c as CaptionClip).style, transform: (c as CaptionClip).transform } as CaptionClip);
+      return { ...p, clips: [...p.clips.map(x => x.id === id ? ({ ...x, end: t } as Clip) : x), b] };
+    });
+    toast.success('已切分为两段');
+  }, []);
+  // 来回动作: GIF 切分→后半帧倒放 (前进→后退); 静态图→customMove 自带 A→B→A 往返
+  const loopBackAndForth = useCallback((id: string, t: number) => {
+    const c = projectRef.current.clips.find(x => x.id === id);
+    if (!c || c.trackId !== 'image') { toast('请先选画面图层'); return; }
+    const ic = c as ImageClip;
+    const gm = isGifSrc(ic.src) ? cacheRef.current.get(ic.src) : undefined;
+    if (gm && isGifFrames(gm)) {
+      const total = gm.frames.length;
+      setProject(p => {
+        const cc = p.clips.find(x => x.id === id) as ImageClip | undefined;
+        if (!cc || t <= cc.start + 0.1 || t >= cc.end - 0.1) return p;
+        const b: ImageClip = { id: uid('img'), trackId: 'image', lane: cc.lane, start: t, end: cc.end,
+          src: cc.src, label: cc.label, fx: cc.fx, kind: cc.kind,
+          transform: { ...(cc.transform ?? DEFAULT_TRANSFORM) },
+          gifEdit: normGifEdit(cc, total, { reverse: !(cc.gifEdit?.reverse ?? false) }),
+          loopMotion: cc.loopMotion ? { ...cc.loopMotion } : undefined };
+        return { ...p, clips: [...p.clips.map(x => x.id === id ? ({ ...x, end: t } as Clip) : x), b] };
+      });
+      toast.success('来回动作 ✓ — 后半段倒放');
+    } else {
+      const baseT = ic.transform ?? DEFAULT_TRANSFORM;
+      const to = ic.loopMotion?.to ?? { ...baseT, x: clampN(baseT.x + 24, -120, 120) };
+      patchClip(id, { loopMotion: { kind: 'customMove', amp: ic.loopMotion?.amp ?? 1, cycles: ic.loopMotion?.cycles ?? 1, to } });
+      setSelectedId(id); setCustomEdit(true);
+      toast.success('来回动作 ✓ — 自定义往返 (画板拖 A·B 点)');
+    }
+  }, [patchClip]);
+  const duplicateClipGif = useCallback((id: string) => {
+    setProject(p => {
+      const c = p.clips.find(x => x.id === id); if (!c) return p;
+      const dur = c.end - c.start;
+      const ns = Math.max(0, Math.min(p.duration - dur, c.end));
+      const base = { id: uid(c.trackId === 'image' ? 'img' : 'cap'), lane: c.lane, start: ns, end: ns + dur };
+      const dup: Clip = c.trackId === 'image'
+        ? ({ ...base, trackId: 'image', src: (c as ImageClip).src, label: (c as ImageClip).label, fx: (c as ImageClip).fx, kind: (c as ImageClip).kind,
+            transform: { ...((c as ImageClip).transform ?? DEFAULT_TRANSFORM) },
+            gifEdit: (c as ImageClip).gifEdit ? { ...(c as ImageClip).gifEdit! } : undefined,
+            loopMotion: (c as ImageClip).loopMotion ? { ...(c as ImageClip).loopMotion! } : undefined } as ImageClip)
+        : ({ ...base, trackId: 'caption', text: (c as CaptionClip).text, fontSize: (c as CaptionClip).fontSize,
+            color: (c as CaptionClip).color, style: (c as CaptionClip).style, transform: (c as CaptionClip).transform } as CaptionClip);
+      return { ...p, clips: [...p.clips, dup] };
+    });
+  }, []);
+  const moveLayer = useCallback((id: string, dir: -1 | 1) => {
+    setProject(p => {
+      const c = p.clips.find(x => x.id === id); if (!c) return p;
+      const group = p.clips.filter(x => x.trackId === c.trackId).slice().sort((a, b) => a.lane - b.lane);
+      const i = group.findIndex(x => x.id === id); const j = i + dir;
+      if (j < 0 || j >= group.length) return p;
+      const re = group.slice(); const [m] = re.splice(i, 1); re.splice(j, 0, m);
+      const laneById = new Map<string, number>(); re.forEach((x, k) => laneById.set(x.id, k));
+      return { ...p, clips: p.clips.map(x => laneById.has(x.id) ? ({ ...x, lane: laneById.get(x.id)! } as Clip) : x) };
+    });
+  }, []);
+  const buildGifClipMenu = useCallback((c: Clip): ContextMenuItem[] => {
+    const cutT = clampN(loopTimeMap(scrubT, D, project.loop.mode), 0, D);
+    const splitDisabled = cutT <= c.start + 0.1 || cutT >= c.end - 0.1;
+    const isImg = c.trackId === 'image';
+    const ic = isImg ? (c as ImageClip) : null;
+    const gm = ic && isGifSrc(ic.src) ? cacheRef.current.get(ic.src) : undefined;
+    const gifFrames = gm && isGifFrames(gm) ? gm : null;
+    const total = gifFrames ? gifFrames.frames.length : 0;
+    const lm = ic?.loopMotion;
+    const group = project.clips.filter(x => x.trackId === c.trackId).slice().sort((a, b) => a.lane - b.lane);
+    const idx = group.findIndex(x => x.id === c.id);
+    const items: ContextMenuItem[] = [
+      { id: 'split', label: '切分 (在游标处)', shortcut: 'S', icon: <Scissors size={12} />, disabled: splitDisabled, onClick: () => gifSplit(c.id, cutT) },
+    ];
+    if (isImg) items.push({ id: 'backforth', label: '来回动作 (切分 + 后半倒放)', icon: <ArrowLeftRight size={12} />, disabled: splitDisabled, onClick: () => loopBackAndForth(c.id, cutT) });
+    items.push({ id: 'dup', label: '复制图层', icon: <CopyIcon size={12} />, onClick: () => duplicateClipGif(c.id) });
+    items.push({ id: 'sep1', label: '', separator: true });
+    items.push({ id: 'up', label: '上移一层 (更前)', icon: <ChevronUp size={12} />, disabled: idx <= 0, onClick: () => moveLayer(c.id, -1) });
+    items.push({ id: 'down', label: '下移一层 (更后)', icon: <ChevronDown size={12} />, disabled: idx >= group.length - 1, onClick: () => moveLayer(c.id, 1) });
+    if (ic) {
+      items.push({ id: 'sep2', label: '', separator: true });
+      items.push({ id: 'flipx', label: ic.transform?.flipX ? '取消水平镜像' : '水平镜像翻转', icon: <FlipHorizontal size={12} />, onClick: () => patchTransform(c.id, { flipX: !ic.transform?.flipX }) });
+      if (gifFrames) {
+        items.push({ id: 'gif-rev', label: (ic.gifEdit?.reverse ? '✓ ' : '') + '帧倒放 (反转 GIF)', onClick: () => patchClip(c.id, { gifEdit: normGifEdit(ic, total, { reverse: !ic.gifEdit?.reverse }) }) });
+        items.push({ id: 'gif-boom', label: (ic.gifEdit?.perClipBoomerang ? '✓ ' : '') + '本帧乒乓 (来回播)', onClick: () => patchClip(c.id, { gifEdit: normGifEdit(ic, total, { perClipBoomerang: !ic.gifEdit?.perClipBoomerang }) }) });
+      }
+      items.push({ id: 'motion', label: '循环动作' + (lm && lm.kind !== 'none' ? ' · ' + motionMeta(lm.kind).label : ''), icon: <Sparkles size={12} />,
+        submenu: LOOP_MOTIONS.map(m => ({ id: 'm-' + m.kind, label: m.emoji + ' ' + m.label + (lm?.kind === m.kind ? '  ✓' : ''), onClick: () => setLayerMotion(c.id, m.kind) })) });
+    }
+    if (c.trackId === 'caption') {
+      items.push({ id: 'sep-cap', label: '', separator: true });
+      items.push({ id: 'cap-edit', label: '编辑文字', icon: <TypeIcon size={12} />, onClick: () => { setSelectedId(c.id); setEditingCaptionId(c.id); } });
+    }
+    items.push({ id: 'sep3', label: '', separator: true });
+    items.push({ id: 'copy-tc', label: '复制时间码', onClick: () => { const tc = `${c.start.toFixed(2)} → ${c.end.toFixed(2)}s (${(c.end - c.start).toFixed(2)}s)`; try { navigator.clipboard.writeText(tc); toast.success('已复制: ' + tc); } catch { toast.error('剪贴板不可用'); } } });
+    items.push({ id: 'info', label: `📋 ${isImg ? '画面' : '字幕'} · L${c.lane + 1} · ${(c.end - c.start).toFixed(1)}s`, disabled: true });
+    items.push({ id: 'sep4', label: '', separator: true });
+    items.push({ id: 'del', label: '删除图层', shortcut: 'Del', danger: true, icon: <Trash2 size={12} />, onClick: () => deleteClip(c.id) });
+    return items;
+  }, [scrubT, D, project.loop.mode, project.clips, gifSplit, loopBackAndForth, duplicateClipGif, moveLayer, patchClip, patchTransform, setLayerMotion, deleteClip]);
+  const onGifClipContextMenu = useCallback((e: React.MouseEvent, c: Clip) => {
+    setSelectedId(c.id);
+    ctxMenu.open(e, buildGifClipMenu(c));
+  }, [ctxMenu, buildGifClipMenu]);
+
   const setDuration = useCallback((d: number) => {
     const dd = Math.max(GIF_MIN_DURATION, Math.min(d, GIF_MAX_DURATION, preset.maxDuration));
     setProject(p => ({ ...p, duration: dd, clips: clampClipsToDuration(p.clips, p.duration, dd) }));
@@ -1262,7 +1381,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }}
                     className={'am-stage-img' + (c.id === selectedId ? ' is-selected' : '') + (isScene ? ' am-stage-scene' : '')}
                     style={{ left: (b.cx - b.iw / 2) * sx, top: (b.cy - b.ih / 2) * sy, width: b.iw * sx, height: b.ih * sy, cursor: c.id === selectedId ? 'move' : 'pointer', zIndex: 50 - c.lane }}
-                    onPointerDown={e => startStageDrag(e, c, 'move')} onDragStart={e => e.preventDefault()}>
+                    onPointerDown={e => startStageDrag(e, c, 'move')} onContextMenu={e => onGifClipContextMenu(e, c)} onDragStart={e => e.preventDefault()}>
                     {isGifSrc(c.src) ? (
                       <canvas ref={el => { if (el) gifCanvasRefs.current.set(c.id, el); else gifCanvasRefs.current.delete(c.id); }} width={mediaWH(media).w} height={mediaWH(media).h}
                         style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined }} />
@@ -1288,6 +1407,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }} className={`am-caption-stage am-caption-style-${st}` + (c.id === selectedId ? ' is-selected' : '') + (isEditing ? ' is-editing' : '')}
                     style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
                     onPointerDown={e => startCaptionDrag(e, c)}
+                    onContextMenu={e => { if (!isEditing) onGifClipContextMenu(e, c); }}
                     onDoubleClick={e => { e.stopPropagation(); setEditingCaptionId(c.id); setSelectedId(c.id); }}>
                     {isEditing ? (
                       <textarea autoFocus wrap="off" rows={1} className="am-caption-edit" value={c.text}
@@ -1333,6 +1453,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     <div key={c.id}
                       className={`am-layer-item am-layer-item-${type}${c.id === selectedId ? ' is-selected' : ''}${layerOverId === c.id ? ' is-drag-over' : ''}`}
                       onClick={() => setSelectedId(c.id)}
+                      onContextMenu={e => onGifClipContextMenu(e, c)}
                       draggable
                       onDragStart={e => { layerDragId.current = c.id; e.dataTransfer.effectAllowed = 'move'; }}
                       onDragOver={e => { const d = project.clips.find(x => x.id === layerDragId.current); if (!d || d.trackId !== c.trackId || layerDragId.current === c.id) return; e.preventDefault(); setLayerOverId(c.id); }}
@@ -1533,7 +1654,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               {tlClips.map(c => c.trackId === 'image' ? (
                 <Fragment key={c.id}>
                   <div className="am-tl-track" style={{ height: 40 }}>
-                    <div className={'am-tl-clip am-tl-clip-image' + (c.id === selectedId ? ' is-selected' : '')}
+                    <div onContextMenu={e => onGifClipContextMenu(e, c)} className={'am-tl-clip am-tl-clip-image' + (c.id === selectedId ? ' is-selected' : '')}
                       style={{ left: c.start * pxPerSec, width: Math.max(8, (c.end - c.start) * pxPerSec) }}
                       onPointerDown={e => tlMove(e, c)} title={`${c.start.toFixed(1)}–${c.end.toFixed(1)}s`}>
                       <div className="am-tl-handle am-tl-handle-l" onPointerDown={e => tlResize(e, c, 'l')} />
@@ -1557,7 +1678,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 </Fragment>
               ) : (
                 <div key={c.id} className="am-tl-track" style={{ height: 40 }}>
-                  <div className={'am-tl-clip am-tl-clip-caption' + (c.id === selectedId ? ' is-selected' : '')}
+                  <div onContextMenu={e => onGifClipContextMenu(e, c)} className={'am-tl-clip am-tl-clip-caption' + (c.id === selectedId ? ' is-selected' : '')}
                     style={{ left: c.start * pxPerSec, width: Math.max(8, (c.end - c.start) * pxPerSec) }}
                     onPointerDown={e => tlMove(e, c)} title={`${c.start.toFixed(1)}–${c.end.toFixed(1)}s`}>
                     <div className="am-tl-handle am-tl-handle-l" onPointerDown={e => tlResize(e, c, 'l')} />
@@ -1675,6 +1796,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           </div>
         </>
       )}
+      {ctxMenu.render()}
     </>
   );
 }
