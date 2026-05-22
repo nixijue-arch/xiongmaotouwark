@@ -1297,8 +1297,8 @@ async function exportVideo(
     try { imgCache.set(src, await loadMedia(src)); } catch {}
   }));
 
-  // 第 0 帧先画
-  renderExportFrame(ctx, 0, project, W, H, imgCache);
+  // 第 0 帧先画 — 白底 (#fff), 跟视频预览画板一致 (默认黑 → 画面背景丑/穿透)
+  renderExportFrame(ctx, 0, project, W, H, imgCache, undefined, '#ffffff');
 
   // Web Audio MediaStream — BGM + 用户录音 TTS 都路由进 audioStream
   // FIX MP4 配音越来越大: 导出前彻底销毁所有旧 TTS player + BGM
@@ -1309,11 +1309,8 @@ async function exportVideo(
   const audioStream = audioEngine.startExportCapture();
   const hasBGM = project.clips.some(c => c.trackId === 'bgm');
   const hasRecordedTTS = project.clips.some(c => c.trackId === 'tts' && !!(c as TTSClip).audioSrc);
-  // BGM 不录入 MP4 (产品决策). audio 流只跟 TTS 走
-  const hasAudio = !!audioStream && hasRecordedTTS;
-  if (hasBGM) {
-    toast(`提示: MP4 仅含 TTS 配音, BGM 不录入 (可第三方工具合并)`, { duration: 4000 });
-  }
+  // TTS + BGM 都录入 MP4 (两者 gain 都接 exportDest, 见 step())
+  const hasAudio = !!audioStream && (hasRecordedTTS || hasBGM);
   // eslint-disable-next-line no-console
   console.log('[export] audioStream:', !!audioStream, 'tracks:', audioStream?.getAudioTracks().length, 'hasBGM:', hasBGM, 'hasRecordedTTS:', hasRecordedTTS);
 
@@ -1351,7 +1348,12 @@ async function exportVideo(
     console.log('[export] preload', ttsClipsForPreload.length, 'TTS audios');
     await audioEngine.preloadTTSAudios(ttsClipsForPreload);
   }
-  // BGM 不录入 MP4 (产品决策, 见上 step()), 这里也不 preload
+  // BGM (file 类, 含内置"机构进场了") 也 preload — 跟 TTS 一样防前几帧静音
+  const bgmFilesForPreload = project.clips
+    .filter((c): c is BGMClip => c.trackId === 'bgm')
+    .map((c) => { const b = resolveBGM(c.bgmId, userBGMs); return (b?.kind === 'file' && b.src) ? { id: c.id, src: b.src } : null; })
+    .filter((x): x is { id: string; src: string } => !!x);
+  if (bgmFilesForPreload.length > 0) await audioEngine.preloadUserBGMs(bgmFilesForPreload);
 
   // 实时渲染 + BGM 真发声 (走 MediaStreamDestination 自动录到 MP4) — v23-k: 用参数 fps
   const frameMs = 1000 / fps;
@@ -1364,20 +1366,25 @@ async function exportVideo(
     function step() {
       const elapsed = performance.now() - startTime;
       const t = Math.min(project.duration, elapsed / 1000);
-      renderExportFrame(ctx, t, project, W, H, imgCache);
+      renderExportFrame(ctx, t, project, W, H, imgCache, undefined, '#ffffff');
       onProgress(Math.min(1, elapsed / totalMs));
 
-      // 仅 TTS 录入 MP4. BGM 故意不录 (产品决策: 用户要无 BGM 视频), 后续可第三方合并
+      // TTS + BGM 都录入 MP4 (gain 都接 exportDest). 走 sync 让 audio 跟 video 时钟严格对齐
       for (const c of project.clips) {
-        // BGM 不录 — 跳过 (export 静默, preview 仍可听)
-        if (c.trackId === 'bgm') continue;
-        // ★ 关键: TTS 走 sync (而非 trigger), audio.currentTime = t - clip.start
-        // 让 audio 跟 video 时钟严格对齐, export 录入 MP4 真音轨
         if (c.trackId === 'tts') {
           const ts = c as TTSClip;
           if (ts.audioSrc) {
             const rate = VOICE_BY_ID[resolveVoiceId(ts.voice)]?.playbackRate ?? 1.0;
             audioEngine.syncTTSPlayer(ts.id, ts.audioSrc, t, ts.start, true, 1.0, rate);
+          }
+        } else if (c.trackId === 'bgm') {
+          // file BGM (含内置"机构进场了") 走 sync 跟 video 时钟绑; 内置 synth BGM 走 trigger (osc 排队)
+          const b = resolveBGM((c as BGMClip).bgmId, userBGMs);
+          if (b?.kind === 'file' && b.src) {
+            audioEngine.syncUserBGMPlayer(c.id, b.src, t, c.start, true, (c as BGMClip).volume ?? 0.5);
+          } else if (b && t >= c.start && t < c.end && !bgmStarted.has(c.id)) {
+            bgmStarted.add(c.id);
+            playBGM(b, (c as BGMClip).volume ?? 0.5, c.end - t);
           }
         }
       }
@@ -1394,7 +1401,7 @@ async function exportVideo(
   });
 
   // 最后一帧 + 等 audio 收尾
-  renderExportFrame(ctx, project.duration, project, W, H, imgCache);
+  renderExportFrame(ctx, project.duration, project, W, H, imgCache, undefined, '#ffffff');
   await new Promise(r => setTimeout(r, hasAudio ? 400 : 100));
   recorder.stop();
   // FIX MP4 配音越来越大: 导出后 destroyAll (cancelAll + destroyAllTTSPlayers)
