@@ -4,6 +4,10 @@ import {
   renderExportFrame, loadMedia, clamp, resolveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM,
   type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform, type FaceLocal, type BoundFaceBox,
 } from '@/lib/animcore';
+// gif.js worker 源码内联 (?raw) → 运行时包成 Blob URL 当 workerScript.
+// 修生产/手机导出 GIF 失败 "'text/html' is not a valid JavaScript MIME type": 原用 ?url 资源 URL
+// 在部署后(Netlify SPA 回退)404→返回 index.html(text/html), worker 加载即崩. 内联 Blob 同源+正确 MIME, 永不 404.
+import gifWorkerRaw from 'gif.js/dist/gif.worker.js?raw';
 
 export type GifLoopMode = 'normal' | 'boomerang' | 'reverse' | 'rewind' | 'crossfade';
 export interface GifLoopConfig {
@@ -301,13 +305,11 @@ async function encodeGIFBlob(
     sctx = scratch.getContext('2d', { alpha: true }) ?? undefined;
   }
 
-  const [{ default: GIF }, workerUrlMod] = await Promise.all([
-    import('gif.js'),
-    import('gif.js/dist/gif.worker.js?url'),
-  ]);
+  const [{ default: GIF }] = await Promise.all([import('gif.js')]);
+  const workerScript = URL.createObjectURL(new Blob([gifWorkerRaw], { type: 'application/javascript' }));   // 内联 worker, 免 404/MIME 问题
   // 画质优化: quality 10→5 (NeuQuant 调色板更准) + FloydSteinberg 抖动 (人脸照片渐变更顺) + 白底 (跟画板一致) + 4 workers 抵消 quality 开销
   // 体积敏感预设(微信/朋友圈)用全局调色板 → 更小 + 消除帧间调色板闪烁(纯色背景 shimmer); 大预设(X 480²)保留每帧调色板求极致画质
-  const gifOpts = { workers: _lite ? 2 : 4, quality: _lite ? 8 : 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.width <= 320 };   // 手机少 worker + 略降质换速度; 小尺寸全局调色板 (更小/消闪) 大尺寸每帧调色板求画质
+  const gifOpts = { workers: _lite ? 2 : 4, quality: _lite ? 8 : 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript, background: '#ffffff', repeat: 0, globalPalette: preset.width <= 320 };   // 手机少 worker + 略降质换速度; 小尺寸全局调色板 (更小/消闪) 大尺寸每帧调色板求画质
   const gif = new GIF(gifOpts as ConstructorParameters<typeof GIF>[0]);
 
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
@@ -336,6 +338,7 @@ async function encodeGIFBlob(
     main.width = main.height = 0;
     if (render !== main) { render.width = render.height = 0; }
     if (sctx) { sctx.canvas.width = sctx.canvas.height = 0; }
+    setTimeout(() => URL.revokeObjectURL(workerScript), 2000);   // 延迟撤销 worker blob (gif.js worker 已起)
   }
 }
 
