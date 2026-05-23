@@ -190,26 +190,23 @@ async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dat
   const preferred: 'youdao' | 'baidu' = voice.preferredEngine || 'youdao';
   const fallback: 'youdao' | 'baidu' = preferred === 'youdao' ? 'baidu' : 'youdao';
   const perOpts = preferred === 'baidu' && voice.baiduPer !== undefined ? { per: voice.baiduPer } : {};
-  try {
-    const dataUrl = await fetchTTSBlob(text, preferred, lang, perOpts);
-    return { dataUrl, engine: preferred };
-  } catch (preferredErr) {
-    // youdao 免费端点对突发/连续请求限流 (随机一次出 4 段 → 第一段成、后几段被挡 → 之前直接降级 baidu, 音色就变了).
-    // 退避后重试同一 (preferred) engine 一次 → 多数能成, 保住统一好音色 (晓晓), 再不行才降级.
+  // youdao 免费端点对突发/连续请求限流 (随机一次出多段 → 第一段成、后几段被挡 → 降级 baidu, 音色就变了 = "两种声音").
+  // 先把 preferred(youdao) 退避重试 3 次 (0/500/1000ms) → 绝大多数能成, 保住统一好音色 (晓晓); 都不行才降级.
+  const backoffs = [0, 500, 1000];
+  let lastErr: unknown;
+  for (const wait of backoffs) {
+    if (wait) await new Promise(r => setTimeout(r, wait));
     try {
-      await new Promise(r => setTimeout(r, 450));
       const dataUrl = await fetchTTSBlob(text, preferred, lang, perOpts);
       return { dataUrl, engine: preferred };
-    } catch (retryErr) {
-      // eslint-disable-next-line no-console
-      console.warn(`[TTS] ${voice.id} ${preferred} 两次失败:`, (retryErr as Error).message);
-      // 严格模式: noFallback=true 时不降级到另一 engine (保证音色一致)
-      if (voice.noFallback) throw retryErr;
-      const fbPerOpts = fallback === 'baidu' && voice.baiduPer !== undefined ? { per: voice.baiduPer } : {};
-      const dataUrl = await fetchTTSBlob(text, fallback, lang, fbPerOpts);
-      return { dataUrl, engine: fallback };
-    }
+    } catch (e) { lastErr = e; }
   }
+  // eslint-disable-next-line no-console
+  console.warn(`[TTS] ${voice.id} ${preferred} 重试 ${backoffs.length} 次失败:`, (lastErr as Error)?.message);
+  if (voice.noFallback) throw lastErr;   // 严格模式: 不降级 (保证音色一致, 失败 inspector 显 ❌)
+  const fbPerOpts = fallback === 'baidu' && voice.baiduPer !== undefined ? { per: voice.baiduPer } : {};
+  const dataUrl = await fetchTTSBlob(text, fallback, lang, fbPerOpts);
+  return { dataUrl, engine: fallback };
 }
 
 // ============================================================
@@ -1751,6 +1748,7 @@ export function AnimateMode() {
           }));
           // eslint-disable-next-line no-console
           console.log(`[auto-gen TTS cache] ${ts.id} "${text.slice(0, 20)}" → ${wallDuration.toFixed(1)}s (rate ${rate.toFixed(2)})`);
+          void audioEngine.preloadTTSAudios([{ id: ts.id, audioSrc: cached.audioSrc }]);   // 预热预览播放器 → 首次播放不静音
           continue;
         }
         ttsGenSigRef.current.set(ts.id, `pending:${sig}`);
@@ -1775,6 +1773,7 @@ export function AnimateMode() {
           }));
           // eslint-disable-next-line no-console
           console.log(`[auto-gen TTS ${usedEngine}] ${ts.id} "${text.slice(0, 20)}" → ${wallDuration.toFixed(1)}s (rate ${rate.toFixed(2)})`);
+          void audioEngine.preloadTTSAudios([{ id: ts.id, audioSrc: dataUrl }]);   // 预热预览播放器 → 首次播放不静音 (修"首播卡没声")
         } catch (e) {
           if (ttsGenSigRef.current.get(ts.id) === `pending:${sig}`) {
             ttsGenSigRef.current.set(ts.id, `fail:${sig}`);
@@ -1790,8 +1789,8 @@ export function AnimateMode() {
           // eslint-disable-next-line no-console
           console.warn(`[auto-gen TTS] ${ts.id} 两个 engine 都失败:`, (e as Error).message);
         }
-        // 限流退避: 每条网络抓取后稍隔一下再抓下一条 → 减少 youdao 突发限流, 多段都能拿到统一好音色 (减少 baidu fallback)
-        await new Promise(r => setTimeout(r, 250));
+        // 限流退避: 每条网络抓取后隔一下再抓下一条 → 减少 youdao 突发限流, 多段都拿到统一好音色 (减少 baidu fallback)
+        await new Promise(r => setTimeout(r, 400));
       }
     }, 800);
     return () => clearTimeout(timer);

@@ -1196,10 +1196,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const rRange = (a: number, b: number) => Number((a + Math.random() * (b - a)).toFixed(2));
     const faceMotion = rPick(faceMotions);
     const bodyMotion = rPick(bodyMotions);
-    const faceAmp = rRange(0.8, 1.6);            // 真随机幅度 (非默认)
-    const faceCycles = rPick([1, 1, 2, 2, 3]);   // 真随机速度
-    const bodyAmp = rRange(0.5, 1.2);
-    const bodyCycles = rPick([1, 1, 2, 2, 3]);
+    const faceAmp = rRange(0.7, 2.0);            // 真随机幅度 (拉宽范围 → 每次明显不同: 0.7 轻微 ~ 2.0 夸张)
+    const faceCycles = rPick([1, 2, 2, 3, 4]);   // 真随机速度 (1 慢 ~ 4 快)
+    const bodyAmp = rRange(0.5, 1.5);
+    const bodyCycles = rPick([1, 1, 2, 3]);
     const loopMode: GifLoopMode = (() => { const r = Math.random(); return r < 0.5 ? 'normal' : r < 0.82 ? 'boomerang' : 'crossfade'; })();   // 精简后只随机 3 种
     try {
       const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });

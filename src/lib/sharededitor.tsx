@@ -507,6 +507,7 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
   const [text, setText] = useState(() => pickRandomText('zh', 'all') || '点击编辑字幕');
   const [style, setStyle] = useState<CaptionStyle>('meme');
   const [fontSize, setFontSize] = useState(56);
+  const [autoSize, setAutoSize] = useState(true);   // 默认自适应字号 (全站统一); 动滑块才转固定
   const [color, setColor] = useState('#ffffff');
   const reroll = useCallback(() => {
     const t = pickRandomText('zh', mode, text);
@@ -516,10 +517,10 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
     type: 'caption',
     text,
     captionStyle: style,
-    captionFontSize: fontSize,
+    captionFontSize: autoSize ? undefined : fontSize,   // 自动 = 不写 → 自适应字号
     captionColor: color,
     defaultDuration: 2.5,
-  }), [text, style, fontSize, color]);
+  }), [text, style, fontSize, color, autoSize]);
   const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     e.dataTransfer.setData('application/x-meme', JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'copy';
@@ -591,13 +592,17 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
       </div>
       <div className="am-cap-quick-row">
         <span className="am-cap-quick-label">字号</span>
+        <button type="button" onClick={() => setAutoSize(a => !a)} title="自适应: 短文案撑大 / 长文案缩小分行 (推荐, 跟随机生成一致)"
+          style={{ padding: '2px 8px', borderRadius: 5, border: '1px solid', borderColor: autoSize ? '#FF5E00' : '#cbd5e1', background: autoSize ? '#fff4ec' : '#fff', color: autoSize ? '#c84a00' : '#64748b', fontSize: 11, fontWeight: 700, cursor: 'pointer', flex: 'none' }}>自动</button>
         <input
           type="range" min="20" max="100" step="2"
           value={fontSize}
-          onChange={(e) => setFontSize(parseInt(e.target.value))}
+          disabled={autoSize}
+          onChange={(e) => { setAutoSize(false); setFontSize(parseInt(e.target.value)); }}
           className="am-range am-cap-quick-range"
+          style={{ opacity: autoSize ? 0.4 : 1 }}
         />
-        <span className="am-cap-quick-val">{fontSize}</span>
+        <span className="am-cap-quick-val">{autoSize ? '自适应' : fontSize}</span>
       </div>
       <div className="am-cap-quick-row">
         <span className="am-cap-quick-label">颜色</span>
@@ -636,7 +641,7 @@ export function CaptionPositionPresets({ onQuickAdd }: { onQuickAdd: (p: DragPay
   ];
   const addAt = (p: typeof presets[number]) => {
     onQuickAdd({
-      type: 'caption', text: '位置示例', captionStyle: 'meme', captionFontSize: 48,
+      type: 'caption', text: '位置示例', captionStyle: 'meme',   // 不写 captionFontSize → 自适应字号 (短超大/长缩字, 跟随机生成一致)
       defaultDuration: 2.5, captionTransform: { x: p.x, y: p.y },
     });
     toast(`已加字幕 · ${p.label}`, { duration: 2000 });
@@ -670,8 +675,8 @@ export function CaptionEmojiPicker({ onQuickAdd }: { onQuickAdd: (p: DragPayload
             key={e}
             type="button"
             className="am-cap-emoji-btn"
-            onClick={() => onQuickAdd({ type: 'caption', text: e, captionStyle: 'meme', captionFontSize: 80, defaultDuration: 1.2 })}
-            title={`加 ${e} 字幕 (大字号 1.2s)`}
+            onClick={() => onQuickAdd({ type: 'caption', text: e, captionStyle: 'meme', defaultDuration: 1.2 })}
+            title={`加 ${e} 表情 (自适应字号 · 1.2s · 可拖角缩放)`}
           >
             {e}
           </button>
@@ -709,7 +714,7 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
         const ttsId = uid('t');
         clips.push({
           id: capId, trackId: 'caption', lane: 0, start: cursor, end: segEnd,
-          text: line, style: 'meme', fontSize: 48, linkedTTSId: ttsId,
+          text: line, style: 'meme', linkedTTSId: ttsId,   // 不写 fontSize → 自适应字号
         } as Clip);
         clips.push({
           id: ttsId, trackId: 'tts', lane: 0, start: cursor, end: segEnd,
@@ -721,7 +726,7 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
       toast.success(`✓ ${lines.length} 段台词 → 字幕 + 配音 配套生成, 已双向链接`);
     } else {
       lines.forEach(line => {
-        onQuickAdd({ type: 'caption', text: line, captionStyle: 'meme', captionFontSize: 48, defaultDuration: 2.5 });
+        onQuickAdd({ type: 'caption', text: line, captionStyle: 'meme', defaultDuration: 2.5 });   // 自适应字号
       });
       toast.success(`已加 ${lines.length} 条字幕`);
     }
