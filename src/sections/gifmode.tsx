@@ -221,7 +221,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [seam, setSeam] = useState<number | null>(null);
   const [seg, setSeg] = useState<'asset' | 'caption' | 'fx'>('asset');
   const [gmSheet, setGmSheet] = useState<'left' | 'right' | null>(null);  // 移动端: 左/右栏变底部 sheet (CSS 重定位, 不搬 DOM)
-  const [assetSub, setAssetSub] = useState<'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload'>('combo');
+  const [assetSub, setAssetSub] = useState<'combo' | 'panda' | 'face' | 'netsearch' | 'scene' | 'draft' | 'upload'>('combo');
   const [q, setQ] = useState('');
   const [scrubT, setScrubT] = useState(0);
   const [variantOpen, setVariantOpen] = useState(false);
@@ -1657,9 +1657,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           {seg === 'asset' && (
             <>
               <div className="am-subtabs">
-                {(['combo', 'panda', 'face', 'scene', 'draft', 'upload'] as const).map(k => (
+                {(['combo', 'panda', 'face', 'netsearch', 'scene', 'draft', 'upload'] as const).map(k => (
                   <button key={k} className={'am-subtab' + (assetSub === k ? ' is-active' : '')} onClick={() => setAssetSub(k)}>
-                    {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ' ' + draftSlots.length : ''}` : '上传'}
+                    {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'netsearch' ? '联网搜' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ' ' + draftSlots.length : ''}` : '上传'}
                   </button>
                 ))}
               </div>
@@ -1689,6 +1689,15 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                       {ALL_FACES.filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={addFromPayload} />)}
                     </div>
                   </>
+                )}
+                {assetSub === 'netsearch' && (
+                  <div className="gm-netsearch-tab">
+                    <MaterialSourceButtons kind="panda" onAdd={(m) => setGifUploads(prev => [{ ...m, kind: 'panda' }, ...prev].slice(0, GIF_UPLOAD_MAX))} />
+                    <div className="gm-hint" style={{ marginTop: 10, lineHeight: 1.7 }}>
+                      🌐 点上面「联网搜图」搜全网熊猫头梗图 → 点选即存进素材池 (到「熊猫」分页用)。<br />
+                      弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+                    </div>
+                  </div>
                 )}
                 {assetSub === 'scene' && (() => {
                   const scenes = gifUploads.filter(u => u.kind === 'scene');

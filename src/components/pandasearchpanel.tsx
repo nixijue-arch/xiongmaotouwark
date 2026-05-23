@@ -19,6 +19,9 @@ import {
   fetchAsDataUrl,
   detectColorfulness,
   detectAIPanda,
+  addRecentNetwork,
+  getRecentNetwork,
+  isGifResult,
   type NetworkResult,
   type SearchResponse,
 } from '@/lib/networkImage';
@@ -48,6 +51,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [resHint, setResHint] = useState<SearchResponse['hint']>(undefined);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [recent, setRecent] = useState<NetworkResult[]>([]);   // 全局「最近搜索」(用过的联网素材, 跨板块通用)
+  useEffect(() => { void getRecentNetwork().then(r => setRecent(r)); }, []);
   // 视觉过滤 (后台 lazy 检测, 默认开启):
   //   - colorfulDetection: 极端彩色 (colorfulRatio > 0.18) — 真彩照片 / 商用素材
   //   - aiPandaDetection: 高饱和 + 无白底 (avgSat > 28 && whiteBg < 10%) — AI 生成 "真实风格熊猫"
@@ -267,6 +272,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
 
       try {
         await onSelect(mat, result);
+        void addRecentNetwork(result);   // 记入全局「最近搜索」(跨快速/编辑器/沙雕动画)
+        setRecent(prev => [result, ...prev.filter(x => x.id !== result.id)].slice(0, 20));
         toast.success(
           props.lang === 'zh' ? '已应用' : 'Applied',
           { id: toastId, duration: 2000 },
@@ -418,6 +425,21 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
       {!hasMore && results.length > 0 && !loading && (
         <div className="psp-end">— {t('networkSearchAllLoaded')} —</div>
       )}
+
+      {/* 最近搜索: 用过的联网素材 (全局 ≤20), 常驻底部, 点直接复用 */}
+      {recent.length > 0 && (
+        <div className="psp-recent">
+          <div className="psp-recent-head">🕘 {props.lang === 'zh' ? '最近用过' : 'Recent'}</div>
+          <div className="psp-recent-row">
+            {recent.map(r => (
+              <button key={r.id} type="button" className="psp-recent-card" disabled={!!busyId} onClick={() => handleSelect(r)} title={r.hint || ''}>
+                <img src={proxyImageUrl(r.thumb || r.src)} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0.25'; }} />
+                {isGifResult(r) && <span className="psp-gif-pill">GIF</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -502,6 +524,8 @@ function ResultCard({
         }}
         draggable={false}
       />
+      {/* GIF 动图标记 (URL 嗅探) */}
+      {isGifResult(item) && <span className="psp-gif-pill psp-gif-pill-card">GIF</span>}
       {/* source badge 仅 DEV 显示 — 生产端用户不需知道图源 */}
       {import.meta.env.DEV && (
         <span className="psp-source-badge" aria-hidden="true" title={`${tFrom} ${item.source}`}>

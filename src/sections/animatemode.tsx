@@ -3747,7 +3747,7 @@ interface CaptionTemplate { id: string; text: string; emoji: string; style: Capt
 // CAPTION_SAMPLE_TEXT → '@/lib/sharededitor' (E2 抽出, 随 CaptionQuickGen)
 // v23-c revert: 不再放一堆 preset row, 让 QuickGen 区域负责样式调试. LeftPane caption subtab 只显 QuickGen
 const CAPTION_LIB: CaptionTemplate[] = [];
-type LibSub = 'combo' | 'panda' | 'face' | 'scene' | 'draft' | 'upload';
+type LibSub = 'combo' | 'panda' | 'face' | 'netsearch' | 'scene' | 'draft' | 'upload';
 
 function LeftPane({
   mode = 'video',
@@ -3975,13 +3975,13 @@ function LeftPane({
         {seg === 'asset' && (
           <div className="am-subtabs">
             {/* panda/face 单独拖也开放 — 通过 flattenAlphaShell 自动填白内部 (跟 combo 同效果) */}
-            {(['combo', 'panda', 'face', 'scene', 'draft', 'upload'] as LibSub[]).map(k => (
+            {(['combo', 'panda', 'face', 'netsearch', 'scene', 'draft', 'upload'] as LibSub[]).map(k => (
               <button
                 key={k}
                 className={'am-subtab' + (sub === k ? ' is-active' : '')}
                 onClick={() => setSub(k)}
               >
-                {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ` ${draftSlots.length}` : ''}` : '上传'}
+                {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'netsearch' ? '联网搜' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ` ${draftSlots.length}` : ''}` : '上传'}
               </button>
             ))}
           </div>
@@ -4016,6 +4016,14 @@ function LeftPane({
                 {filter(ALL_FACES).length === 0 && <p className="am-empty-line">无匹配素材</p>}
               </div>
             </>
+          )}
+          {seg === 'asset' && sub === 'netsearch' && (
+            <div className="am-netsearch-tab">
+              <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [{ ...m, kind: 'panda' }, ...prev].slice(0, AM_UPLOAD_MAX_COUNT))} />
+              <div className="am-scene-hint" style={{ marginTop: 10, lineHeight: 1.7 }}>
+                🌐 点上面「联网搜图」搜全网熊猫头梗图 → 点选即存进素材池 (到「熊猫」分页用)。弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+              </div>
+            </div>
           )}
           {seg === 'asset' && sub === 'scene' && (
             <>
