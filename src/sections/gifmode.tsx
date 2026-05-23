@@ -12,6 +12,7 @@ import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { pickRandomText } from '@/data/quickModeTexts';
 import {
   loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, GIF_MAX_DURATION, GIF_MIN_DURATION,
+  fitCaptionFontPx, contentBboxFrac,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
   type GifPresetId, type LoopMotionKind, type ProjectMode, type GifFrameEdit,
@@ -32,8 +33,7 @@ const GIF_DRAFTS_IDB_KEY = 'xiongmaotou.gifmode-drafts.v1';
 const GIF_DRAFT_MAX = 10;
 const GIF_UPLOADS_IDB_KEY = 'xiongmaotou.gifmode-userpool.v1'; // GIF 自己的素材池 (联网搜图/抠脸沉淀, 跟 video 数据隔离)
 const GIF_UPLOAD_MAX = 60;
-// 字幕默认字号 (1280-conv: drawCaption 按 capFontSize*W/1280 渲) — 56 跟视频默认一致 (原 180 过大 ~3.3x, 一加就盖满画面)
-const GIF_CAP_FONT = 56;
+// 字幕默认走自适应字号 (fitCaptionFontPx — 短文案超大撑边 / 长文案缩字分行); 用户拖滑块才转手动
 const GIF_CAP_MAXCHARS = 14; // 随机字幕字数上限 (跟快速/编辑器同文案池 pickRandomText, 截到能一行装下)
 const GIF_HISTORY_MAX = 50;  // 撤回栈深度 (跟视频 HISTORY_MAX 一致)
 // 历史入栈 (模块级, 避开 useCallback 依赖搅动)
@@ -514,7 +514,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           clips: [...p.clips, {
             id, trackId: 'caption', lane: 0, start: startAt, end: p.duration,
             text: payload.text || '双击编辑文字', style: payload.captionStyle || 'meme',
-            fontSize: payload.captionFontSize ?? GIF_CAP_FONT, color: payload.captionColor,
+            fontSize: payload.captionFontSize, color: payload.captionColor,   // 没给 = 自适应字号
             transform: { x: tx, y: ty },
           } as CaptionClip],
         };
@@ -601,7 +601,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         } as ImageClip];
         if (text) newClips.push({
           id: uid('dc'), trackId: 'caption', lane: 0, start: 0, end: p.duration,
-          text, style: 'meme', fontSize: GIF_CAP_FONT, transform: { ...DEFAULT_CAPTION_TRANSFORM },
+          text, style: 'meme', transform: { ...DEFAULT_CAPTION_TRANSFORM },   // 自适应字号 (不写 fontSize)
         } as CaptionClip);
         return { ...p, clips: [...bumped, ...newClips] };
       });
@@ -623,7 +623,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setProject(p => {
       const clip: CaptionClip = {
         id, trackId: 'caption', lane: 0, start: 0, end: p.duration,
-        text: '双击编辑文字', style: 'meme', fontSize: GIF_CAP_FONT, transform: { ...DEFAULT_CAPTION_TRANSFORM },
+        text: '双击编辑文字', style: 'meme', transform: { ...DEFAULT_CAPTION_TRANSFORM },   // 自适应字号
       };
       return { ...p, clips: [...p.clips, clip] };
     });
@@ -1142,7 +1142,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           { id: pid, trackId: 'image', lane: pandaOnTopR ? 0 : 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: layR.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id, transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
           { id: fid, trackId: 'image', lane: pandaOnTopR ? 1 : 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', blend: layR.faceBlend === 'multiply' ? 'multiply' : undefined, transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR, role: 'face' } as ImageClip,
         ];
-        if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
+        if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', transform: { x: 0, y: 34 } } as CaptionClip);   // 自适应字号
         return { ...p, clips, loop: { ...p.loop, mode: loopMode } };
       });
       setSelectedId(fid);
@@ -1582,6 +1582,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 }
                 const sx = (fit.w || preset.width) / preset.width, sy = (fit.h || preset.height) / preset.height;
                 const isScene = c.kind === 'scene';
+                // 绑定脸: 按内容 bbox 内切椭圆裁切 (跟编辑器/导出一致), 防脸矩形角/白边盖到壳透明区
+                const faceClip = c.boundTo ? (() => { const fb = contentBboxFrac(media); return `ellipse(${(fb.w * 52).toFixed(1)}% ${(fb.h * 52).toFixed(1)}% at ${((fb.x + fb.w / 2) * 100).toFixed(1)}% ${((fb.y + fb.h / 2) * 100).toFixed(1)}%)`; })() : undefined;
                 return (
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }}
                     className={'am-stage-img' + (c.id === selectedId ? ' is-selected' : '') + (isScene ? ' am-stage-scene' : '')}
@@ -1589,10 +1591,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     onPointerDown={e => startStageDrag(e, c, 'move')} onContextMenu={e => onGifClipContextMenu(e, c)} onDragStart={e => e.preventDefault()}>
                     {isGifSrc(c.src) ? (
                       <canvas ref={el => { if (el) gifCanvasRefs.current.set(c.id, el); else gifCanvasRefs.current.delete(c.id); }} width={mediaWH(media).w} height={mediaWH(media).h}
-                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined }} />
+                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined, clipPath: faceClip }} />
                     ) : (
                       <img src={c.src} alt={c.label} draggable={false}
-                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined }} />
+                        style={{ width: '100%', height: '100%', objectFit: isScene ? 'cover' : 'contain', display: 'block', transform: c.transform?.flipX ? 'scaleX(-1)' : undefined, mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined, clipPath: faceClip }} />
                     )}
                     {c.id === selectedId && <>
                       <div className="am-stage-frame" />
@@ -1607,12 +1609,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 const tr = c.transform ?? { x: 0, y: 35 };
                 const st = c.style ?? 'meme';
                 const isEditing = c.id === editingCaptionId;
-                // 跟导出 drawCaption 同 1280-conv (capFontSize*W/1280) → 预览所见即导出所得 (修"预览大/导出小"错位)
-                const fontPx = (c.fontSize ?? GIF_CAP_FONT) * (fit.w || preset.width) / 1280;
+                // 有 fontSize = 手动 (1280-conv); 没有 = 自适应 (短超大/长缩字, 跟导出 drawCaption 同算法 → 所见即所得)
+                const fontPx = c.fontSize != null
+                  ? c.fontSize * (fit.w || preset.width) / 1280
+                  : fitCaptionFontPx(c.text, fit.w || preset.width, fit.h || preset.height, st);
                 const col = c.color ?? (st === 'panel' ? '#000' : '#fff');
                 return (
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }} className={`am-caption-stage am-caption-style-${st}` + (c.id === selectedId ? ' is-selected' : '') + (isEditing ? ' is-editing' : '')}
-                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
+                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, width: c.fontSize == null ? (fit.w || preset.width) * 0.92 : undefined, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
                     onPointerDown={e => startCaptionDrag(e, c)}
                     onContextMenu={e => { if (!isEditing) onGifClipContextMenu(e, c); }}
                     onDoubleClick={e => { e.stopPropagation(); setEditingCaptionId(c.id); setSelectedId(c.id); }}>
@@ -1803,10 +1807,16 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   <NumberInput label="Y%" value={selCap.transform?.y ?? 35} step={1} min={-50} max={50} onChange={v => patchClip(selCap.id, { transform: { x: selCap.transform?.x ?? 0, y: Math.max(-50, Math.min(50, v)) } })} />
                 </div>
               </Field>
-              <Field label={`字号 · ${Math.round((selCap.fontSize ?? GIF_CAP_FONT) * preset.width / 1280)}px`}>
-                <input type="range" min={12} max={Math.round(preset.width * 0.4)} step={1}
-                  value={Math.round((selCap.fontSize ?? GIF_CAP_FONT) * preset.width / 1280)} className="am-range"
-                  onChange={e => patchClip(selCap.id, { fontSize: Math.round(parseInt(e.target.value) * 1280 / preset.width) })} />
+              <Field label={selCap.fontSize != null
+                ? `字号 · ${Math.round(selCap.fontSize * preset.width / 1280)}px`
+                : `字号 · 自动 (${fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme')}px)`}>
+                <div className="am-row" style={{ gap: 6, alignItems: 'center' }}>
+                  <button type="button" className={'am-chip' + (selCap.fontSize == null ? ' is-active' : '')}
+                    onClick={() => patchClip(selCap.id, { fontSize: undefined })} title="自适应字号 — 短文案超大撑边, 长文案缩字分行 (免手动调)">自动</button>
+                  <input type="range" min={12} max={Math.round(preset.width * 0.4)} step={1}
+                    value={selCap.fontSize != null ? Math.round(selCap.fontSize * preset.width / 1280) : fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme')} className="am-range"
+                    onChange={e => patchClip(selCap.id, { fontSize: Math.round(parseInt(e.target.value) * 1280 / preset.width) })} />
+                </div>
               </Field>
               <Field label="颜色">
                 <div className="am-chips">

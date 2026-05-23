@@ -42,7 +42,7 @@ import './animatemode.css';
 import {
   clamp, loadMedia,
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
-  computeCaptionEntrance, renderExportFrame,
+  computeCaptionEntrance, renderExportFrame, fitCaptionFontPx,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
@@ -3401,7 +3401,6 @@ export function AnimateMode() {
                 end: start + dur,
                 text: texts[i % texts.length],
                 style,
-                fontSize: 56,
                 color: style === 'panel' ? '#222' : '#fff',
               });
             }
@@ -4220,7 +4219,7 @@ function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {
       if (capId) {
         clips.push({
           id: capId, trackId: 'caption', lane: 0, start: cursor, end: segEnd,
-          text: line, style: 'meme', fontSize: 48, linkedTTSId: ttsId,
+          text: line, style: 'meme', linkedTTSId: ttsId,   // 自适应字号 (不写 fontSize)
         } as Clip);
       }
       cursor = segEnd + gap;
@@ -5083,7 +5082,7 @@ function PreviewPane({
             const isSel = c.id === selectedId;
             const isEditing = c.id === editingCaptionId;
             const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-            const cFontSize = c.fontSize ?? captionSize;
+            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style);
             // meme/bar 默认白字, panel 默认黑字 (跟样式背景反色)
             const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
             // v23-k: 字幕入场动效 — 实时计算 (编辑时禁用动效, 不打扰)
@@ -5099,6 +5098,7 @@ function PreviewPane({
                   left: `${50 + tr.x}%`,
                   top: `${50 + tr.y}%`,
                   fontSize: cFontSize,
+                  width: c.fontSize == null ? canvasSize.w * 0.92 : undefined,
                   color: cColor,
                   cursor: isEditing ? 'text' : (isSel ? 'move' : 'pointer'),
                   ...xformStyle,
@@ -5466,6 +5466,7 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
   const t = clip.transform ?? DEFAULT_CAPTION_TRANSFORM;
   const curStyle: CaptionStyle = clip.style ?? DEFAULT_CAPTION_STYLE;
   const curSize = clip.fontSize ?? 32;
+  const isAutoSize = clip.fontSize == null;   // 自适应字号 (短超大撑边 / 长缩字分行, 免手动调)
   // meme/bar 默认色不一样, 让 active swatch 跟样式联动
   const defaultColor = curStyle === 'panel' ? '#000000' : '#ffffff';
   const curColor = clip.color ?? defaultColor;
@@ -5565,13 +5566,22 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
         </div>
       </Field>
 
-      <Field label={`字号 · ${curSize}px`}>
+      <Field label={`字号 · ${isAutoSize ? '自动 (随文字)' : curSize + 'px'}`}>
         <div className="am-size-preset-row">
+          <button
+            type="button"
+            className={`am-size-preset${isAutoSize ? ' is-active' : ''}`}
+            onClick={() => onUpdate({ fontSize: undefined })}
+            title="自适应字号 — 短文案超大撑边, 长文案缩字分行 (免手动调)"
+          >
+            <span className="am-size-preset-num" style={{ fontSize: 12 }}>自</span>
+            <span className="am-size-preset-lbl">自动</span>
+          </button>
           {SIZE_PRESETS.map(p => (
             <button
               key={p.v}
               type="button"
-              className={`am-size-preset${curSize === p.v ? ' is-active' : ''}`}
+              className={`am-size-preset${!isAutoSize && curSize === p.v ? ' is-active' : ''}`}
               onClick={() => onUpdate({ fontSize: p.v })}
               title={`${p.v}px`}
             >
@@ -6772,7 +6782,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
             {activeCaptionClips.map(c => {
               const tr = c.transform ?? DEFAULT_CAPTION_TRANSFORM;
               const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-              const cFontSize = c.fontSize ?? captionSize;
+              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style);
               const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
               const ent = computeCaptionEntrance(c, playhead);
               const xformStyle = (ent.opacity < 1 || Math.abs(ent.scale - 1) > 0.01)
@@ -6786,6 +6796,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
                     left: `${50 + tr.x}%`,
                     top: `${50 + tr.y}%`,
                     fontSize: cFontSize,
+                    width: c.fontSize == null ? canvasSize.w * 0.92 : undefined,
                     color: cColor,
                     ...xformStyle,
                   }}

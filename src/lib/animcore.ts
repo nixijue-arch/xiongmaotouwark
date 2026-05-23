@@ -308,6 +308,42 @@ export function drawableAt(m: MediaAsset, t: number, clipStart: number, edit?: G
   return m;
 }
 
+// 内容 bbox (alpha>阈值 的边界) 占整图的比例 {x,y,w,h} (0~1). 用于"绑定脸"椭圆裁切 — 透明化脸返回五官实际区域,
+// 白底矩形脸/跨域脸返回整框 (内切椭圆仍裁掉矩形角). 缩到 128px 扫描 + WeakMap 缓存 (每脸一次).
+const _bboxFracCache = new WeakMap<CanvasImageSource, { x: number; y: number; w: number; h: number }>();
+const FULL_BBOX_FRAC = { x: 0, y: 0, w: 1, h: 1 };
+export function contentBboxFrac(media: MediaAsset): { x: number; y: number; w: number; h: number } {
+  const d = drawableAt(media, 0, 0);
+  const cached = _bboxFracCache.get(d);
+  if (cached) return cached;
+  const { w: NW, h: NH } = mediaWH(media);
+  let res = FULL_BBOX_FRAC;
+  if (NW && NH) {
+    const sc = Math.min(1, 128 / Math.max(NW, NH));
+    const sw = Math.max(1, Math.round(NW * sc)), sh = Math.max(1, Math.round(NH * sc));
+    const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    if (cx) {
+      try {
+        cx.drawImage(d, 0, 0, sw, sh);
+        const data = cx.getImageData(0, 0, sw, sh).data;
+        let x1 = sw, y1 = sh, x2 = -1, y2 = -1;
+        for (let y = 0; y < sh; y++) {
+          for (let x = 0; x < sw; x++) {
+            if (data[(y * sw + x) * 4 + 3] > 24) {
+              if (x < x1) x1 = x; if (x > x2) x2 = x;
+              if (y < y1) y1 = y; if (y > y2) y2 = y;
+            }
+          }
+        }
+        if (x2 >= x1 && y2 >= y1) res = { x: x1 / sw, y: y1 / sh, w: (x2 - x1 + 1) / sw, h: (y2 - y1 + 1) / sh };
+      } catch { /* 跨域 face (搜图) → tainted canvas, 退回整框椭圆 */ }
+    }
+  }
+  _bboxFracCache.set(d, res);
+  return res;
+}
+
 // 决定某 image clip 在时间 t 实际应用的 fx 名:
 // FX track 优先 — 找 active 的 FXClip, 若 targetClipId 匹配 / 为空 (全局) 都生效, 否则用 image.fx
 export function effectiveFxFor(clip: ImageClip, t: number, allClips: Clip[]): { fx: ImageFx; fxStart: number; fxDur: number; fxClip: FXClip | null } {
@@ -454,6 +490,16 @@ export function renderExportFrame(
         ctx.translate(bf.cx, bf.cy);
         ctx.rotate(bf.rotation * Math.PI / 180);
         ctx.scale(bf.flipX ? -1 : 1, 1);
+        // 椭圆裁切 (跟编辑器 composeMemeCanvas 的 destination-in ellipse 一致): 按脸内容 bbox 内切椭圆,
+        // 裁掉脸矩形角 / 白边溢出到壳的透明区 (修"face 太大盖到壳"). 1.04 微放防削到五官边缘.
+        {
+          const fbb = contentBboxFrac(media);
+          const eRx = (fbb.w / 2) * bf.iw * 1.04, eRy = (fbb.h / 2) * bf.ih * 1.04;
+          const eCx = (fbb.x + fbb.w / 2 - 0.5) * bf.iw, eCy = (fbb.y + fbb.h / 2 - 0.5) * bf.ih;
+          ctx.beginPath();
+          ctx.ellipse(eCx, eCy, eRx, eRy, 0, 0, Math.PI * 2);
+          ctx.clip();
+        }
         ctx.drawImage(drawableAt(media, t, c.start, c.gifEdit), -bf.iw / 2, -bf.ih / 2, bf.iw, bf.ih);
         ctx.restore();
         continue;
@@ -572,6 +618,46 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): s
   return out.length ? out : [''];
 }
 
+// 字幕自适应字号 (傻瓜式免调参): 短文案 → 撑到接近左右边缘的超大字号; 长文案 → 缩字号 + 分行.
+// 思路: 从"按高度封顶的最大字号"往下找, 第一个满足 (最宽行 ≤ 92%画宽 且 文本块高 ≤ 高度预算) 的字号即取.
+// 视频+GIF 通用 (drawCaption 导出 + 预览 DOM 都调). offscreen 测量 + memo (文案/尺寸/样式 不变时 O(1)).
+const _capFitCache = new Map<string, { fontSize: number; lines: string[] }>();
+let _capMeasureCtx: CanvasRenderingContext2D | null = null;
+function capMeasureCtx(): CanvasRenderingContext2D | null {
+  if (!_capMeasureCtx) { const c = document.createElement('canvas'); c.width = 16; c.height = 16; _capMeasureCtx = c.getContext('2d'); }
+  return _capMeasureCtx;
+}
+const CAP_FONT_FAMILY = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
+export function fitCaptionLayout(text: string, W: number, H: number, style: CaptionStyle = 'meme'): { fontSize: number; lines: string[] } {
+  const key = `${Math.round(W)}|${Math.round(H)}|${style}|${text}`;
+  const hit = _capFitCache.get(key);
+  if (hit) return hit;
+  const mc = capMeasureCtx();
+  const isBox = style === 'panel' || style === 'bar';   // 字幕条/面板 = 副标题感, 别太大
+  const maxTextW = W * (isBox ? 0.84 : 0.92);            // 左右接近边缘 (meme 92%)
+  const maxBlockH = H * (isBox ? 0.22 : 0.40);           // 文本块总高预算 (不喧宾夺主)
+  const FONT_MAX = Math.round(Math.min(W * 0.46, H * (isBox ? 0.12 : 0.30)));  // 2 字撑满宽 / 单字按高封顶
+  const FONT_MIN = Math.max(13, Math.round(W * 0.022));
+  let best = FONT_MIN, bestLines: string[] = [text || ''];
+  if (mc) {
+    for (let fs = FONT_MAX; fs >= FONT_MIN; fs -= 2) {
+      mc.font = `900 ${fs}px ${CAP_FONT_FAMILY}`;
+      const lines = wrapLines(mc, text, maxTextW);
+      const widest = lines.reduce((m, l) => Math.max(m, mc.measureText(l).width), 0);
+      if (widest <= maxTextW && lines.length * fs * 1.28 <= maxBlockH) { best = fs; bestLines = lines; break; }
+      if (fs - 2 < FONT_MIN) { best = FONT_MIN; mc.font = `900 ${FONT_MIN}px ${CAP_FONT_FAMILY}`; bestLines = wrapLines(mc, text, maxTextW); }  // 兜底: 最小字号也分行装
+    }
+  }
+  const res = { fontSize: best, lines: bestLines };
+  if (_capFitCache.size > 200) { const k = _capFitCache.keys().next().value; if (k !== undefined) _capFitCache.delete(k); }
+  _capFitCache.set(key, res);
+  return res;
+}
+// 仅取自适应字号 px (预览 DOM 用 — 跟导出按各自画宽算 → 比例一致 = 所见即所得)
+export function fitCaptionFontPx(text: string, W: number, H: number, style: CaptionStyle = 'meme'): number {
+  return fitCaptionLayout(text || ' ', W, H, style).fontSize;
+}
+
 export function drawCaption(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -585,15 +671,23 @@ export function drawCaption(
 ): void {
   if (!text) return;
   if (entranceState.opacity <= 0.01) return;  // v23-k: 完全透明 skip 绘制
-  const fontSize = capFontSize ? Math.round(capFontSize * W / 1280) : Math.max(28, Math.round(W * 0.04));
+  // capFontSize 给了 = 手动 (1280-conv 缩放); 没给 = 自适应 (短文案超大撑边 / 长文案缩字+分行, 傻瓜式免调参)
+  let fontSize: number;
+  let lines: string[];
+  if (capFontSize != null) {
+    fontSize = Math.round(capFontSize * W / 1280);
+    ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+    lines = wrapLines(ctx, text, W * 0.92);   // 该分行分行 (跟预览 pre-wrap 对齐 → 导出≈预览)
+  } else {
+    const fit = fitCaptionLayout(text, W, H, style);
+    fontSize = fit.fontSize;
+    lines = fit.lines;
+    ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+  }
   // meme/bar 默认白字, panel 默认黑字
   const color = capColor ?? (style === 'panel' ? '#000000' : '#ffffff');
-  ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;  // 900 黑体 = 更醒目 (原 bold)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // 自动按 92% 画宽换行 (该分行分行; 跟预览 white-space:pre-wrap 对齐 → 导出≈预览). 不再单行缩字/省略.
-  const maxTextW = W * 0.92;
-  const lines = wrapLines(ctx, text, maxTextW);
   const lineH = fontSize * 1.28;
   // transform.x/y 都是 % of stage, 跟预览 'left: 50+x%' 'top: 50+y%' 对齐
   const cx = W * (0.5 + tr.x / 100);
