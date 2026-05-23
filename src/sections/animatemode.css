@@ -1243,7 +1243,7 @@
   box-shadow:
     inset 0 0 0 1px var(--retro-stroke, #7f9dc8),
     0 12px 30px rgba(20, 60, 110, 0.22);
-  overflow: hidden;
+  overflow: visible;  /* 选框/手柄/超出画板图层不被裁 (可选中拖拽); 内容各自 objectFit 裁; 导出 canvas 按 W×H 裁不受影响 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3178,7 +3178,8 @@
 .am-stage-handle-se { right: -10px; bottom: -10px; }
 .am-stage-handle:hover { background: #ff7a2f; transform: scale(1.15); }
 /* 旋转手柄 — 选框正上方, 拖拽旋转 (Shift 锁 15°); 视频/GIF 共用 */
-.am-stage-handle-rot { left: 50%; top: -26px; transform: translateX(-50%); cursor: grab; }
+.am-stage-handle-rot { left: 50%; top: -26px; transform: translateX(-50%); cursor: grab; display: flex; align-items: center; justify-content: center; color: #fff; }
+.am-stage-handle-rot svg { pointer-events: none; }
 .am-stage-handle-rot:active { cursor: grabbing; }
 .am-stage-handle-rot:hover { background: #ff7a2f; transform: translateX(-50%) scale(1.15); }
 .am-stage-rotstem { position: absolute; left: 50%; top: -20px; width: 2px; height: 16px; margin-left: -1px; background: #FF5E00; pointer-events: none; z-index: 99; }

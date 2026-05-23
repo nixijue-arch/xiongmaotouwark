@@ -1573,7 +1573,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     {c.id === selectedId && <>
                       <div className="am-stage-frame" />
                       <div className="am-stage-rotstem" />
-                      <div className="am-stage-handle am-stage-handle-rot" onPointerDown={e => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title="拖动旋转 (Shift 锁 15°)" />
+                      <div className="am-stage-handle am-stage-handle-rot" onPointerDown={e => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title="拖动旋转 (Shift 锁 15°)"><RotateCw size={9} strokeWidth={2.6} /></div>
                       <div className="am-stage-handle am-stage-handle-se" onPointerDown={e => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }} title="拖动缩放" />
                     </>}
                   </div>

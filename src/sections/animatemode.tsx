@@ -5002,7 +5002,7 @@ function PreviewPane({
                       className="am-stage-handle am-stage-handle-rot"
                       onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }}
                       title="拖动旋转 (Shift 锁 15°)"
-                    />
+                    ><RotateCw size={9} strokeWidth={2.6} /></div>
                     <div
                       className="am-stage-handle am-stage-handle-se"
                       onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }}

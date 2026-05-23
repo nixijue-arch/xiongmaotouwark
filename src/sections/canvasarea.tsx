@@ -3,7 +3,7 @@ import { useMeme } from '@/context/memecontext';
 import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import Draggable from 'react-draggable';
-import { Eraser, RotateCcw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
+import { Eraser, RotateCcw, RotateCw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchAsDataUrl } from '@/lib/networkImage';
 import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -347,8 +347,8 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
                 <div className="absolute" style={{ left: '50%', top: -22, width: 2, height: 22, transform: 'translateX(-50%)', background: '#FF5E00', zIndex: 14, pointerEvents: 'none' }} />
-                <div className="absolute rotate-handle" style={{ left: '50%', top: -28, width: 12, height: 12, marginLeft: -6, borderRadius: '50%', background: '#fff', border: '2px solid #FF5E00', zIndex: 16, pointerEvents: 'auto', cursor: 'grab', boxSizing: 'border-box' }}
-                  onMouseDown={handleSelectionStart(rotate)} onTouchStart={handleSelectionStart(rotate)} title="拖动旋转 (Shift 锁 15°)" />
+                <div className="absolute rotate-handle" style={{ left: '50%', top: -29, width: 16, height: 16, marginLeft: -8, borderRadius: '50%', background: '#FF5E00', border: '2px solid #fff', zIndex: 16, pointerEvents: 'auto', cursor: 'grab', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}
+                  onMouseDown={handleSelectionStart(rotate)} onTouchStart={handleSelectionStart(rotate)} title="拖动旋转 (Shift 锁 15°)"><RotateCw size={10} strokeWidth={2.6} style={{ pointerEvents: 'none' }} /></div>
               </div>
               {/* 编辑/删除 action — base 调大 (font 14, padding 5/11, svg 13, gap 4)
                  * scale 限 max(0.6, 1/canvasScale) → canvasScale 2.0 时 visual 仍 base*0.6 = font 8.4
@@ -1421,7 +1421,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
             height: CANVAS_SIZE,
             boxShadow: '0 16px 32px rgba(108, 146, 196, 0.22)',
             border: '3px solid #88a6cf',
-            overflow: 'hidden',
+            overflow: 'visible',  /* 选框/手柄/超出画板元素不被裁 (可选中拖拽); 导出走 composeMeme canvas 按 CANVAS_SIZE 裁, 不受影响 */
             flexShrink: 0,
             transform: canvasScale !== 1 ? `scale(${canvasScale})` : undefined,
             transformOrigin: 'top left',
