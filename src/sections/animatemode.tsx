@@ -1261,9 +1261,9 @@ const RESOLUTION_DIM: Record<ExportResolution, { w: number; h: number }> = {
   '1080p': { w: 1920, h: 1080 },
 };
 const RESOLUTION_VBPS: Record<ExportResolution, number> = {
-  '480p': 2_000_000,
-  '720p': 4_000_000,
-  '1080p': 8_000_000,
+  '480p': 3_000_000,
+  '720p': 6_000_000,
+  '1080p': 12_000_000,
 };
 
 async function exportVideo(
@@ -1326,7 +1326,7 @@ async function exportVideo(
 
   const recorderOpts: MediaRecorderOptions = {
     mimeType: mime,
-    videoBitsPerSecond: RESOLUTION_VBPS[resolution],
+    videoBitsPerSecond: Math.round(RESOLUTION_VBPS[resolution] * Math.max(1, fps / 30)),  // 高 fps 按比例提码率, 每帧画质恒定 (60fps 不再比 30fps 糊)
   };
   if (audioStream) recorderOpts.audioBitsPerSecond = 128_000;
   const recorder = new MediaRecorder(combinedStream, recorderOpts);
@@ -2392,7 +2392,7 @@ export function AnimateMode() {
     updateClipCommit(id, { start: newStart, end: newStart + dur });
   }, [project, updateClipCommit]);
   const randomize = useCallback(async () => {
-    const lines = ['家人们谁懂啊', '我直接裂开', '但我装作很淡定', '我可太牛了', '麻了麻了', '让你装！', '别问 问就是不知道', '你礼貌吗', '6 兄弟 6', '今天也要努力摸鱼'];
+    // 字幕走完整文案池 (quickModeTexts ~150 条) + pickRandomText 自带最近10去重 + exclude 防连续重复 → 每段都不一样 (原来固定 10 句翻来覆去)
     const fxs: ImageFx[] = ['none', 'none', 'shake', 'zoom', 'flash'];
     const isGifMode = (project.mode ?? 'video') === 'gif';
     const voices = VOICE_LIB.filter(v => v.lang.startsWith('zh')).map(v => v.id);
@@ -2422,8 +2422,9 @@ export function AnimateMode() {
       );
       const next: Clip[] = [];
       let cursor = initialOffset;
+      let prevLine: string | undefined;
       for (let i = 0; i < segs; i++) {
-        const line = lines[Math.floor(Math.random() * lines.length)];
+        const line = pickRandomText('zh', 'all', prevLine); prevLine = line;
         // GIF 模式: 每段 image 固定 gifSegDur, caption 跟 image 同长. 无 TTS.
         // video 模式: 每段按 TTS 时长 + gap.
         let segDur: number;
@@ -4443,15 +4444,16 @@ function VoiceDiagBtn() {
             </div>
             <div className="am-popover-body">
               <p className="am-tts-cfg-tip">
-                <b>现状</b>: Microsoft 官方 <code>speech.platform.bing.com</code> <b>全球 403 下线</b>, 所有不带 key 直连服务都失败.
-                <br /><br />
-                <b>真男声/萝莉/晓晓真 Neural</b> 需自部署 edge-tts 反代 (永久免费, 1 分钟 Cloudflare Worker):
+                想要抖音同款<b>真男声 / 萝莉 / 晓晓真 Neural</b>? 自部署一个开源 edge-tts 代理 (永久免费), 填到下面即可。浏览器原生只有 1 个女声。
               </p>
               <ul className="am-tts-cfg-tip">
-                <li>开源模板: <a href="https://github.com/travisvn/openai-edge-tts" target="_blank" rel="noopener noreferrer">openai-edge-tts</a> (Docker / 服务器)</li>
-                <li>或 <a href="https://github.com/wangwangit/tts" target="_blank" rel="noopener noreferrer">wangwangit/tts</a> (一键 Cloudflare Workers 部署)</li>
-                <li>部署后填 URL (示例: <code>https://your.workers.dev</code>)</li>
+                <li><b>① 一键部署 (最简单)</b>: 打开 <a href="https://github.com/wangwangit/tts" target="_blank" rel="noopener noreferrer">wangwangit/tts</a> → 按 README 一键部署到 Cloudflare Workers, 点几下就出 URL。</li>
+                <li><b>② 或自建服务器</b>: <a href="https://github.com/travisvn/openai-edge-tts" target="_blank" rel="noopener noreferrer">openai-edge-tts</a> (Docker)。</li>
+                <li><b>③ 把得到的地址</b>粘到下面 (示例 <code>https://your.workers.dev</code>) → 点 🔍 测听 验证 → 保存。OpenAI POST 和 GET ?text= 两种 worker 格式都支持。</li>
               </ul>
+              <p className="am-tts-cfg-tip" style={{ opacity: 0.55, fontSize: '11px', marginTop: '4px' }}>
+                (为啥要自部署: 微软官方 <code>speech.platform.bing.com</code> 已全球 403 下线, 不带 key 的直连都失败。)
+              </p>
               <Field label="TTS HTTP 代理 URL">
                 <input
                   type="text"
@@ -6249,7 +6251,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         {pk === 'tts-gen:' + clip.id ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听</>}
       </button>
 
-      <Field label="MP4 真音轨配音">
+      <Field label="配音音频 · 生成 / 导入 (导出 MP4 带声)">
         <input
           ref={uploadInputRef}
           type="file"
@@ -6352,8 +6354,8 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         )}
         <div className="am-field-sublabel">
           {clip.audioSrc
-            ? '✅ 已设音轨 · 导出 MP4 真带声 (不烧字幕)'
-            : '上方试听是浏览器 SS (女声化). 要抖音同款真男/女声 → 点 🌐 TTSMaker 复制台词生成 → 下载 mp3 → 📂 上传'}
+            ? '✅ 已设音轨 · 导出 MP4 真带声 (不烧字幕). 备份/换设备 → 顶栏「导出项目 JSON」会连音频一起导出, 导入即恢复'
+            : '导入自己的配音: ① 点 🌐 TTSMaker (或任意 TTS / 录音) 生成并下载 mp3 → ② 点 📂 上传 mp3 附加到此片段. 「云端生成」= 一键 youdao 自动出声 (女声)'}
         </div>
       </Field>
     </>
