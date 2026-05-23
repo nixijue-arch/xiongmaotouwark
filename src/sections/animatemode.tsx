@@ -4772,7 +4772,7 @@ function PreviewPane({
     window.addEventListener('pointerup', onUp);
   };
 
-  // 字幕轮廓 SE 手柄拖拽改字号 (像拖图片一样); 落到手动 fontSize(1280 空间, 跟导出一致), 从当前有效字号起算
+  // 字幕轮廓 SE 手柄拖拽改字号 (像拖图片一样); 视频字幕 fontSize = 显示像素 (跟字号滑块/预设一致), 从当前有效字号起算不跳
   const startCaptionResize = (e: React.PointerEvent, clip: CaptionClip) => {
     if (e.button !== 0 || editingCaptionId === clip.id) return;
     e.preventDefault(); e.stopPropagation();
@@ -4782,12 +4782,11 @@ function PreviewPane({
     const st = clip.style ?? DEFAULT_CAPTION_STYLE, ty = clip.transform?.y ?? 35;
     const startFs = clip.fontSize != null
       ? clip.fontSize
-      : fitCaptionFontPx(clip.text, canvasSize.w, canvasSize.h, st, captionAvailH(ty, canvasSize.h)) * 1280 / canvasSize.w;
+      : fitCaptionFontPx(clip.text, canvasSize.w, canvasSize.h, st, captionAvailH(ty, canvasSize.h));
     const startX = e.clientX, startY = e.clientY;
     const onMove = (ev: PointerEvent) => {
-      const drag = Math.max(ev.clientX - startX, ev.clientY - startY);   // SE 手柄: 往右下放大
-      const next = startFs + drag * (1280 / canvasSize.w) * 1.25;        // 显示像素 → 1280 空间 + 手感系数
-      onUpdateClipLive(clip.id, { fontSize: Math.round(clamp(next, 20, 360)) });
+      const drag = Math.max(ev.clientX - startX, ev.clientY - startY);   // SE 手柄: 往右下放大, 1:1 显示像素
+      onUpdateClipLive(clip.id, { fontSize: Math.round(clamp(startFs + drag * 1.25, 12, 200)) });
     };
     const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); onEndDrag(); };
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
@@ -5158,7 +5157,7 @@ function PreviewPane({
             const isSel = c.id === selectedId;
             const isEditing = c.id === editingCaptionId;
             const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-            const cFontSize = c.fontSize != null ? c.fontSize * canvasSize.w / 1280 : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));  /* 手动字号是 1280 空间 → ×画宽/1280, 跟导出 drawCaption 一致 (修预览偏大) */
+            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));
             // meme/bar 默认白字, panel 默认黑字 (跟样式背景反色)
             const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
             // v23-k: 字幕入场动效 — 实时计算 (编辑时禁用动效, 不打扰)
@@ -6861,7 +6860,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
             {activeCaptionClips.map(c => {
               const tr = c.transform ?? DEFAULT_CAPTION_TRANSFORM;
               const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-              const cFontSize = c.fontSize != null ? c.fontSize * canvasSize.w / 1280 : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));  /* 手动字号是 1280 空间 → ×画宽/1280, 跟导出 drawCaption 一致 (修预览偏大) */
+              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));
               const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
               const ent = computeCaptionEntrance(c, playhead);
               const xformStyle = (ent.opacity < 1 || Math.abs(ent.scale - 1) > 0.01)
