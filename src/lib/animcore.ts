@@ -35,7 +35,7 @@ export type CaptionEntranceFx = 'none' | 'fade' | 'pop' | 'slam' | 'typewriter';
 export interface CaptionClip extends BaseClip { trackId: 'caption'; text: string; fontSize?: number; color?: string; style?: CaptionStyle; transform?: CaptionTransform; linkedTTSId?: string /* v23-e: caption ⇌ tts 1:1 双向 link, caption.start/end/text 改 → tts 自动同步 */; entranceFx?: CaptionEntranceFx; entranceDuration?: number; }
 // v23-e: TTSClip + linkedCaptionId (双向 link) + playbackRate (clip 级倍速 0.5-3.0, 优先于 voice 级)
 // v23-k: audioDuration (原始 audio 时长, resize 时自动算 rate fit)
-export interface TTSClip extends BaseClip { trackId: 'tts'; text: string; voice: string; audioSrc?: string; audioDuration?: number; genFailed?: boolean; audioEngine?: 'youdao' | 'baidu'; linkedCaptionId?: string; playbackRate?: number; }
+export interface TTSClip extends BaseClip { trackId: 'tts'; text: string; voice: string; audioSrc?: string; audioDuration?: number; genFailed?: boolean; audioEngine?: 'youdao' | 'baidu'; linkedCaptionId?: string; playbackRate?: number; userAudio?: boolean; /* 用户上传的 mp3 配音 — audioSrc 直接用, 不走 TTS auto-gen */ }
 export interface BGMClip extends BaseClip { trackId: 'bgm'; bgmId: string; name: string; volume: number; }
 // 特效独立轨 — 可绑定到某 image clip 或全局生效 (targetClipId 空)
 // 跟 ImageClip.fx 同时存在: FXClip 优先, 旧 image.fx 是 fallback

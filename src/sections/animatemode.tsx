@@ -379,6 +379,9 @@ const AM_USER_BGMS_IDB_KEY = 'xiongmaotou.animate-user-bgms.v1';
 const AM_USER_BGM_MAX_COUNT = 30;                      // 30 首 (上：10)
 const AM_USER_BGM_MAX_FILE_BYTES = 30 * 1024 * 1024;   // 单首 30 MB (上：5MB) — 容纳无损 mp3
 const AM_USER_BGM_MAX_TOTAL_BYTES = 200 * 1024 * 1024; // 总 200 MB (上：30MB)
+const AM_USER_VOICES_IDB_KEY = 'xiongmaotou.animate-user-voices.v1';   // 用户上传配音池 (跟 BGM 隔离)
+const AM_USER_VOICE_MAX_COUNT = 40;                    // 自定义配音上限 40 条
+const AM_USER_VOICE_MAX_FILE_BYTES = 20 * 1024 * 1024; // 单条 ≤20MB
 
 // gender 关键字 (用 voice.name 推断 voice 实际性别)
 const MALE_RE = /\b(male|man|guy|kang|yun|jian|davis|brandon|adam|joey|ryan|mark|alex|brian|daniel|andrew|oliver|aaron)\b/i;
@@ -1721,6 +1724,7 @@ export function AnimateMode() {
       for (const c of project.clips) {
         if (c.trackId !== 'tts') continue;
         const ts = c as TTSClip;
+        if (ts.userAudio) continue;   // 用户上传的 mp3 配音: audioSrc 直接用, 不走 TTS auto-gen (否则会被云端重生成覆盖)
         const text = (ts.text || '').trim();
         if (!text) continue;
         const v = VOICE_BY_ID[resolveVoiceId(ts.voice)];
@@ -2607,9 +2611,13 @@ export function AnimateMode() {
     else if (type === 'tts') {
       const ttsVoice = resolveVoiceId(payload.voice || VOICE_LIB[0].id);
       const ttsText = payload.text || '点击编辑文字';
-      const ttsDur = estimateTTSDuration(ttsText, ttsVoice);
-      const ttsEnd = Math.min(project.duration, start + ttsDur);
-      clip = { id, trackId: 'tts', lane, start, end: ttsEnd, text: ttsText, voice: ttsVoice };
+      if (payload.audioSrc) {   // 用户上传的 mp3 配音: 直接用, 时长按音频, 不走 auto-gen
+        const dur = payload.audioDuration || 2;
+        clip = { id, trackId: 'tts', lane, start, end: Math.min(project.duration, start + dur), text: ttsText, voice: ttsVoice, audioSrc: payload.audioSrc, audioDuration: payload.audioDuration, userAudio: true };
+      } else {
+        const ttsDur = estimateTTSDuration(ttsText, ttsVoice);
+        clip = { id, trackId: 'tts', lane, start, end: Math.min(project.duration, start + ttsDur), text: ttsText, voice: ttsVoice };
+      }
     }
     else {
       // BGM: 查 userBGMs (用户上传) + BGM_LIB (内置, 含 bgm-jigou) + 运行时探测 cache
@@ -3932,6 +3940,39 @@ function LeftPane({
   const handleDeleteUserBGM = (id: string) => setUserBGMs(prev => prev.filter(b => b.id !== id));
   const bgmUsedBytes = useMemo(() => userBGMs.reduce((s, b) => s + (b.sizeBytes || 0), 0), [userBGMs]);
 
+  // 自定义配音上传 (mp3/wav) — 本地池 (IDB 持久); 加到时间轴 = userAudio TTS clip (audioSrc 内嵌, 不走云端 TTS)
+  const [userVoices, setUserVoices] = useState<{ id: string; name: string; src: string; durationSec: number }[]>([]);
+  const voicesLoadedRef = useRef(false);
+  useEffect(() => {
+    idbGet<{ id: string; name: string; src: string; durationSec: number }[]>(AM_USER_VOICES_IDB_KEY)
+      .then(d => { if (Array.isArray(d)) setUserVoices(d.slice(0, AM_USER_VOICE_MAX_COUNT)); }).catch(() => {}).finally(() => { voicesLoadedRef.current = true; });
+  }, []);
+  useEffect(() => {
+    if (!voicesLoadedRef.current) return;
+    const t = window.setTimeout(() => { void idbSet(AM_USER_VOICES_IDB_KEY, userVoices).catch(() => {}); }, 300);
+    return () => window.clearTimeout(t);
+  }, [userVoices]);
+  const voiceFileRef = useRef<HTMLInputElement>(null);
+  const handleVoiceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []); e.target.value = '';
+    if (files.length === 0) return;
+    let added = 0, rejected = 0;
+    for (const f of files) {
+      if (userVoices.length + added >= AM_USER_VOICE_MAX_COUNT) { toast.error(`已达上限 ${AM_USER_VOICE_MAX_COUNT} 条`); break; }
+      if (f.size > AM_USER_VOICE_MAX_FILE_BYTES) { toast.error(`${f.name} 超 ${(AM_USER_VOICE_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB`); rejected++; continue; }
+      try {
+        const dataUrl = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
+        let durationSec = 2; try { durationSec = await getAudioDuration(dataUrl); } catch { /* 探测失败兜底 */ }
+        const name = f.name.replace(/\.(mp3|wav|m4a|ogg|aac)$/i, '').slice(0, 16) || `配音${added + 1}`;
+        setUserVoices(prev => [{ id: `uv-${Date.now()}-${added}`, name, src: dataUrl, durationSec }, ...prev].slice(0, AM_USER_VOICE_MAX_COUNT));
+        added++;
+      } catch { rejected++; }
+    }
+    if (added > 0) toast.success(`已上传 ${added} 条配音${rejected ? ` (${rejected} 拒绝)` : ''} · 点卡片加到时间轴`);
+    else if (rejected > 0) toast.error('全部上传失败');
+  };
+  const handleDeleteUserVoice = (id: string) => setUserVoices(prev => prev.filter(v => v.id !== id));
+
   const renderSearch = () => (
     <div className="material-search-box">
       <Search size={12} />
@@ -4138,6 +4179,27 @@ function LeftPane({
           {seg === 'voice' && (
             <div className="am-row-list">
               <VoiceDiagBtn />
+              {/* 自定义配音上传 (mp3/wav) — 上传自己的声音/真 Neural mp3 直接当配音 */}
+              <input ref={voiceFileRef} type="file" accept="audio/*" multiple style={{ display: 'none' }} onChange={handleVoiceFile} />
+              <div className="am-upload-quota">
+                <span>🎤 我的配音 {userVoices.length}/{AM_USER_VOICE_MAX_COUNT}</span>
+                <button className="am-upload-clear-btn" onClick={() => voiceFileRef.current?.click()} type="button" title="上传 mp3/wav 当配音"><Upload size={10} /></button>
+              </div>
+              {userVoices.length > 0 && (
+                <>
+                  <div className="am-list-section-head">自定义 (上传)</div>
+                  {userVoices.map(uv => (
+                    <div key={uv.id} className="am-uservoice-row">
+                      <button className="am-uservoice-add" onClick={() => onQuickAdd({ type: 'tts', voice: VOICE_LIB[0].id, text: uv.name, audioSrc: uv.src, audioDuration: uv.durationSec })} title="加到时间轴 (作为配音)">
+                        <Mic size={12} /> <span className="am-uservoice-name">{uv.name}</span> <span className="am-uservoice-dur">{uv.durationSec.toFixed(1)}s</span>
+                      </button>
+                      <button className="am-uservoice-play" onClick={() => audioEngine.playTTSAudio(uv.src, 1.0)} type="button" title="试听">▶</button>
+                      <button className="am-uservoice-del" onClick={() => handleDeleteUserVoice(uv.id)} type="button" title="删除"><Trash2 size={11} /></button>
+                    </div>
+                  ))}
+                </>
+              )}
+              <div className="am-list-section-head">内置音色 (云端 TTS)</div>
               {VOICE_LIB.map(v => <VoiceRow key={v.id} item={v} onQuickAdd={onQuickAdd} />)}
               {/* v23-k: TTS 批量导入 — paste 多段台词 → 一次性多个 TTS clip + 可选随同字幕 */}
               <TTSBatchImport
@@ -7504,8 +7566,13 @@ function Timeline({
     else if (payload.type === 'tts') {
       const ttsVoice = resolveVoiceId(payload.voice || VOICE_LIB[0].id);
       const ttsText = payload.text || '点击编辑文字';
-      const ttsDur = estimateTTSDuration(ttsText, ttsVoice);
-      clip = { id, trackId: 'tts', lane: droppedLane, start, end: Math.min(project.duration, start + ttsDur), text: ttsText, voice: ttsVoice };
+      if (payload.audioSrc) {   // 用户上传配音
+        const dur = payload.audioDuration || 2;
+        clip = { id, trackId: 'tts', lane: droppedLane, start, end: Math.min(project.duration, start + dur), text: ttsText, voice: ttsVoice, audioSrc: payload.audioSrc, audioDuration: payload.audioDuration, userAudio: true };
+      } else {
+        const ttsDur = estimateTTSDuration(ttsText, ttsVoice);
+        clip = { id, trackId: 'tts', lane: droppedLane, start, end: Math.min(project.duration, start + ttsDur), text: ttsText, voice: ttsVoice };
+      }
     }
     else clip = { id, trackId: 'bgm', lane: droppedLane, start, end: start + effectiveDur, bgmId: payload.bgmId!, name: payload.name || 'BGM', volume: 0.5 };
     onAddClip(clip);

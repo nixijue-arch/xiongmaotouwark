@@ -24,6 +24,8 @@ export interface DragPayload {
   src?: string; label?: string;
   voice?: string; text?: string;
   bgmId?: string; name?: string;
+  // 用户上传的 mp3 配音 — type:'tts' + audioSrc 直接当配音 (不走 TTS 云端生成)
+  audioSrc?: string; audioDuration?: number;
   fx?: ImageFx;
   // image 子类 — 'scene' = 场景背景图 (全屏 cover)
   kind?: 'scene';
