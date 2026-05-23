@@ -35,12 +35,13 @@ const NAV_ITEMS: Array<{
   labelZh: string;
   labelEn: string;
 }> = [
-  { page: 'quick', icon: Zap, labelZh: '快速生图', labelEn: 'Quick' },
-  { page: 'editor', icon: PenTool, labelZh: '表情包编辑器', labelEn: 'Meme Editor' },
-  { page: 'animate', icon: Film, labelZh: '沙雕动画剪辑', labelEn: 'Animation Editor' },
-  { page: 'collection', icon: FolderOpen, labelZh: '草图本', labelEn: 'Drafts' },
-  { page: 'museum', icon: ImageIcon, labelZh: '博物馆', labelEn: 'Museum' },
-  { page: 'about', icon: BookOpen, labelZh: '了解熊猫头', labelEn: 'About' },
+  // 严格对齐桌面 header 的 link-label (原手机端用了更长的描述名, 不一致)
+  { page: 'quick', icon: Zap, labelZh: '快速', labelEn: 'Quick' },
+  { page: 'editor', icon: PenTool, labelZh: '编辑器', labelEn: 'Editor' },
+  { page: 'animate', icon: Film, labelZh: '沙雕动画', labelEn: 'Animation' },
+  { page: 'collection', icon: FolderOpen, labelZh: '草图', labelEn: 'Drafts' },
+  { page: 'museum', icon: ImageIcon, labelZh: '表情博物馆', labelEn: 'Museum' },
+  { page: 'about', icon: BookOpen, labelZh: '了解', labelEn: 'About' },
 ];
 
 export function MobileNav({ open, onClose, page, setPage }: MobileNavProps) {

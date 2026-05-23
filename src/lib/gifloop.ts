@@ -182,15 +182,17 @@ export function resolveBoundFaceBox(
   const maxH = H * 0.85;
   if (sIh > maxH) { const k = maxH / sIh; sIw *= k; sIh *= k; }
   const sMd = loopMotionDelta(shell.loopMotion, t, D, W, H, sTr);
+  const shellFlip = sMd.dScaleX ?? 1;   // 壳水平翻转 (flip 动效): 脸要跟着镜像位置 + 镜像内容
   sIw *= sMd.dScale;
   const sCx = W / 2 + (sTr.x / 100) * W + sMd.dx;
   const sCy = H / 2 + (sTr.y / 100) * H + sMd.dy;
   const sRot = sTr.rotation + sMd.dRot;
-  // 2. face 世界位姿 = shell 框 ∘ faceLocal (偏移按 shell 半宽 + 旋到 shell 角)
+  // 2. face 世界位姿 = shell 框 ∘ faceLocal (偏移按 shell 半宽 + 旋到 shell 角); x 偏移 ×shellFlip → 脸随壳翻到镜像侧 (壳翻面脸不脱节)
   const half = sIw / 2;
   const rad = sRot * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
-  let fCx = sCx + (loc.dxN * cos - loc.dyN * sin) * half;
-  let fCy = sCy + (loc.dxN * sin + loc.dyN * cos) * half;
+  const mdxN = loc.dxN * shellFlip;
+  let fCx = sCx + (mdxN * cos - loc.dyN * sin) * half;
+  let fCy = sCy + (mdxN * sin + loc.dyN * cos) * half;
   let fIw = sIw * loc.scaleRatio;
   let fIh = fIw * (faceNaturalH / Math.max(1, faceNaturalW));
   if (fIh > H * 0.85) { const fk = (H * 0.85) / fIh; fIw *= fk; fIh *= fk; }   // 跟非绑定渲染的 0.85H 钳一致 (修解绑跳变 + 预览/导出一致)
@@ -201,7 +203,8 @@ export function resolveBoundFaceBox(
   fCx += fMd.dx * cos - fMd.dy * sin;
   fCy += fMd.dx * sin + fMd.dy * cos;
   fRot += fMd.dRot;
-  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: fTr.flipX };
+  const faceFlip = fMd.dScaleX ?? 1;   // 脸自身 flip 动效
+  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: fTr.flipX, scaleX: shellFlip * faceFlip };
 }
 
 export function makeBoundFaceAt(D: number, W: number, H: number) {

@@ -454,7 +454,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               const rc = resolveBoundFaceBox(ic, shell, t, dd, w, h, sWH.w, sWH.h, fWH.w, fWH.h);
               if (Number.isFinite(rc.cx) && Number.isFinite(rc.cy) && Number.isFinite(rc.rotation) && Number.isFinite(r0.cx) && Number.isFinite(r0.cy) && r0.iw > 0) {
                 const ds = Number.isFinite(rc.iw) ? rc.iw / r0.iw : 1;
-                el.style.transform = `translate(${((rc.cx - r0.cx) * sx).toFixed(2)}px, ${((rc.cy - r0.cy) * sy).toFixed(2)}px) rotate(${rc.rotation.toFixed(2)}deg) scale(${ds.toFixed(4)})`;
+                el.style.transform = `translate(${((rc.cx - r0.cx) * sx).toFixed(2)}px, ${((rc.cy - r0.cy) * sy).toFixed(2)}px) rotate(${rc.rotation.toFixed(2)}deg) scale(${(ds * (rc.scaleX ?? 1)).toFixed(4)}, ${ds.toFixed(4)})`;   // scaleX 含壳/脸翻转 → 脸跟壳一起翻 (静态 flipX 在内层 img)
                 boundDone = true;
               }
             }
@@ -1085,7 +1085,19 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   }, []);
   const saveGifDraft = useCallback(async () => {
     const firstImg = project.clips.find(c => c.trackId === 'image') as ImageClip | undefined;
-    const thumbSrc = firstImg?.src ? await makeDraftThumb(firstImg.src) : undefined;  // 96px webp 缩略图 (省 IDB)
+    // 缩略图: 渲染配套首帧 (壳+脸+字幕合成) 而非只取首图 src — 修 GIF 草稿预览只有空壳没脸 (首图=壳, 漏绑定脸)
+    let thumbSrc: string | undefined;
+    try {
+      const W = preset.width, H = preset.height;
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const cx2 = cv.getContext('2d');
+      if (cx2) {
+        renderLoopFrame(cx2, loopSpecAt(0, D, project.loop, preset.fps), project, W, H, cacheRef.current, makeLoopMotionAt(D, W, H), undefined, '#ffffff', makeBoundFaceAt(D, W, H));
+        thumbSrc = await makeDraftThumb(cv.toDataURL('image/png'));
+      }
+      cv.width = cv.height = 0;
+    } catch { /* 渲染失败 → 退回首图 src */ }
+    if (!thumbSrc) thumbSrc = firstImg?.src ? await makeDraftThumb(firstImg.src) : undefined;  // 96px webp 缩略图 (省 IDB)
     const slot: GifDraftSlot = {
       id: uid('gd'), name: `GIF草稿${gifDrafts.length + 1}`, updatedAt: Date.now(),
       project: JSON.parse(JSON.stringify(project)) as GifProject, thumbSrc,
@@ -1385,23 +1397,52 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
     const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
     const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
+    // 绑定脸: 拖动/缩放/旋转 → 改 faceLocal 相对位姿 (仍跟随壳), 而非死改被 resolveBoundFaceBox 忽略的 transform.
+    const _sm = target.boundTo ? cacheRef.current.get(imgClipById(target.boundTo)?.src ?? '') : undefined;
+    const boundShell = target.boundTo && _sm ? imgClipById(target.boundTo) : null;
+    const startLoc = target.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+    let _bHalf = 1, _bCos = 1, _bSin = 0;
+    if (boundShell && _sm) {
+      const sWH = mediaWH(_sm);
+      const bs = Math.min(preset.width, preset.height) * 0.6;
+      let sIw = bs * (boundShell.transform?.scale ?? 1);
+      const sIh = (sWH.h / Math.max(1, sWH.w)) * sIw;
+      if (sIh > preset.height * 0.85) sIw *= (preset.height * 0.85) / sIh;
+      _bHalf = Math.max(1, sIw / 2);
+      const sr = (boundShell.transform?.rotation ?? 0) * Math.PI / 180;
+      _bCos = Math.cos(sr); _bSin = Math.sin(sr);
+    }
     let moved = false;
     const onMove = (ev: PointerEvent) => {
       if (!moved && (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4)) moved = true;
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / cw * 100;
         const dyPct = (ev.clientY - startY) / ch * 100;
-        patchTransform(target.id, { x: Math.max(-200, Math.min(200, startT.x + dxPct)), y: Math.max(-200, Math.min(200, startT.y + dyPct)) });
+        if (boundShell) {
+          const dFx = (dxPct / 100) * preset.width, dFy = (dyPct / 100) * preset.height;   // 世界位移 → shell 未旋转帧 → 归一化半宽
+          patchClip(target.id, { faceLocal: { ...startLoc, dxN: startLoc.dxN + (dFx * _bCos + dFy * _bSin) / _bHalf, dyN: startLoc.dyN + (-dFx * _bSin + dFy * _bCos) / _bHalf } });
+        } else {
+          patchTransform(target.id, { x: Math.max(-200, Math.min(200, startT.x + dxPct)), y: Math.max(-200, Math.min(200, startT.y + dyPct)) });
+        }
       } else if (kind === 'scale') {
         const baseSize = Math.min(cw, ch) * 0.6;
         const drag = Math.max(ev.clientX - startX, ev.clientY - startY);
-        patchTransform(target.id, { scale: Math.max(0.2, Math.min(4, startT.scale + (drag * 2) / Math.max(1, baseSize))) });
+        if (boundShell) {
+          patchClip(target.id, { faceLocal: { ...startLoc, scaleRatio: Math.max(0.1, Math.min(4, startLoc.scaleRatio + (drag * 1.5) / Math.max(1, baseSize))) } });
+        } else {
+          patchTransform(target.id, { scale: Math.max(0.2, Math.min(4, startT.scale + (drag * 2) / Math.max(1, baseSize))) });
+        }
       } else {
         // 拖拽旋转 (Shift 锁 15°)
         const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
-        let rot = startT.rotation + (a - _startAngle);
-        if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
-        patchTransform(target.id, { rotation: Math.max(-180, Math.min(180, rot)) });
+        if (boundShell) {
+          let dr = a - _startAngle; if (ev.shiftKey) dr = Math.round(dr / 15) * 15;
+          patchClip(target.id, { faceLocal: { ...startLoc, rotation: startLoc.rotation + dr } });
+        } else {
+          let rot = startT.rotation + (a - _startAngle);
+          if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
+          patchTransform(target.id, { rotation: Math.max(-180, Math.min(180, rot)) });
+        }
       }
     };
     const onUp = () => {

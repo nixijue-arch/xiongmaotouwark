@@ -23,7 +23,7 @@ export interface BaseClip { id: string; trackId: TrackType; lane: number; start:
 // endTransform — 'move' 特效用首尾帧 tween. lerp clip.transform → endTransform 按 t/duration
 // 脸跟壳绑定: boundTo = 此 face 绑定的 shell(熊猫头) clip id; faceLocal = 绑定时 face 相对 shell 渲染框的局部位姿 (dxN/dyN 按 shell 半宽归一, scaleRatio=face/shell, rotation=相对角). face 渲染时 = shell 实时框(transform+loopMotion) ∘ faceLocal + face 自身 loopMotion.
 export interface FaceLocal { dxN: number; dyN: number; scaleRatio: number; rotation: number; }
-export interface BoundFaceBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; }
+export interface BoundFaceBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; scaleX?: number; /* 动态水平镜像 (壳flip×脸flip), 默认 1 */ }
 export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; blend?: 'multiply'; role?: 'shell' | 'face' | 'scene' | 'image'; shellPandaId?: string; xfadeIn?: number; xfadeOut?: number; /* 变脸溶解: 窗口首/尾秒数内 alpha 渐变 (相邻脸时段重叠 → 交叉溶解); 硬切则不设 */ }
 export interface CaptionTransform { x: number; y: number; }
 export const DEFAULT_CAPTION_TRANSFORM: CaptionTransform = { x: 0, y: 35 };
@@ -502,7 +502,7 @@ export function renderExportFrame(
         if (c.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';  // 不透明壳方案: 脸在上 multiply (脸盖白底, 壳黑特征透出)
         ctx.translate(bf.cx, bf.cy);
         ctx.rotate(bf.rotation * Math.PI / 180);
-        ctx.scale(bf.flipX ? -1 : 1, 1);
+        ctx.scale((bf.flipX ? -1 : 1) * (bf.scaleX ?? 1), 1);   // 静态 flipX × 动态翻转(壳flip×脸flip) → 脸跟壳一起翻
         // 椭圆裁切 (跟编辑器 composeMemeCanvas 的 destination-in ellipse 一致): 按脸内容 bbox 内切椭圆,
         // 裁掉脸矩形角 / 白边溢出到壳的透明区 (修"face 太大盖到壳"). 1.04 微放防削到五官边缘.
         {
