@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Play, Pause, Download, Trash2, Upload, Loader2, FlipHorizontal, Type as TypeIcon, Eye, Layers, X, Image as ImageIcon, MessageSquare, Sparkles, FolderOpen, Search, ArrowLeftRight, Shuffle, Save, RotateCw, Undo2, Redo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
-import { ALL_PANDAS, ALL_FACES, type Material } from '@/data/materials';
+import { ALL_PANDAS, ALL_FACES, getShellLayering, type Material } from '@/data/materials';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import { useMeme, type DraftSlot } from '@/context/memecontext';
 import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
@@ -102,11 +102,20 @@ function normalizeCombo(p: GifProject): GifProject {
     if (!f.boundTo) continue;
     const shell = clips.find(s => s.id === f.boundTo && s.trackId === 'image') as ImageClip | undefined;
     if (!shell) continue;
-    if (shell.blend !== 'multiply') { shell.blend = 'multiply'; changed = true; }
+    // 按壳类型定方案 (跟编辑器 getShellLayering 一致). 老配套不存 shellPandaId → 按 label 反查 panda id.
+    const pid = shell.shellPandaId ?? ALL_PANDAS.find(pp => pp.labelCn === shell.label)?.id;
+    const lay = pid ? getShellLayering(pid) : { pandaZ: 5, faceZ: 1, pandaBlend: 'multiply' as const, faceBlend: 'normal' as const };
+    const pandaOnTop = lay.pandaZ > lay.faceZ;
+    const wantShellBlend = lay.pandaBlend === 'multiply' ? 'multiply' as const : undefined;
+    const wantFaceBlend = lay.faceBlend === 'multiply' ? 'multiply' as const : undefined;
+    const lo = Math.min(shell.lane, f.lane), hi = Math.max(shell.lane, f.lane);
+    const shellLane = pandaOnTop ? lo : hi, faceLane = pandaOnTop ? hi : lo;
     if (shell.role !== 'shell') { shell.role = 'shell'; changed = true; }
     if (f.role !== 'face') { f.role = 'face'; changed = true; }
-    if (f.blend) { f.blend = undefined; changed = true; }
-    if (shell.lane >= f.lane) { const t = shell.lane; shell.lane = f.lane; f.lane = t; changed = true; }  // 壳必须画在脸之后(lane 小=顶)
+    if (shell.blend !== wantShellBlend) { shell.blend = wantShellBlend; changed = true; }
+    if (f.blend !== wantFaceBlend) { f.blend = wantFaceBlend; changed = true; }
+    if (shell.lane !== shellLane || f.lane !== faceLane) { shell.lane = shellLane; f.lane = faceLane; changed = true; }
+    if (pid && shell.shellPandaId !== pid) { shell.shellPandaId = pid; changed = true; }
   }
   return changed ? { ...p, clips } : p;
 }
@@ -554,16 +563,19 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
       const faceLocal = captureFaceLocal({ cx: W / 2, cy: H / 2, iw: _sIw }, 0, { cx: W / 2 + (faceTransform.x / 100) * W, cy: H / 2 + (faceTransform.y / 100) * H, iw: baseSize * faceTransform.scale }, 0);
       const pandaId = uid('img'), faceId = uid('img');
+      // 图层方案按壳类型 (跟编辑器 getShellLayering 一致): 透明壳→壳在上 multiply(脸透出洞); 不透明壳→脸在上 multiply(脸盖白底, 壳黑特征透出)
+      const lay = getShellLayering(panda.id);
+      const pandaOnTop = lay.pandaZ > lay.faceZ;
       setProject(p => {
         const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 2 } as Clip : c));
         const pandaClip: ImageClip = {
-          id: pandaId, trackId: 'image', lane: 0, start: 0, end: p.duration,
-          src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', role: 'shell',
+          id: pandaId, trackId: 'image', lane: pandaOnTop ? 0 : 1, start: 0, end: p.duration,
+          src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: lay.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id,
           transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
         };
         const faceClip: ImageClip = {
-          id: faceId, trackId: 'image', lane: 1, start: 0, end: p.duration,
-          src: face.src, label: face.labelCn + '·脸', fx: 'none',
+          id: faceId, trackId: 'image', lane: pandaOnTop ? 1 : 0, start: 0, end: p.duration,
+          src: face.src, label: face.labelCn + '·脸', fx: 'none', blend: lay.faceBlend === 'multiply' ? 'multiply' : undefined,
           transform: faceTransform, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
           boundTo: pandaId, faceLocal, role: 'face',
         };
@@ -1123,10 +1135,12 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       let _sIwR = baseSize * fillScale; const _sIhR = (box.h / box.w) * _sIwR; if (_sIhR > H * 0.85) _sIwR *= (H * 0.85) / _sIhR;
       const faceLocalR = captureFaceLocal({ cx: W / 2, cy: H / 2, iw: _sIwR }, 0, { cx: W / 2 + (faceT.x / 100) * W, cy: H / 2 + (faceT.y / 100) * H, iw: baseSize * faceT.scale }, 0);
       const pid = uid('img'), fid = uid('img');
+      const layR = getShellLayering(panda.id);
+      const pandaOnTopR = layR.pandaZ > layR.faceZ;  // 透明壳→壳在上 multiply; 不透明壳→脸在上 multiply (跟编辑器一致)
       setProject(p => {
         const clips: Clip[] = [
-          { id: pid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', role: 'shell', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
-          { id: fid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR, role: 'face' } as ImageClip,
+          { id: pid, trackId: 'image', lane: pandaOnTopR ? 0 : 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: layR.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id, transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
+          { id: fid, trackId: 'image', lane: pandaOnTopR ? 1 : 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', blend: layR.faceBlend === 'multiply' ? 'multiply' : undefined, transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR, role: 'face' } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
         return { ...p, clips, loop: { ...p.loop, mode: loopMode } };
