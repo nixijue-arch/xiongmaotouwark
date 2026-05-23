@@ -31,8 +31,11 @@ import './gifmode.css';
 const GIF_PROJECT_IDB_KEY = 'xiongmaotou.gifmode-current.v1';
 const GIF_DRAFTS_IDB_KEY = 'xiongmaotou.gifmode-drafts.v1';
 const GIF_DRAFT_MAX = 10;
-const GIF_UPLOADS_IDB_KEY = 'xiongmaotou.gifmode-userpool.v1'; // GIF 自己的素材池 (联网搜图/抠脸沉淀, 跟 video 数据隔离)
+const GIF_UPLOADS_IDB_KEY = 'xiongmaotou.gifmode-userpool.v1'; // GIF 自己的素材池 (上传/联网搜图/抠脸沉淀, 跟 video 数据隔离)
 const GIF_UPLOAD_MAX = 60;
+const GIF_UPLOAD_MAX_FILE_BYTES = 30 * 1024 * 1024;   // 单图 ≤30MB
+const GIF_UPLOAD_MAX_DIM = 4096;                       // 尺寸 ≤4K (防超大图撑爆 IDB)
+const GIF_UPLOAD_MAX_BYTES = 300 * 1024 * 1024;        // 池总 ≤300MB
 // 字幕默认走自适应字号 (fitCaptionFontPx — 短文案超大撑边 / 长文案缩字分行); 用户拖滑块才转手动
 const GIF_CAP_MAXCHARS = 14; // 随机字幕字数上限 (跟快速/编辑器同文案池 pickRandomText, 截到能一行装下)
 const GIF_HISTORY_MAX = 50;  // 撤回栈深度 (跟视频 HISTORY_MAX 一致)
@@ -225,7 +228,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [variantBusy, setVariantBusy] = useState(false);
   const [gifDrafts, setGifDrafts] = useState<GifDraftSlot[]>([]);
   const [draftPopOpen, setDraftPopOpen] = useState(false);
-  const [gifUploads, setGifUploads] = useState<Material[]>([]); // GIF 素材池 (搜图/抠脸沉淀, 隔离于 video)
+  const [gifUploads, setGifUploads] = useState<Material[]>([]); // GIF 素材池 (上传/搜图/抠脸沉淀, 隔离于 video)
+  const [gifUploadKind, setGifUploadKind] = useState<'general' | 'panda' | 'face' | 'scene'>('general'); // 上传归类 → 决定进哪个 subtab
   const uploadsLoadedRef = useRef(false); // 防"持久化在加载前跑→把池写空"竞态
 
   const cacheRef = useRef<Map<string, MediaAsset>>(new Map());
@@ -1000,27 +1004,38 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     return () => { window.removeEventListener('keydown', onKey); delete win.__dumpGifTemplate; };
   }, [view]);
 
-  const onUpload = useCallback((file: File) => {
-    if (file.size > 30 * 1024 * 1024) { toast.error('文件超过 30MB'); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result || '');
-      if (!src) return;
-      const id = uid('up');
-      setProject(p => {
-        const clip: ImageClip = {
-          id, trackId: 'image', lane: 0, start: 0, end: p.duration,
-          src, label: file.name.slice(0, 16), fx: 'none',
-          transform: { ...DEFAULT_TRANSFORM }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
-        };
-        const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 1 } as Clip : c));
-        return { ...p, clips: [...bumped, clip] };
-      });
-      setSelectedId(id);
-      toast.success('已添加上传素材');
-    };
-    reader.readAsDataURL(file);
-  }, []);
+  // 上传文件 → 落入 gifUploads 素材池 (持久化 IDB, 可反复加入画板/删除), 而非一次性塞进画板.
+  // 多图 + 体积/尺寸/数量/总量校验 (对齐视频 handleFile). 点卡片用 addFromPayload 加入画板.
+  const handleGifFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []); e.target.value = '';
+    if (files.length === 0) return;
+    let added = 0, rejected = 0;
+    let usedBytes = gifUploads.reduce((a, m) => a + (m.src?.length || 0), 0);
+    for (const f of files) {
+      if (gifUploads.length + added >= GIF_UPLOAD_MAX) { toast.error(`已达数量上限 ${GIF_UPLOAD_MAX} 张`); break; }
+      if (f.size > GIF_UPLOAD_MAX_FILE_BYTES) { toast.error(`${f.name} 超过 30MB`); rejected++; continue; }
+      try {
+        const dataUrl = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
+        const dims = await new Promise<{ w: number; h: number }>((res, rej) => { const im = new Image(); im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight }); im.onerror = () => rej(new Error('img')); im.src = dataUrl; });
+        if (dims.w > GIF_UPLOAD_MAX_DIM || dims.h > GIF_UPLOAD_MAX_DIM) { toast.error(`${f.name} 尺寸超 ${GIF_UPLOAD_MAX_DIM}px`); rejected++; continue; }
+        if (usedBytes + dataUrl.length > GIF_UPLOAD_MAX_BYTES) { toast.error('素材池存储已满 (300MB)'); rejected++; break; }
+        usedBytes += dataUrl.length;
+        const labelCn = f.name.split('.')[0].slice(0, 12) || `上传${added + 1}`;
+        const tags = gifUploadKind === 'scene' ? ['上传', '场景'] : gifUploadKind === 'panda' ? ['上传', '熊猫'] : gifUploadKind === 'face' ? ['上传', '表情'] : ['上传'];
+        const mat: Material = { id: uid('gu'), src: dataUrl, labelCn, labelEn: labelCn, tags, tagsEn: ['upload'], faceOffset: { x: 0, y: 0, w: 0, h: 0 }, kind: gifUploadKind };
+        setGifUploads(prev => [mat, ...prev].slice(0, GIF_UPLOAD_MAX));
+        added++;
+      } catch { rejected++; }
+    }
+    if (added > 0) toast.success(`已上传 ${added} 张${rejected ? ` (${rejected} 拒绝)` : ''} · 点卡片加入画板`);
+    else if (rejected > 0) toast.error('全部上传失败');
+  };
+  const handleClearGifUploads = async () => {
+    const list = gifUploads.filter(u => (u.tags || []).includes('上传'));
+    if (list.length === 0) return;
+    const { confirmed } = await showDialog({ title: '清空上传素材', message: `清空全部 ${list.length} 张上传图? (搜图/抠脸的不动)`, destructive: true, confirmText: '清空', cancelText: '取消' });
+    if (confirmed) { setGifUploads(prev => prev.filter(u => !(u.tags || []).includes('上传'))); toast.success('已清空上传素材'); }
+  };
 
   const onExport = useCallback(async () => {
     if (exporting) return;
@@ -1629,6 +1644,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 )}
                 {assetSub === 'scene' && (
                   <div className="sidebar-grid">
+                    {gifUploads.filter(u => u.kind === 'scene').filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
                     {SCENE_LIB.filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={addFromPayload} />)}
                   </div>
                 )}
@@ -1645,14 +1661,42 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     </div>
                   )
                 )}
-                {assetSub === 'upload' && (
-                  <div className="gm-upload-zone">
-                    <button className="gm-addcap" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> 上传图片 (≤30MB)</button>
-                    <input ref={fileInputRef} type="file" accept="image/*" hidden
-                      onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = ''; }} />
-                    <div className="gm-hint" style={{ marginTop: 8 }}>上传后立即作为全幅图层加入</div>
-                  </div>
-                )}
+                {assetSub === 'upload' && (() => {
+                  const ups = gifUploads.filter(u => (u.tags || []).includes('上传'));   // 仅文件上传 (搜图/抠脸在熊猫/表情页)
+                  const kindLbl = gifUploadKind === 'general' ? '通用图' : gifUploadKind === 'panda' ? '熊猫头' : gifUploadKind === 'face' ? '表情' : '场景';
+                  return (
+                    <>
+                      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={handleGifFiles} />
+                      <div className="am-upload-kind-row">
+                        <span className="am-upload-kind-label">导入为:</span>
+                        {([{ k: 'general' as const, lbl: '通用图' }, { k: 'panda' as const, lbl: '熊猫头' }, { k: 'face' as const, lbl: '表情' }, { k: 'scene' as const, lbl: '场景' }]).map(opt => (
+                          <button key={opt.k} type="button" className={'am-upload-kind-chip' + (gifUploadKind === opt.k ? ' is-active' : '')} onClick={() => setGifUploadKind(opt.k)}>{opt.lbl}</button>
+                        ))}
+                      </div>
+                      {ups.length === 0 ? (
+                        <div className="am-upload-zone" onClick={() => fileInputRef.current?.click()}>
+                          <Upload size={22} strokeWidth={1.6} />
+                          <div className="am-upload-ttl">点击上传图片</div>
+                          <div className="am-upload-hint">单图 ≤30MB · 尺寸 ≤4096px · 共 {GIF_UPLOAD_MAX} 张</div>
+                          <div className="am-upload-hint">存浏览器本地 · 跨刷新保留 · 可反复加入画板</div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="am-upload-quota">
+                            <span><FolderOpen size={11} strokeWidth={2.2} /> {ups.length}/{GIF_UPLOAD_MAX} 张</span>
+                            <button className="am-upload-clear-btn" onClick={handleClearGifUploads} type="button" title="清空上传"><Trash2 size={10} /></button>
+                          </div>
+                          <button className="am-upload-more" onClick={() => fileInputRef.current?.click()}><Upload size={12} /> <span>继续上传 (作为 {kindLbl})</span></button>
+                          <div className="sidebar-grid">
+                            {ups.filter(matchQ).map(m => (
+                              <MaterialCardClip key={m.id} item={m} kind={m.kind === 'panda' ? 'panda' : m.kind === 'face' ? 'face' : m.kind === 'scene' ? 'scene' : undefined} onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </>
           )}
