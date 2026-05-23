@@ -1255,16 +1255,20 @@ async function probeMp4AudioMuxing(): Promise<boolean> {
 // v23-k Phase A: 分辨率 / 帧率 / 码率 — 工业级标配
 export type ExportResolution = '480p' | '720p' | '1080p';
 export type ExportFps = 24 | 30 | 60;
-const RESOLUTION_DIM: Record<ExportResolution, { w: number; h: number }> = {
-  '480p': { w: 854, h: 480 },
-  '720p': { w: 1280, h: 720 },
-  '1080p': { w: 1920, h: 1080 },
-};
 const RESOLUTION_VBPS: Record<ExportResolution, number> = {
   '480p': 3_000_000,
   '720p': 6_000_000,
   '1080p': 12_000_000,
 };
+// 短边定锚 (480/720/1080), 长边 = round(短*16/9) 偶数; aspect 决定横/竖/方 → 导出尺寸跟预览 canvasSize 同 aspect (修竖屏/方屏导出错位)
+const RESOLUTION_SHORT: Record<ExportResolution, number> = { '480p': 480, '720p': 720, '1080p': 1080 };
+function exportDims(resolution: ExportResolution, aspect: AspectId): { w: number; h: number } {
+  const short = RESOLUTION_SHORT[resolution];
+  const long = 2 * Math.round((short * 16 / 9) / 2);   // 偶数 (H.264 要求 W/H 偶)
+  if (aspect === '9:16') return { w: short, h: long };
+  if (aspect === '1:1') return { w: short, h: short };
+  return { w: long, h: short };   // 16:9 (跟旧 RESOLUTION_DIM 完全一致)
+}
 
 async function exportVideo(
   project: ProjectState,
@@ -1274,6 +1278,7 @@ async function exportVideo(
   preferMp4 = false,
   resolution: ExportResolution = '720p',
   fps: ExportFps = 30,
+  aspect: AspectId = '16:9',
 ): Promise<{ ext: string; size: number; hasAudio: boolean; mime: string; resolution: ExportResolution; fps: ExportFps }> {
   // FIX BGM 越累越大: export 开始前彻底清干净所有跑着的音源 (试听 / 上次 export 残留)
   audioEngine.cancelAll();
@@ -1281,7 +1286,7 @@ async function exportVideo(
   // 销毁旧 TTS players, export 重建保证 audio 跟 exportDest 重新 connect
   audioEngine.destroyAllTTSPlayers();
 
-  const { w: W, h: H } = RESOLUTION_DIM[resolution];
+  const { w: W, h: H } = exportDims(resolution, aspect);
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -1449,6 +1454,7 @@ export async function exportGIF(
 export function AnimateMode() {
   const isMobile = useIsMobile();
   const [project, setProject] = useState<ProjectState>(() => makeInitialProject());
+  const [aspect, setAspect] = useState<AspectId>('16:9');   // 画幅 (预览+导出共用 → 竖屏/方屏导出对齐)
   const [playhead, setPlayhead] = useState(0);
   const playheadRef = useRef(0);  // 镜像 playhead, 供事件期 (split/插入/快捷键/snap) 读最新值 → 子组件不必每帧拿 playhead prop, 可 memo
   const [isPlaying, setIsPlaying] = useState(false);
@@ -3172,6 +3178,8 @@ export function AnimateMode() {
           onOpenShortcuts={() => setShortcutsModalOpen(true)}
           onToggleDraftPopover={() => setDraftPopoverOpen(o => !o)}
           mode={project.mode ?? 'video'}
+          aspect={aspect}
+          setAspect={setAspect}
         />
         <RightPane
           clip={selectedClip}
@@ -3350,6 +3358,7 @@ export function AnimateMode() {
         <PreviewModal
           project={project}
           userBGMs={userBGMs}
+          aspect={aspect}
           onClose={() => setPreviewModalOpen(false)}
         />
       )}
@@ -3358,6 +3367,7 @@ export function AnimateMode() {
           project={project}
           userBGMs={userBGMs}
           name={'我的沙雕动画'}
+          aspect={aspect}
           onClose={() => setExportModalOpen(false)}
         />
       )}
@@ -4633,7 +4643,7 @@ function PreviewPane({
   clips, lanes, time, duration, isPlaying, selectedId,
   onSelect, onPlayPause, onSeek, onTransformLive, onCaptionTextLive, onUpdateClipLive, onUpdateClipCommit, onBeginDrag, onEndDrag, onQuickAdd,
   onClipContextMenu,
-  onRandomize, onOpenShortcuts, onToggleDraftPopover, mode,
+  onRandomize, onOpenShortcuts, onToggleDraftPopover, mode, aspect, setAspect,
 }: {
   clips: Clip[];
   lanes: LaneCount;
@@ -4657,9 +4667,10 @@ function PreviewPane({
   onOpenShortcuts?: () => void;
   onToggleDraftPopover?: () => void;
   mode?: ProjectMode;
+  aspect: AspectId;
+  setAspect: (a: AspectId) => void;
 }) {
   const isGifMode = mode === 'gif';
-  const [aspect, setAspect] = useState<AspectId>('16:9');
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
   const [dropHilite, setDropHilite] = useState(false);
@@ -6606,7 +6617,7 @@ function DraftPopover({
 // ============================================================
 // PREVIEW MODAL — 全屏播放
 // ============================================================
-function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; onClose: () => void }) {
+function PreviewModal({ project, userBGMs, aspect, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; aspect: AspectId; onClose: () => void }) {
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const userBGMsRef = useRef(userBGMs);
@@ -6701,7 +6712,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
       const r = stageRef.current.getBoundingClientRect();
       const availW = r.width - 32;
       const availH = r.height - 32;
-      const ratio = 16 / 9;
+      const ratio = aspect === '16:9' ? 16 / 9 : aspect === '9:16' ? 9 / 16 : 1;   // 跟 PreviewPane 同 aspect → 全屏预览不再恒横屏
       let w = availW, h = w / ratio;
       if (h > availH) { h = availH; w = h * ratio; }
       setCanvasSize({ w: Math.round(w), h: Math.round(h) });
@@ -6710,7 +6721,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
     const ro = new ResizeObserver(resize);
     if (stageRef.current) ro.observe(stageRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [aspect]);
 
   const activeImageClips = useMemo(() => {
     const arr = project.clips.filter(c => c.trackId === 'image' && playhead >= c.start && playhead < c.end) as ImageClip[];
@@ -6829,7 +6840,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
 // ============================================================
 // EXPORT MODAL — 真渲染 + 下载
 // ============================================================
-function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; name: string; onClose: () => void }) {
+function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; name: string; aspect: AspectId; onClose: () => void }) {
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -6883,7 +6894,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
             setPhase('done');
           }
         } else {
-          const result = await exportVideo(project, name, (p) => { if (!cancelledRef.current) setProgress(p); }, userBGMs, format === 'mp4', resolution, fps);
+          const result = await exportVideo(project, name, (p) => { if (!cancelledRef.current) setProgress(p); }, userBGMs, format === 'mp4', resolution, fps, aspect);
           if (!cancelledRef.current) {
             setOutputInfo(result);
             setDone(true);
@@ -6948,7 +6959,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
             <>
               <div className="am-export-status">
                 <strong>{`导出 ${(supportedMime.ext || 'mp4').toUpperCase()} 视频`}</strong>
-                <span className="am-export-sub">{RESOLUTION_DIM[resolution].w}×{RESOLUTION_DIM[resolution].h} · {fps}fps · 时长 {project.duration.toFixed(1)}s · 估算码率 {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
+                <span className="am-export-sub">{exportDims(resolution, aspect).w}×{exportDims(resolution, aspect).h} · {fps}fps · 时长 {project.duration.toFixed(1)}s · 估算码率 {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
               </div>
               {/* v23-k Phase A: 分辨率 + 帧率 自选 */}
               <div className="am-export-format-row">
@@ -6961,7 +6972,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
                       className={'am-tb-btn' + (resolution === r ? ' am-tb-btn-primary' : '')}
                       onClick={() => setResolution(r)}
                       style={{ flex: 1, justifyContent: 'center' }}
-                      title={`${RESOLUTION_DIM[r].w}×${RESOLUTION_DIM[r].h} · ${(RESOLUTION_VBPS[r] / 1_000_000).toFixed(1)} Mbps`}
+                      title={`${exportDims(r, aspect).w}×${exportDims(r, aspect).h} · ${(RESOLUTION_VBPS[r] / 1_000_000).toFixed(1)} Mbps`}
                     >
                       {r === '480p' ? '480p 标清' : r === '720p' ? '720p 高清' : '1080p 蓝光'}
                     </button>
@@ -7076,7 +7087,7 @@ function ExportModal({ project, userBGMs, name, onClose }: { project: ProjectSta
               <div className="am-export-meta">
                 {isGif
                   ? `${gifPreset.width}×${gifPreset.height} · ${gifPreset.fps}fps · GIF (gif.js worker)`
-                  : `${RESOLUTION_DIM[resolution].w}×${RESOLUTION_DIM[resolution].h} · ${fps}fps · ${supportedMime.mime}`
+                  : `${exportDims(resolution, aspect).w}×${exportDims(resolution, aspect).h} · ${fps}fps · ${supportedMime.mime}`
                 }
               </div>
             </>

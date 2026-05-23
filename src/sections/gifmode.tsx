@@ -142,6 +142,26 @@ function clampClipsToDuration(clips: Clip[], oldD: number, newD: number): Clip[]
   });
 }
 
+// 变脸 (face-cycle) 删一张脸后重排剩余脸时段, 消除循环里的空脸洞. 保留 dissolve/hard-cut 性质
+// (任一兄弟有 xfade ⇒ dissolve) + 播放顺序 (按 start 排). M==1 → 单脸全幅清 xfade; M>=2 → 复用 applyFaceCycle 窗口数学.
+function rewindowCycle(clips: Clip[], shellId: string, D: number): Clip[] {
+  const faces = (clips.filter(c => c.trackId === 'image' && (c as ImageClip).boundTo === shellId) as ImageClip[])
+    .slice().sort((a, b) => a.start - b.start);
+  const M = faces.length;
+  if (M === 0) return clips;
+  const dissolve = M >= 2 && faces.some(f => f.xfadeIn != null || f.xfadeOut != null);
+  const seg = D / M;
+  const xf = dissolve ? Math.min(0.35, seg * 0.45) : 0;
+  const win = new Map<string, { start: number; end: number; xfadeIn?: number; xfadeOut?: number }>();
+  faces.forEach((f, i) => win.set(f.id, {
+    start: i * seg,
+    end: (i < M - 1) ? (i + 1) * seg + xf : D,
+    xfadeIn: (dissolve && i > 0) ? xf : undefined,
+    xfadeOut: (dissolve && i < M - 1) ? xf : undefined,
+  }));
+  return clips.map(c => { const w = win.get(c.id); return w ? ({ ...c, ...w } as Clip) : c; });
+}
+
 const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 // 时间轴吸附: 吸到其它 clip 端点 / 0 / D (tol 按像素阈值换算成秒). 跟视频 findSnapTime 同思路 (gifmode 不 import animatemode)
 function gifSnapTime(raw: number, clips: Clip[], D: number, ignoreId: string | null, tolSec: number): { t: number; snapped: boolean } {
@@ -769,8 +789,17 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   };
 
   const deleteClip = useCallback((id: string) => {
-    setProject(p => ({ ...p, clips: p.clips.filter(c => c.id !== id).map(c =>  // 删壳时清掉跟随它的脸的 boundTo (防悬挂引用)
-      (c.trackId === 'image' && (c as ImageClip).boundTo === id) ? ({ ...c, boundTo: undefined, faceLocal: undefined } as Clip) : c) }));
+    setProject(p => {
+      const del = p.clips.find(c => c.id === id) as ImageClip | undefined;
+      let next = p.clips.filter(c => c.id !== id).map(c =>  // 删壳时清掉跟随它的脸的 boundTo (防悬挂引用)
+        (c.trackId === 'image' && (c as ImageClip).boundTo === id) ? ({ ...c, boundTo: undefined, faceLocal: undefined } as Clip) : c);
+      // 删的是变脸里的一张脸 → 重排剩余脸时段消除空脸洞 (剩 ≥1 才重排; 剩 1 张自动全幅)
+      const shellId = del?.trackId === 'image' ? del.boundTo : undefined;
+      if (shellId && next.some(c => c.trackId === 'image' && (c as ImageClip).boundTo === shellId)) {
+        next = rewindowCycle(next, shellId, p.duration);
+      }
+      return { ...p, clips: next };
+    });
     setSelectedId(prev => (prev === id ? null : prev));
   }, []);
 
