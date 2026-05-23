@@ -6884,7 +6884,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
   const [fps, setFps] = useState<ExportFps>(30);
   // v23-l: GIF preset (仅 mode=gif 用)
   const isGif = (project.mode ?? 'video') === 'gif';
-  const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'wechat');
+  const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'quick-share');   // 默认标准档 (跟 gif 视图一致, 不再默认小巧 240²)
   const gifPreset = resolveGifPreset(gifPresetId);
 
   const supportedMime = useMemo(() => pickBestMime(format === 'mp4'), [format]);

@@ -289,7 +289,7 @@ export function Collection({ onOpenQuick, onOpenEditor, onOpenAnimate }: Collect
           {(['all', 'image', 'gif', 'video'] as Filter[]).map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f)}
+              onClick={() => { setFilter(f); clearSelection(); }}
               className={filter === f ? 'about-arcade-btn' : ''}
               style={filter === f
                 ? { padding: '6px 12px', fontSize: 13, borderRadius: 10 }
