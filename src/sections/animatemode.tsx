@@ -1726,9 +1726,13 @@ export function AnimateMode() {
   // ========================================================
   const ttsGenSigRef = useRef<Map<string, string>>(new Map());
   const ttsAudioCacheRef = useRef<Map<string, { audioSrc: string; duration: number }>>(new Map());
+  const genRunningRef = useRef(false);   // 防并发: setProjectLive 改 clips 会再触发本 effect, 并发跑多循环→并发抓 youdao→限流→退 baidu (随机生成"声音不一样"根因)
   useEffect(() => {
     if (view !== 'video') return;   // GIF 视图不跑视频 TTS 自动生成 (GIF 默认后省无谓云端请求)
     const timer = setTimeout(async () => {
+      if (genRunningRef.current) return;   // 已有生成循环在跑 → 不并发 → 串行抓取 → 同一音色 (晓晓), 不被 baidu 串味
+      genRunningRef.current = true;
+      try {
       for (const c of project.clips) {
         if (c.trackId !== 'tts') continue;
         const ts = c as TTSClip;
@@ -1804,6 +1808,7 @@ export function AnimateMode() {
         // 限流退避: 每条网络抓取后隔一下再抓下一条 → 减少 youdao 突发限流, 多段都拿到统一好音色 (减少 baidu fallback)
         await new Promise(r => setTimeout(r, 400));
       }
+      } finally { genRunningRef.current = false; }
     }, 800);
     return () => clearTimeout(timer);
   }, [project.clips, setProjectLive, view]);
@@ -2434,7 +2439,10 @@ export function AnimateMode() {
       if (!confirmed) return;
     }
     // 字幕走完整文案池 (quickModeTexts ~150 条) + pickRandomText 自带最近10去重 + exclude 防连续重复 → 每段都不一样 (原来固定 10 句翻来覆去)
-    const fxs: ImageFx[] = ['none', 'none', 'shake', 'zoom', 'flash'];
+    // 视频随机动效: 偏「持续运镜」(整段可见的 ken-burns/缓推缓拉/平移) + 少量微动效; 不留 none → 每段都有明显动效
+    const motionFx: ImageFx[] = ['ken-burns', 'zoom-in', 'zoom-out', 'pan-l', 'pan-r', 'pan-u'];
+    const briefFx: ImageFx[] = ['shake', 'bounce', 'pulse', 'zoom'];
+    const fxPool: ImageFx[] = [...motionFx, ...motionFx, ...briefFx];   // 运镜 2x 权重
     const isGifMode = (project.mode ?? 'video') === 'gif';
     const voices = VOICE_LIB.filter(v => v.lang.startsWith('zh')).map(v => v.id);
     const segs = 4;
@@ -2500,17 +2508,16 @@ export function AnimateMode() {
             start: segStart, end: captionEnd, text: line, voice,
           });
         }
-        // FX clip 到 FX 轨 (时间轴可见, 右侧可调时长 / 类型). 跳 'none' 避免空 fx clip
-        const fxPick = fxs[Math.floor(Math.random() * fxs.length)];
-        if (fxPick !== 'none') {
-          const fxInfo = FX_LIB.find(f => f.id === fxPick);
-          const fxDur = Math.min(captionEnd - segStart, fxInfo?.defaultDuration ?? 0.8);
-          next.push({
-            id: `rfx${i}-${ts}`, trackId: 'fx', lane: 0,
-            start: segStart, end: segStart + fxDur,
-            fx: fxPick, targetClipId: imageId,
-          });
-        }
+        // FX clip 到 FX 轨 (时间轴可见可调). 每段都给动效; 持续运镜类铺满整段(整段可见), 微动效用默认短时长
+        const fxPick = fxPool[Math.floor(Math.random() * fxPool.length)];
+        const fxInfo = FX_LIB.find(f => f.id === fxPick);
+        const isContinuous = motionFx.includes(fxPick);
+        const fxDur = isContinuous ? (captionEnd - segStart) : Math.min(captionEnd - segStart, fxInfo?.defaultDuration ?? 0.8);
+        next.push({
+          id: `rfx${i}-${ts}`, trackId: 'fx', lane: 0,
+          start: segStart, end: segStart + Math.max(0.3, fxDur),
+          fx: fxPick, targetClipId: imageId,
+        });
         cursor = segEnd;
       }
       // 总时长自适应 — GIF: cap GIF_MAX_DURATION (15s) · video: 最少 8s
