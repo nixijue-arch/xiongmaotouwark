@@ -91,6 +91,26 @@ function imageRenderBox(c: ImageClip, media: MediaAsset, W: number, H: number, t
   return { cx: W / 2 + (tr.x / 100) * W, cy: H / 2 + (tr.y / 100) * H, iw, ih };
 }
 
+// 配套自愈: 老配套(脸不透明叠壳上/无 blend, 盖住墨镜等壳特征)迁到编辑器式规则 — 壳顶层(lane 小)+multiply+role:shell,
+// 脸底层+role:face. 渲染时白内部×脸=脸透出, 黑特征(墨镜)×脸=盖在脸上. 跑在 hydrate/import (老 IDB 项目自动修).
+function normalizeCombo(p: GifProject): GifProject {
+  const clips = p.clips.map(c => ({ ...c }));
+  let changed = false;
+  for (const c of clips) {
+    if (c.trackId !== 'image') continue;
+    const f = c as ImageClip;
+    if (!f.boundTo) continue;
+    const shell = clips.find(s => s.id === f.boundTo && s.trackId === 'image') as ImageClip | undefined;
+    if (!shell) continue;
+    if (shell.blend !== 'multiply') { shell.blend = 'multiply'; changed = true; }
+    if (shell.role !== 'shell') { shell.role = 'shell'; changed = true; }
+    if (f.role !== 'face') { f.role = 'face'; changed = true; }
+    if (f.blend) { f.blend = undefined; changed = true; }
+    if (shell.lane >= f.lane) { const t = shell.lane; shell.lane = f.lane; f.lane = t; changed = true; }  // 壳必须画在脸之后(lane 小=顶)
+  }
+  return changed ? { ...p, clips } : p;
+}
+
 // 时长变化时夹紧 clip [start,end] (全幅的跟随新时长; 部分的只夹上限) — 不再强制全部全幅, 让用户能在时间轴自定时段
 function clampClipsToDuration(clips: Clip[], oldD: number, newD: number): Clip[] {
   return clips.map(c => {
@@ -290,8 +310,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     idbGet<GifProject>(GIF_PROJECT_IDB_KEY).then(saved => {
       if (alive && saved && saved.kind === 'gif-project' && Array.isArray(saved.clips) && saved.clips.length) {
         skipHistRef.current = true;
-        histSnapRef.current = saved;
-        setProject(saved);
+        const migrated = normalizeCombo(saved);
+        histSnapRef.current = migrated;
+        setProject(migrated);
       }
       if (alive) setHydrated(true);
     }).catch(() => { if (alive) setHydrated(true); });
@@ -510,7 +531,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   // 配套 = panda + face 两个独立图层 (各可套不同循环动作). 用编辑器 face 布局算 face 位置, 映射到 GIF 画板
   const addCombo = useCallback(async (panda: Material, face: Material) => {
     try {
-      const box = await getEditorPandaBox(panda.src, { fillShell: true });
+      const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
       const fl = await calcEditorFaceLayout({
         pandaSrc: panda.src, faceSrc: face.src, faceOffset350: panda.faceOffset,
         panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h,
@@ -537,14 +558,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         const bumped = p.clips.map(c => (c.trackId === 'image' ? { ...c, lane: c.lane + 2 } as Clip : c));
         const pandaClip: ImageClip = {
           id: pandaId, trackId: 'image', lane: 0, start: 0, end: p.duration,
-          src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply',
+          src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', role: 'shell',
           transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
         };
         const faceClip: ImageClip = {
           id: faceId, trackId: 'image', lane: 1, start: 0, end: p.duration,
           src: face.src, label: face.labelCn + '·脸', fx: 'none',
           transform: faceTransform, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
-          boundTo: pandaId, faceLocal,
+          boundTo: pandaId, faceLocal, role: 'face',
         };
         return { ...p, clips: [...bumped, pandaClip, faceClip] };
       });
@@ -1039,7 +1060,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         safe.clips = safe.clips.map(c => (c.trackId === 'image' && (c as ImageClip).boundTo && !liveIds.has((c as ImageClip).boundTo!)) ? ({ ...c, boundTo: undefined, faceLocal: undefined } as Clip) : c);
         historyRef.current = { past: [], future: [] };
         skipHistRef.current = true;
-        setProject(safe);
+        setProject(normalizeCombo(safe));
         setSelectedId(safe.clips[0]?.id ?? null);
         setScrubT(0); frozenRef.current = 0; startRef.current = performance.now();
         setHistTick(t => t + 1);
@@ -1089,7 +1110,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const faceCycles = Math.random() < 0.35 ? 2 : 1;
     const loopMode: GifLoopMode = (() => { const r = Math.random(); return r < 0.4 ? 'normal' : r < 0.65 ? 'boomerang' : r < 0.78 ? 'reverse' : r < 0.88 ? 'rewind' : 'crossfade'; })();
     try {
-      const box = await getEditorPandaBox(panda.src, { fillShell: true });
+      const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
       const fl = await calcEditorFaceLayout({
         pandaSrc: panda.src, faceSrc: face.src, faceOffset350: panda.faceOffset,
         panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h,
@@ -1104,8 +1125,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const pid = uid('img'), fid = uid('img');
       setProject(p => {
         const clips: Clip[] = [
-          { id: pid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
-          { id: fid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR } as ImageClip,
+          { id: pid, trackId: 'image', lane: 0, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: 'multiply', role: 'shell', transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
+          { id: fid, trackId: 'image', lane: 1, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR, role: 'face' } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', fontSize: GIF_CAP_FONT, transform: { x: 0, y: 34 } } as CaptionClip);
         return { ...p, clips, loop: { ...p.loop, mode: loopMode } };
@@ -1126,7 +1147,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     if (!face) return;
     const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
     if (others.length === 0) { toast('没有可绑定的熊猫头壳'); return; }
-    const shell = others.find(o => o.blend === 'multiply') ?? others.find(o => !(o.label ?? '').endsWith('·脸')) ?? others.slice().sort((a, b) => b.lane - a.lane)[0];  // 壳 = blend multiply / 非·脸 / 兜底最底层
+    const shell = others.find(o => o.role === 'shell') ?? others.find(o => o.blend === 'multiply') ?? others.find(o => !(o.label ?? '').endsWith('·脸')) ?? others.slice().sort((a, b) => b.lane - a.lane)[0];  // 壳 = role shell / blend multiply / 非·脸 / 兜底
     const sMedia = cacheRef.current.get(shell.src), fMedia = cacheRef.current.get(face.src);
     if (!sMedia || !fMedia) { toast('素材还在加载, 稍后再绑'); return; }
     const W = preset.width, H = preset.height;
@@ -1152,7 +1173,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     toast('已解绑 — 表情现在独立');
   }, [preset]);
   // 换素材: 点 shell/face 图层弹素材网格快速换 (保留位置/动作/绑定). 区分用 label '·脸' 后缀.
-  const swapKind = (c: ImageClip): 'face' | 'panda' => c.boundTo ? 'face' : c.blend === 'multiply' ? 'panda' : (c.label ?? '').endsWith('·脸') ? 'face' : 'panda';  // 稳定判别 (不靠 label, 防改名误判)
+  const swapKind = (c: ImageClip): 'face' | 'panda' => (c.role === 'face' || c.boundTo) ? 'face' : (c.role === 'shell' || c.blend === 'multiply') ? 'panda' : (c.label ?? '').endsWith('·脸') ? 'face' : 'panda';  // role 优先 (稳定, 不靠 label)
   const swapFace = useCallback((id: string, face: Material) => {
     patchClip(id, { src: face.src, label: face.labelCn + '·脸' });  // face 即插即换, 绑定/位置不动
     toast.success(`已换表情 · ${face.labelCn}`);
@@ -1162,7 +1183,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     setSwapBusy(true);
     const tid = toast.loading('换熊猫头…');
     try {
-      const box = await getEditorPandaBox(panda.src, { fillShell: true });
+      const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
       const W = preset.width, H = preset.height;
       const baseSize = Math.min(W, H) * 0.6, K = baseSize / box.w, fillScale = 1.5 * Math.min(1, box.w / box.h);
       let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
@@ -1613,7 +1634,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   <div className={`am-layer-group-head am-layer-group-${type}`}>{type === 'image' ? '画面' : '字幕'}</div>
                   {group.map(c => (
                     <div key={c.id}
-                      className={`am-layer-item am-layer-item-${type}${c.id === selectedId ? ' is-selected' : ''}${layerOverId === c.id ? ' is-drag-over' : ''}`}
+                      className={`am-layer-item am-layer-item-${type}${c.id === selectedId ? ' is-selected' : ''}${layerOverId === c.id ? ' is-drag-over' : ''}${type === 'image' && (c as ImageClip).boundTo ? ' is-bound' : ''}`}
                       onClick={() => setSelectedId(c.id)}
                       onContextMenu={e => onGifClipContextMenu(e, c)}
                       draggable
@@ -1627,7 +1648,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                         : <span className="am-layer-icon"><TypeIcon size={14} strokeWidth={2} /></span>}
                       <div className="am-layer-meta">
                         <div className="am-layer-name">{type === 'image' ? ((c as ImageClip).label || '图层') : ((c as CaptionClip).text || '字幕')}</div>
-                        <div className="am-layer-sub">{type === 'image' ? '主体' : '字幕'} · L{c.lane + 1}</div>
+                        <div className="am-layer-sub">{type === 'image' ? (() => { const ic = c as ImageClip; const role = ic.role ?? (ic.boundTo ? 'face' : ic.blend === 'multiply' ? 'shell' : ic.kind === 'scene' ? 'scene' : 'image'); return role === 'shell' ? '熊猫头壳' : role === 'face' ? '🔗 表情 · 跟随壳' : role === 'scene' ? '背景' : '图片'; })() : '字幕'}</div>
                       </div>
                       <button className="am-layer-del" onClick={e => { e.stopPropagation(); deleteClip(c.id); }} title="删除"><X size={10} /></button>
                     </div>

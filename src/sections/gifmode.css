@@ -96,6 +96,10 @@
 /* 画板 = 视频同款 DOM 舞台 (复用全局 am-preview-canvas / am-stage-img / am-stage-frame / am-stage-handle / am-caption-stage / am-move-marker). GIF 仅加白底 + A·B 连线 */
 .gm-stage { position: relative; background: #fff; overflow: hidden; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(127,157,200,0.5), 0 6px 18px rgba(40,78,120,0.18); }
 .gm-layerlist { max-height: 40vh; overflow-y: auto; }
+/* 配套脸图层缩进 + 链接竖线 (示意它跟随上面的壳) */
+.gm-layerlist .am-layer-item.is-bound { margin-left: 14px; border-left: 2px solid #b98ae0; }
+/* 缩略图棋盘底 (透明壳/抠脸在白面板上看不清 → 棋盘格衬底) */
+.gm-layerlist .am-layer-thumb { background-color: #f0f0f4; background-image: linear-gradient(45deg, #dcdce4 25%, transparent 25%, transparent 75%, #dcdce4 75%), linear-gradient(45deg, #dcdce4 25%, transparent 25%, transparent 75%, #dcdce4 75%); background-size: 10px 10px; background-position: 0 0, 5px 5px; }
 .gm-marker-line { position: absolute; height: 2px; background: rgba(255,94,0,0.85); transform-origin: left center; pointer-events: none; z-index: 59; }
 
 /* GIF 循环时间轴 — clips/ruler/playhead/handles 复用视频全局 am-tl-* 类 (一眼对齐视频); 这里只留 label 列 + GIF 专属补充 */

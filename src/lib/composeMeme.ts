@@ -507,14 +507,14 @@ export async function calcEditorFaceLayout(args: {
  *
  * @returns { croppedSrc, x, y, w, h } — panda 元素位置 + 尺寸 + 已 bbox-crop 的 src
  */
-export async function getEditorPandaBox(src: string, opts?: { fillShell?: boolean }): Promise<{
+export async function getEditorPandaBox(src: string, opts?: { fillShell?: boolean; maxPx?: number }): Promise<{
   croppedSrc: string;
   x: number; y: number;
   w: number; h: number;
 }> {
   // fillShell: GIF 两图层 panda 内部填白防场景透出 (默认 false → 编辑器/快速/校准路径零影响)
-  // GIF 路径顺带封顶 350px (croppedSrc 进 clip.src/IDB; box 几何用 FRAME=350 + aspect, 不受影响)
-  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false, opts?.fillShell ? 350 : 0);
+  // maxPx: croppedSrc 分辨率封顶 (GIF 配套传 350 控 IDB 体积; box 几何用 FRAME=350 + aspect, 不受影响)
+  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false, opts?.maxPx ?? (opts?.fillShell ? 350 : 0));
   const aspect = cropped.w / Math.max(1, cropped.h);
   const FRAME = 350;
   let w = FRAME, h = FRAME;
