@@ -4851,6 +4851,11 @@
 
   /* v23-l: 5 tab 底栏布局 + disabled state */
   .am-mobile-bottombar--5 { grid-template-columns: repeat(5, 1fr); }
+  /* 视频端 7 tab (素材/音乐/配音/字幕/动效/编辑/导出 — 跟桌面左栏 segs 严格对齐) — 收紧 icon/label 适配窄列 */
+  .am-mobile-bottombar--7 { grid-template-columns: repeat(7, 1fr); }
+  .am-mobile-bottombar--7 .am-mb-tab { padding: 6px 0; }
+  .am-mobile-bottombar--7 .am-mb-tab-ic { font-size: 17px; }
+  .am-mobile-bottombar--7 .am-mb-tab-lbl { font-size: 9px; }
   .am-mb-tab.is-disabled { opacity: 0.35; pointer-events: none; }
 
   /* v23-l: Mobile Inspector MVP (5th tab — 编辑 sheet) */

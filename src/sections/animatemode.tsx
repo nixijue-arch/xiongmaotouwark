@@ -152,6 +152,11 @@ async function fetchTTSBlob(text: string, engine: 'youdao' | 'baidu' = 'youdao',
   const params = new URLSearchParams({ engine, text, lang });
   if (engine === 'baidu' && opts.per !== undefined) params.set('per', String(opts.per));
   const url = `${TTS_PROXY_BASE}?${params}`;
+  // 会话级缓存 (key=完整 URL, 含 ?text=) — 同文案+同音色重复抓取(试听反复点 / 多 clip 同文)秒回,
+  //   不依赖浏览器 HTTP 缓存 (修「试听每次等 10s」: no-store 曾关掉 HTTP 缓存致每次重打 youdao).
+  const cacheKey = `blob:${url}`;
+  const cached = _ttsCache.get(cacheKey);
+  if (cached) return cached;
   // eslint-disable-next-line no-console
   console.log('[TTS] fetch via Netlify Function:', url);
   const res = await fetch(url);
@@ -164,12 +169,14 @@ async function fetchTTSBlob(text: string, engine: 'youdao' | 'baidu' = 'youdao',
     throw new Error(`非 audio 响应 (${ct})`);
   }
   const blob = await res.blob();
-  return await new Promise<string>((resolve, reject) => {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result || ''));
     r.onerror = () => reject(new Error('FileReader 失败'));
     r.readAsDataURL(blob);
   });
+  _ttsCacheLRU(cacheKey, dataUrl);
+  return dataUrl;
 }
 
 // 有道试听 — 走 Netlify Function 中转 → dataURL → audio.play()
@@ -219,7 +226,7 @@ export function setTTSProxyURL(url: string) { _userTTSProxyURL = url.trim(); }
 export function getTTSProxyURL() { return _userTTSProxyURL; }
 
 const _ttsCache = new Map<string, string>();
-const _TTS_CACHE_LIMIT = 60;
+const _TTS_CACHE_LIMIT = 120;   // 会话级 TTS dataURL 缓存 (试听 + auto-gen + 代理 共用; 每条 ~30-80KB)
 function _ttsCacheLRU(key: string, val: string) {
   if (_ttsCache.size >= _TTS_CACHE_LIMIT) {
     const first = _ttsCache.keys().next().value;
@@ -1481,7 +1488,7 @@ export function AnimateMode() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectHydrated, setProjectHydrated] = useState(false);
   // v23-l mobile: 底栏 4 tab → sheet
-  const [mobileSheet, setMobileSheet] = useState<'assets' | 'caption' | 'fx' | 'inspector' | null>(null);
+  const [mobileSheet, setMobileSheet] = useState<'assets' | 'music' | 'voice' | 'caption' | 'fx' | 'inspector' | null>(null);
   // 视频/GIF 视图 (融入: GIF 是 animate 内的视图, 非独立板块). localStorage 持久.
   const [view, setView] = useState<'video' | 'gif'>(() => {
     try { const v = localStorage.getItem('xmw.animate-view'); return v === 'video' ? 'video' : 'gif'; } catch { return 'gif'; }  // 默认 GIF (视频太复杂, 多数人首选 GIF); 只有显式选过视频才记住视频
@@ -3338,7 +3345,7 @@ export function AnimateMode() {
       {ctxMenu.render()}
       {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}
       {isMobile && view === 'video' && (
-        <div className="am-mobile-bottombar am-mobile-bottombar--5" role="tablist" aria-label="底部工具">
+        <div className="am-mobile-bottombar am-mobile-bottombar--7" role="tablist" aria-label="底部工具">
           <button
             type="button"
             role="tab"
@@ -3348,6 +3355,26 @@ export function AnimateMode() {
           >
             <span className="am-mb-tab-ic">🎨</span>
             <span className="am-mb-tab-lbl">素材</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'music'}
+            className={'am-mb-tab' + (mobileSheet === 'music' ? ' is-active' : '')}
+            onClick={() => setMobileSheet(s => s === 'music' ? null : 'music')}
+          >
+            <span className="am-mb-tab-ic">🎵</span>
+            <span className="am-mb-tab-lbl">音乐</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileSheet === 'voice'}
+            className={'am-mb-tab' + (mobileSheet === 'voice' ? ' is-active' : '')}
+            onClick={() => setMobileSheet(s => s === 'voice' ? null : 'voice')}
+          >
+            <span className="am-mb-tab-ic">🎙</span>
+            <span className="am-mb-tab-lbl">配音</span>
           </button>
           <button
             type="button"
@@ -3417,6 +3444,8 @@ export function AnimateMode() {
             <div className="am-mobile-sheet-head">
               <span>
                 {mobileSheet === 'assets' && '🎨 素材库'}
+                {mobileSheet === 'music' && '🎵 背景音乐'}
+                {mobileSheet === 'voice' && '🎙 配音音色'}
                 {mobileSheet === 'caption' && '💬 字幕'}
                 {mobileSheet === 'fx' && '✨ 动效'}
                 {mobileSheet === 'inspector' && '🔧 编辑'}
@@ -3440,7 +3469,7 @@ export function AnimateMode() {
               ) : (
                 <LeftPane
                   mode={project.mode ?? 'video'}
-                  initialSeg={mobileSheet === 'caption' ? 'caption' : mobileSheet === 'fx' ? 'fx' : 'asset'}
+                  initialSeg={mobileSheet === 'caption' ? 'caption' : mobileSheet === 'fx' ? 'fx' : mobileSheet === 'music' ? 'music' : mobileSheet === 'voice' ? 'voice' : 'asset'}
                   uploads={uploads}
                   setUploads={setUploads}
                   userBGMs={userBGMs}

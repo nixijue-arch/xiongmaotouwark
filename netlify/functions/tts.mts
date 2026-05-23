@@ -80,11 +80,12 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
       headers: {
         ...CORS_HEADERS,
         'Content-Type': contentType,
-        // ⚠️ no-store (修「随机配音全是同一段、且不是当前文案」严重 bug):
-        //   旧 'public, max-age=3600' 让 Netlify 边缘/中间层缓存本响应. 若缓存键按 path 忽略 ?text=
-        //   query → 不同文案的请求全部命中同一条旧缓存 → 4 段配音听到的是更早某次请求的同一段音频.
-        //   客户端 (ttsAudioCacheRef 内存缓存 + clip.audioSrc dataURL 落 IDB) 已自带缓存, 共享缓存零收益、纯风险.
-        'Cache-Control': 'no-store',
+        // ⚠️ private (而非 public / no-store):
+        //   - public(旧): Netlify 共享边缘缓存按 path 忽略 ?text= → 不同文案命中同一旧缓存 = 「全是同一段错误音频」bug.
+        //   - no-store(过修): 连浏览器都不缓存 → 每次试听/抓取都重打 youdao(~3-10s) = 试听巨慢 (用户报"配音坏了").
+        //   - private(对): 仅【浏览器】按完整 URL(含 ?text=) 缓存 → 同文案重复试听/抓取秒回, 且各文案隔离正确;
+        //     共享 CDN 不缓存 → 杜绝跨文案串台. 客户端 batchAudioSeen 串台检测兜底 youdao 限流返通用音频的情况.
+        'Cache-Control': 'private, max-age=86400',
       },
     });
   } catch (e) {
