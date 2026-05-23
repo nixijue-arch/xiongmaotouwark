@@ -744,10 +744,10 @@ const audioEngine = (() => {
       }
       return;
     }
-    // 在范围内
-    // drift > 150ms 才 seek (避免每 frame 都 seek 卡顿)
+    // 在范围内: 只在暂停/起播时校正 seek; 稳定播放中不 seek (手机 audio seek 很贵 + 会咔哒断音 → 卡顿主因),
+    // 让 audio 自由播 (小漂移听不出); 仅严重失同步(>1s)才硬纠. 修手机配音卡顿.
     const drift = Math.abs(p.audio.currentTime - local);
-    if (drift > 0.15) {
+    if (drift > 0.15 && (!isPlaying || p.audio.paused || drift > 1.0)) {
       try { p.audio.currentTime = local; } catch {}
     }
     if (isPlaying) {
@@ -1201,7 +1201,7 @@ function pickBestMime(preferMp4 = false): { mime: string; ext: 'mp4' | 'webm' } 
       return c;
     }
   }
-  return { mime: 'video/webm', ext: 'webm' };
+  return { mime: '', ext: 'webm' };   // 啥都不支持 (iOS Safari MediaRecorder 常见) → 让 exportVideo 报清晰错, 别假装能录出空文件
 }
 
 // 检测浏览器 mp4 audio mux 是否真工作 — 用 isTypeSupported 不够 (撒谎). 录 0.3s 真测试.
@@ -1295,6 +1295,9 @@ async function exportVideo(
   const ctx: CanvasRenderingContext2D = ctxRaw;
 
   const { mime, ext } = pickBestMime(preferMp4);
+  if (!mime || typeof MediaRecorder === 'undefined') {
+    throw new Error('此设备/浏览器不支持视频录制 (iOS Safari 常见) — 请改用「GIF」导出');
+  }
   // 先把所有 image 资源预加载 (GIF 走 decoder 拿多帧, 静图走 <img>)
   const allSrcs = Array.from(new Set(project.clips.filter(c => c.trackId === 'image').map(c => (c as ImageClip).src)));
   const imgCache = new Map<string, MediaAsset>();
@@ -1964,7 +1967,9 @@ export function AnimateMode() {
       return;
     }
     lastTimeRef.current = performance.now();
+    const frameMin = isMobile ? 1000 / 30 : 0;   // 手机限 30fps 更新 playhead → 省每帧全树 re-render 的卡顿 (dt 累积, 播放速度不变)
     function tick(now: number) {
+      if (now - lastTimeRef.current < frameMin) { rafRef.current = requestAnimationFrame(tick); return; }
       const dt = (now - lastTimeRef.current) / 1000;
       lastTimeRef.current = now;
       setPlayhead(p => {
@@ -1979,7 +1984,7 @@ export function AnimateMode() {
     }
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [isPlaying, project.duration, view]);
+  }, [isPlaying, project.duration, view, isMobile]);
   useEffect(() => { playheadRef.current = playhead; }, [playhead]);  // playheadRef 跟随 playhead (覆盖所有 setPlayhead 入口)
   // TTS / BGM 同步 — 两条路径:
   //   有 audioSrc: syncTTSPlayer 严格跟 playhead 绑 (1s/2s/3s 听到对应字, 可导出 MP4 真音轨)
@@ -2483,17 +2488,7 @@ export function AnimateMode() {
         ? Math.min(Math.max(cursor, 4), GIF_MAX_DURATION)
         : Math.max(cursor, 8);
       // v24: GIF 模式跳过 BGM clip (无声音)
-      if (!isGifMode) {
-        // 优先挑真发声/可识别的 BGM (file 内置"机构进场了" + 用户上传的); 都没有才退合成音
-        // → 用户上传抖音神曲(哈基米等)后, 随机会直接用上 (合成 BGM 太弱听不出 = "没带 BGM")
-        const goodBgms = [...BGM_LIB.filter(b => b.kind === 'file'), ...userBGMsRef.current];
-        const pool = goodBgms.length ? goodBgms : BGM_LIB;
-        const bgm = pool[Math.floor(Math.random() * pool.length)];
-        next.push({
-          id: `rb-${ts}`, trackId: 'bgm', lane: 0, start: 0, end: totalDur,
-          bgmId: bgm.id, name: bgm.name, volume: 0.55,
-        });
-      }
+      // 不随机 BGM — 音乐轨留空, 用户自己加 (防 BGM 跟配音/TTS 撞车; 配音是主轨, BGM 自己挑 + 调音量更可控)
       const newProject: ProjectState = {
         duration: totalDur,
         lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
@@ -6872,6 +6867,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
 // EXPORT MODAL — 真渲染 + 下载
 // ============================================================
 function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; name: string; aspect: AspectId; onClose: () => void }) {
+  const isMobile = useIsMobile();   // 手机端: 降默认分辨率/帧率 (防 1080p MediaRecorder OOM/掉帧)
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -6880,8 +6876,8 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
   const [format, setFormat] = useState<'webm' | 'mp4'>('mp4');
   const [showAdvanced, setShowAdvanced] = useState(false);
   // v23-k Phase A: 工业级 — 分辨率 + 帧率 自选
-  const [resolution, setResolution] = useState<ExportResolution>('720p');
-  const [fps, setFps] = useState<ExportFps>(30);
+  const [resolution, setResolution] = useState<ExportResolution>(isMobile ? '480p' : '720p');
+  const [fps, setFps] = useState<ExportFps>(isMobile ? 24 : 30);
   // v23-l: GIF preset (仅 mode=gif 用)
   const isGif = (project.mode ?? 'video') === 'gif';
   const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'quick-share');   // 默认标准档 (跟 gif 视图一致, 不再默认小巧 240²)

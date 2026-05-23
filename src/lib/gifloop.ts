@@ -271,7 +271,9 @@ async function encodeGIFBlob(
   const D = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
   // 超采样: 小尺寸渲 2× 再缩 → 边缘/字幕/人脸抗锯齿更顺 (大尺寸不必, 省内存/时间)
-  const SS = W <= 512 ? 2 : 1;   // 超采样阈值提到 512 → TG(512)/X(480) 也 2× 渲染, 边缘/字幕/人脸更顺 (画质接近预览)
+  // 手机端轻量: 关 2× 超采样 (省 4× 像素内存/时间, 防低端机崩) + 少 worker
+  const _lite = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 768px)').matches;
+  const SS = (W <= 512 && !_lite) ? 2 : 1;
   const RW = W * SS, RH = H * SS;
   // 编码画布 = 目标尺寸 (gif.js 按此编码输出)
   const main = document.createElement('canvas'); main.width = W; main.height = H;
@@ -299,7 +301,7 @@ async function encodeGIFBlob(
   ]);
   // 画质优化: quality 10→5 (NeuQuant 调色板更准) + FloydSteinberg 抖动 (人脸照片渐变更顺) + 白底 (跟画板一致) + 4 workers 抵消 quality 开销
   // 体积敏感预设(微信/朋友圈)用全局调色板 → 更小 + 消除帧间调色板闪烁(纯色背景 shimmer); 大预设(X 480²)保留每帧调色板求极致画质
-  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.width <= 320 };   // 小尺寸用全局调色板 (更小体积/消闪); 大尺寸每帧调色板求画质
+  const gifOpts = { workers: _lite ? 2 : 4, quality: _lite ? 8 : 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.width <= 320 };   // 手机少 worker + 略降质换速度; 小尺寸全局调色板 (更小/消闪) 大尺寸每帧调色板求画质
   const gif = new GIF(gifOpts as ConstructorParameters<typeof GIF>[0]);
 
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
