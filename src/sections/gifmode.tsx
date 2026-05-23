@@ -231,6 +231,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [draftPopOpen, setDraftPopOpen] = useState(false);
   const [gifUploads, setGifUploads] = useState<Material[]>([]); // GIF 素材池 (上传/搜图/抠脸沉淀, 隔离于 video)
   const [gifUploadKind, setGifUploadKind] = useState<'general' | 'panda' | 'face' | 'scene'>('general'); // 上传归类 → 决定进哪个 subtab
+  const [gifTbMore, setGifTbMore] = useState(false); // 手机端工具栏折叠/展开 (跟视频一致, 避免横向滚动)
   const uploadsLoadedRef = useRef(false); // 防"持久化在加载前跑→把池写空"竞态
 
   const cacheRef = useRef<Map<string, MediaAsset>>(new Map());
@@ -1569,8 +1570,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   return (
     <>
       {/* ===== 顶栏 — 复用 am-toolbar 蓝色 titlebar, 跟视频视图同一条 ===== */}
-      <div className="am-toolbar win7-titlebar gm-toolbar">
-        <div className="am-toolbar-name">
+      <div className={'am-toolbar win7-titlebar gm-toolbar' + (gifTbMore ? ' is-expanded' : '')}>
+        <div className="am-toolbar-name" data-mobile-hide>
           <span className="am-toolbar-name-ic">🔁</span>
           <span className="am-toolbar-name-text">GIF 循环</span>
         </div>
@@ -1583,11 +1584,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             className={'am-tb-mode-btn' + (view === 'gif' ? ' is-active' : '')}
             onClick={() => onSwitchView('gif')} title="GIF 模式 — 无声 + 短时长 + 循环直出">🎞️ GIF</button>
         </div>
-        <select className="gm-tb-select" value={project.preset} title="尺寸预设"
+        <select className="gm-tb-select" value={project.preset} title="尺寸预设" data-mobile-hide
           onChange={e => setPresetId(e.target.value as GifPresetId)}>
           {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
-        <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`}>
+        <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`} data-mobile-hide>
           ⏱<input type="number" min={GIF_MIN_DURATION} max={maxDur} step={0.5}
             value={Number(D.toFixed(1))} onChange={e => setDuration(Number(e.target.value || '1'))} /><span>s</span>
         </label>
@@ -1597,14 +1598,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <button className="am-tb-btn" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z / Ctrl+Y)"><Redo2 size={14} /></button>
         </div>
         <div className="am-toolbar-spacer" />
-        <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF"><FilePlus size={14} /> <span>新建</span></button>
+        <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF" data-mobile-hide><FilePlus size={14} /> <span>新建</span></button>
         <button className="am-tb-btn" onClick={gifRandomize} title="随机熊猫头+表情+字幕+循环动作 (清空重来)">
           <Shuffle size={13} /> <span>随机</span>
         </button>
-        <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)"><Trash2 size={14} /> <span>清空</span></button>
-        <div className="am-tb-sep" />
-        <button className="am-tb-btn" onClick={saveGifDraft} title="保存当前为新草稿"><Save size={13} /> <span>保存</span></button>
-        <div className="gm-draftwrap">
+        <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)" data-mobile-hide><Trash2 size={14} /> <span>清空</span></button>
+        <div className="am-tb-sep" data-mobile-hide />
+        <button className="am-tb-btn" onClick={saveGifDraft} title="保存当前为新草稿" data-mobile-hide><Save size={13} /> <span>保存</span></button>
+        <div className="gm-draftwrap" data-mobile-hide>
           <button className={'am-tb-btn' + (draftPopOpen ? ' am-tb-btn-primary' : '')} onClick={() => setDraftPopOpen(o => !o)} title="GIF 草稿 — 存 / 读 当前作品">
             <FolderOpen size={13} /> <span>草稿{gifDrafts.length ? ` ${gifDrafts.length}` : ''}</span>
           </button>
@@ -1635,10 +1636,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             </>
           )}
         </div>
-        <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title="全屏预览 — 大图看循环"><Maximize2 size={13} /> <span>预览</span></button>
-        <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓/溶解 三变体并排对比">
+        <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title="全屏预览 — 大图看循环" data-mobile-hide><Maximize2 size={13} /> <span>预览</span></button>
+        <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓/溶解 三变体并排对比" data-mobile-hide>
           <Layers size={13} /> <span>对比变体</span>
         </button>
+        <button className="am-tb-btn am-tb-more-toggle" onClick={() => setGifTbMore(v => !v)} title="更多功能">{gifTbMore ? '收起 ▲' : '⋯ 更多'}</button>
         <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
           {exporting ? <Loader2 size={13} className="gm-spin" /> : <Download size={13} />} <span>{exporting ? '生成中' : '导出 GIF'}</span>
         </button>

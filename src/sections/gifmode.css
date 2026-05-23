@@ -303,12 +303,14 @@
   .gm-pane-sheet.is-open .gm-assetbody, .gm-pane-sheet.is-open .gm-layerlist { max-height: none; overflow: visible; }
   .gm-sheet-backdrop { position: fixed; inset: 0; z-index: 300; background: rgba(11,35,62,0.4); backdrop-filter: blur(2px); }
 
-  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成页面滚动 */
-  .am-tl-clip, .am-tl-handle, .gm-tl-durhandle, .gm-tl-lanes,
-  .am-stage-img, .am-caption-stage, .am-move-marker, .am-tl-playhead-handle { touch-action: none; }
+  /* clip/handle/lanes 用 pan-y: 纵向滑动→滚轨道(gm-tl-body 纵滚), 横向→拖 clip/scrub; 修"纵向拖时间轴很难" */
+  .am-tl-clip, .am-tl-handle, .gm-tl-lanes { touch-action: pan-y; }
+  /* 时长手柄/游标(细) + 画板元素: 整个吃掉手势精确拖 */
+  .gm-tl-durhandle, .am-tl-playhead-handle, .am-stage-img, .am-caption-stage, .am-move-marker { touch-action: none; }
+  .gm-tl-body { overflow-y: auto; -webkit-overflow-scrolling: touch; }   /* 轨道多时纵向滚 */
 
-  /* 工具栏横滚 + 图标 only (不换行吃竖向空间) */
-  .gm-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; height: auto; min-height: 44px; padding: 6px 8px; }
+  /* 工具栏换行铺开 (不横滚) — 折叠仅 1 行主操作, 「⋯ 更多」展开多行全显 (data-mobile-hide 规则在 animatemode.css, .am-toolbar 共用) */
+  .gm-toolbar { flex-wrap: wrap; overflow-x: visible; align-content: flex-start; scrollbar-width: none; height: auto; min-height: 44px; padding: 6px 8px; }
   .gm-toolbar::-webkit-scrollbar { display: none; }
   .gm-draftpop { width: min(280px, 92vw); }
   .gm-variant-grid { grid-template-columns: 1fr; }

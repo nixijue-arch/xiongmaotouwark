@@ -3494,6 +3494,7 @@ function AnimateToolbar({
   const [editing, setEditing] = useState(false);
   const [tmp, setTmp] = useState(name);
   const [durOpen, setDurOpen] = useState(false);
+  const [mobileMore, setMobileMore] = useState(false);   // 手机端: 折叠次要按钮, 点「⋯ 更多」展开 (避免横向滚动)
   const durRef = useRef<HTMLDivElement>(null);
   useEffect(() => { setTmp(name); }, [name]);
   useEffect(() => {
@@ -3510,8 +3511,8 @@ function AnimateToolbar({
   const DURATION_PRESETS = isGif ? [3, 4, 5, 6, 10, 15] : [5, 10, 15, 20, 30, 45, 60];
 
   return (
-    <div className="am-toolbar win7-titlebar">
-      <div className="am-toolbar-name">
+    <div className={'am-toolbar win7-titlebar' + (mobileMore ? ' is-expanded' : '')}>
+      <div className="am-toolbar-name" data-mobile-hide>
         <span className="am-toolbar-name-ic">🎬</span>
         {editing ? (
           <input
@@ -3563,7 +3564,7 @@ function AnimateToolbar({
           </span>
         )}
       </div>
-      <div className="am-tb-duration" ref={durRef}>
+      <div className="am-tb-duration" ref={durRef} data-mobile-hide>
         <button
           className="am-tb-btn am-tb-duration-btn"
           onClick={() => setDurOpen(o => !o)}
@@ -3641,24 +3642,26 @@ function AnimateToolbar({
         ⤓ <span>整理</span>
       </button>
       <div className="am-tb-sep" />
-      <button className="am-tb-btn" onClick={onSaveDraft} title="保存为新草稿 (Ctrl+S)"><Save size={13} /> <span>保存</span></button>
-      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={`管理 ${draftsCount} 个草稿`}>
+      <button className="am-tb-btn" onClick={onSaveDraft} title="保存为新草稿 (Ctrl+S)" data-mobile-hide><Save size={13} /> <span>保存</span></button>
+      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={`管理 ${draftsCount} 个草稿`} data-mobile-hide>
         <FolderOpen size={13} /> <span>草稿 ({draftsCount})</span>
       </button>
       {/* v23-k Phase A: 项目 JSON 导入/导出 (跨设备 / 备份 / 分享) */}
       {onExportJSON && (
-        <button className="am-tb-btn am-tb-btn-icon" onClick={onExportJSON} title="导出项目 JSON (.amjson, 跨设备 / 备份)">
+        <button className="am-tb-btn am-tb-btn-icon" onClick={onExportJSON} title="导出项目 JSON (.amjson, 跨设备 / 备份)" data-mobile-hide>
           <Upload size={13} />
         </button>
       )}
       {onImportJSON && (
-        <button className="am-tb-btn am-tb-btn-icon" onClick={onImportJSON} title="导入项目 JSON (.amjson)">
+        <button className="am-tb-btn am-tb-btn-icon" onClick={onImportJSON} title="导入项目 JSON (.amjson)" data-mobile-hide>
           <FileText size={13} />
         </button>
       )}
-      <div className="am-tb-sep" />
-      <button className="am-tb-btn" onClick={onOpenShortcuts} title="完整快捷键列表"><span style={{ fontSize: 14 }}>⌨️</span> <span>快捷键</span></button>
-      <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览"><Eye size={13} /> <span>预览</span></button>
+      <div className="am-tb-sep" data-mobile-hide />
+      <button className="am-tb-btn" onClick={onOpenShortcuts} title="完整快捷键列表" data-mobile-hide><span style={{ fontSize: 14 }}>⌨️</span> <span>快捷键</span></button>
+      <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览" data-mobile-hide><Eye size={13} /> <span>预览</span></button>
+      {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (桌面 CSS 隐藏) */}
+      <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title="更多功能">{mobileMore ? '收起 ▲' : '⋯ 更多'}</button>
       <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件">
         <Download size={13} /> <span>导出视频</span>
       </button>

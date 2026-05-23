@@ -82,6 +82,9 @@
 .am-toolbar-stat strong { font-weight: 800; color: #fff; }
 .am-toolbar-stat .am-dot { opacity: 0.55; }
 
+/* 「⋯ 更多」开关默认隐藏 (仅手机端 @media 显示) */
+.am-tb-more-toggle { display: none !important; }
+@media (max-width: 768px) { .am-tb-more-toggle { display: inline-flex !important; } }
 .am-tb-btn {
   display: inline-flex;
   align-items: center;
@@ -4635,12 +4638,13 @@
     padding: 6px 8px;
     gap: 4px;
     min-height: 44px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    flex-wrap: wrap;            /* 换行铺开, 不横滚 — 折叠仅 1 行(主操作), 展开多行全显 */
+    overflow-x: visible;
+    align-content: flex-start;
     scrollbar-width: none;
   }
   .am-toolbar::-webkit-scrollbar { display: none; }
+  .am-tb-more-toggle { display: inline-flex; }   /* 手机端显示「⋯ 更多」开关 */
   .am-toolbar-name { min-width: 0; flex: 0 0 auto; }
   .am-toolbar-name-text { max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
   .am-toolbar-stat { display: none; } /* mobile 不显片段数 */
@@ -4649,9 +4653,9 @@
   .am-tb-btn-icon { min-width: 36px; }
   .am-tb-mode-btn { height: 30px; padding: 0 8px; font-size: 11px; }
   .am-tb-mode-btn { min-width: 0; }
-  /* 隐藏次要 (剩 mode/undo/redo/save/导出 主操作) — data-mobile-hide 属性更稳, 不被 title 文案改动击穿 */
-  .am-toolbar > button[data-mobile-hide],
-  .am-toolbar > div[data-mobile-hide] { display: none; }
+  /* 折叠时隐藏次要按钮 (剩 mode/随机/undo/redo/更多/导出 主操作常驻 1 行); 点「⋯ 更多」加 .is-expanded → 全显换行铺开, 永不横滚 */
+  /* 通用 [data-mobile-hide] — 覆盖 button/div/select/label (GIF 工具栏的预设 select + 时长 label) */
+  .am-toolbar:not(.is-expanded) > [data-mobile-hide] { display: none; }
   /* 第 1 个 sep 保留, 后续 sep 隐藏 (通用兄弟组合器 — 任何前面已有 sep 的 sep) */
   .am-toolbar > .am-tb-sep ~ .am-tb-sep { display: none; }
 
@@ -4700,9 +4704,12 @@
     flex: 0 0 60px;
     flex: 0 0 calc(60px + env(safe-area-inset-bottom, 0px));
   }
-  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成滚动 (视频时间轴 clip/handle/游标/时长手柄/标尺 + 画板) */
-  .am-tl-clip, .am-tl-handle, .am-preview-canvas,
-  .am-tl-playhead-handle, .am-tl-duration-handle, .am-tl-scrub-zone { touch-action: none; }
+  /* clip/handle 用 pan-y: 纵向滑动→滚轨道(穿透到容器), 横向→拖/裁 clip; 修"纵向拖时间轴很难" */
+  .am-tl-clip, .am-tl-handle { touch-action: pan-y; }
+  /* 标尺/游标/时长手柄(细)+画板: 整个吃掉手势精确拖 */
+  .am-preview-canvas, .am-tl-playhead-handle, .am-tl-duration-handle, .am-tl-scrub-zone { touch-action: none; }
+  /* 轨道容器: 横滚时间 + 纵滚轨道 (clip 用 pan-y 把纵向手势让给它) */
+  .am-tl-tracks-wrap { overflow-y: auto; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
   .am-tb-mode-btn { min-width: 0; }
 
   /* 底栏 4 大 tab — 浮在底部, 按下展开 sheet */
