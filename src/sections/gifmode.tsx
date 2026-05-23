@@ -1641,7 +1641,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <Layers size={13} /> <span>对比变体</span>
         </button>
         <button className="am-tb-btn am-tb-more-toggle" onClick={() => setGifTbMore(v => !v)} title="更多功能">{gifTbMore ? '收起 ▲' : '⋯ 更多'}</button>
-        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
+        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF" data-mobile-hide>
           {exporting ? <Loader2 size={13} className="gm-spin" /> : <Download size={13} />} <span>{exporting ? '生成中' : '导出 GIF'}</span>
         </button>
       </div>
@@ -2380,7 +2380,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       {isMobile && (
         <>
           {gmSheet && <div className="gm-sheet-backdrop" onClick={() => setGmSheet(null)} />}
-          <div className="am-mobile-bottombar am-mobile-bottombar--4" role="tablist">
+          <div className="am-mobile-bottombar am-mobile-bottombar--5" role="tablist">
             <button type="button" className={'am-mb-tab' + (gmSheet === 'left' && seg === 'asset' ? ' is-active' : '')}
               onClick={() => { if (gmSheet === 'left' && seg === 'asset') setGmSheet(null); else { setSeg('asset'); setGmSheet('left'); } }}>
               <span className="am-mb-tab-ic"><ImageIcon size={18} /></span><span className="am-mb-tab-lbl">素材</span>
@@ -2397,6 +2397,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               className={'am-mb-tab' + (gmSheet === 'right' ? ' is-active' : '') + (!selectedId ? ' is-disabled' : '')}
               onClick={() => setGmSheet(s => (s === 'right' ? null : 'right'))}>
               <span className="am-mb-tab-ic"><Layers size={18} /></span><span className="am-mb-tab-lbl">编辑</span>
+            </button>
+            <button type="button" className="am-mb-tab" disabled={exporting} onClick={() => { setGmSheet(null); onExport(); }}>
+              <span className="am-mb-tab-ic">{exporting ? <Loader2 size={18} className="gm-spin" /> : <Download size={18} />}</span><span className="am-mb-tab-lbl">{exporting ? '生成中' : '导出'}</span>
             </button>
           </div>
         </>

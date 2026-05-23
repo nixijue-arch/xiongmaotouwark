@@ -3662,7 +3662,7 @@ function AnimateToolbar({
       <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览" data-mobile-hide><Eye size={13} /> <span>预览</span></button>
       {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (桌面 CSS 隐藏) */}
       <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title="更多功能">{mobileMore ? '收起 ▲' : '⋯ 更多'}</button>
-      <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件">
+      <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件" data-mobile-hide>
         <Download size={13} /> <span>导出视频</span>
       </button>
       {import.meta.env.DEV && (onOpenTemplates || onOpenBgmAlign || onOpenStateDump) && (

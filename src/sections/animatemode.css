@@ -4645,6 +4645,7 @@
   }
   .am-toolbar::-webkit-scrollbar { display: none; }
   .am-tb-more-toggle { display: inline-flex; }   /* 手机端显示「⋯ 更多」开关 */
+  .am-toolbar-spacer { display: none; }          /* 手机端去弹簧 — 按钮自然左排+换行, 不把导出挤出屏 */
   .am-toolbar-name { min-width: 0; flex: 0 0 auto; }
   .am-toolbar-name-text { max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
   .am-toolbar-stat { display: none; } /* mobile 不显片段数 */
