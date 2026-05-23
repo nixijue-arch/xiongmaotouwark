@@ -52,7 +52,7 @@ import {
   type MediaAsset, type FxApply,
 } from '@/lib/animcore';
 import { GifMode } from '@/sections/gifmode';
-import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
+import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { VOICE_LIB, VOICE_BY_ID, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
 
 // ============================================================
@@ -4012,14 +4012,13 @@ function LeftPane({
           )}
           {seg === 'asset' && sub === 'scene' && (
             <>
-              {/* v23-d: 内置 Lorem Picsum 真位图 + 用户上传混合 */}
+              {/* 场景纯用户自定义 (原 Picsum 内置随机图跟标签对不上, 已移除) */}
               <div className="am-scene-hint">
-                <ImagePlus size={11} strokeWidth={2.2} /> 内置 12 张实拍 (Picsum CDN) + 想换:
-                <button type="button" className="am-scene-upload-link" onClick={() => { setUploadKind('scene'); setSub('upload'); }}>+ 上传自己的</button>
+                <ImagePlus size={11} strokeWidth={2.2} /> 场景纯自定义 — 上传你的背景图:
+                <button type="button" className="am-scene-upload-link" onClick={() => { setUploadKind('scene'); setSub('upload'); }}>+ 上传场景</button>
               </div>
               <div className="sidebar-grid">
                 {filter(uploads.filter(u => u.kind === 'scene')).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
-                {filter(SCENE_LIB).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={onQuickAdd} />)}
               </div>
               <div className="am-scene-sources" style={{ marginTop: 10 }}>
                 <div className="am-scene-sources-label">还可以去这些图源找 (CC0 免费) ↓</div>

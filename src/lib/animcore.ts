@@ -112,11 +112,13 @@ export interface GifFrameEdit {
 export type LoopMotionKind = 'none' | 'bob' | 'shimmy' | 'sway' | 'breathe' | 'pulseLoop' | 'spin360' | 'float' | 'bounce' | 'orbit'
   // v25: 更"动"的鬼畜系 — hop 来回横跳 / wobble 果冻晃 / jitter 疯狂抖(intensify) / punch 怼脸放大 / swing 钟摆荡
   | 'hop' | 'wobble' | 'jitter' | 'punch' | 'swing'
+  // flip: 水平镜像翻转来回 (绕竖轴翻牌, 替代用户手动"切分+倒放"; 幅度=翻多狠, 速度=翻多快)
+  | 'flip'
   | 'customMove';
 // customMove: A = clip.transform, B = to. 引擎乒乓 A→B→A (首尾无缝). clip.fx 保持 'none' 防与 move-FX lerp 双叠加.
 export interface LoopMotion { kind: LoopMotionKind; amp: number; cycles: number; to?: Transform; }
-// renderExportFrame 的 motionAt 回调返回值 — 叠加在 clip transform 之上
-export interface MotionDelta { dx: number; dy: number; dScale: number; dRot: number; }
+// renderExportFrame 的 motionAt 回调返回值 — 叠加在 clip transform 之上. dScaleX 可选 (默认 1; <0 = 水平镜像翻转)
+export interface MotionDelta { dx: number; dy: number; dScale: number; dRot: number; dScaleX?: number; }
 
 export function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
 
@@ -553,7 +555,7 @@ export function renderExportFrame(
     if (fxA.filter) ctx.filter = fxA.filter;
     ctx.translate(cx + fxA.offsetX + (md ? md.dx : 0), cy + fxA.offsetY + (md ? md.dy : 0));
     ctx.rotate((tr.rotation + fxA.rotateAdd + (md ? md.dRot : 0)) * Math.PI / 180);
-    ctx.scale(tr.flipX ? -1 : 1, 1);
+    ctx.scale((tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1), 1);   // 静态 flipX × 动态翻转动作 (flip motion)
     // GIF: 按 (t-clipStart) % gifDur 取当前帧 (+gifEdit 帧级微调); 静图: HTMLImageElement 自身
     ctx.drawImage(drawableAt(media, t, c.start, c.gifEdit), -iw / 2, -ih / 2, iw, ih);
     ctx.restore();

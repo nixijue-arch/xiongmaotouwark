@@ -127,6 +127,7 @@ export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number,
     case 'jitter':    return { dx: A * W * 0.028 * Math.sin(3 * ph), dy: A * W * 0.026 * Math.sin(4 * ph), dScale: 1, dRot: A * 3 * Math.sin(5 * ph) }; // 疯狂抖 intensify
     case 'punch':     return { dx: 0, dy: 0, dScale: 1 + A * 0.32 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };                                     // 怼脸放大 (zoom in→out)
     case 'swing':     return { dx: A * W * 0.03 * Math.sin(ph), dy: 0, dScale: 1, dRot: A * 16 * Math.sin(ph) };                              // 钟摆荡
+    case 'flip':      return { dx: 0, dy: 0, dScale: 1, dRot: 0, dScaleX: 1 - Math.min(1, A) * (1 - Math.cos(ph)) };                          // 水平镜像翻转 (绕竖轴翻牌; A=1 整翻 1→-1→1, A<1 半翻; u=0/1 都=1 闭环)
     // 自定义移动 A→B 乒乓 — w 三角波 0→1→0, 首尾 w=0 必无缝. A=base(clip.transform), B=m.to
     case 'customMove': {
       if (!m.to || !base) return ZERO_DELTA;

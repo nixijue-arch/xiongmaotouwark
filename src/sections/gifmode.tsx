@@ -21,7 +21,7 @@ import {
   type GifProject, type GifLoopMode, type GifVariant, DEFAULT_LOOP_CONFIG,
   loopTimeMap, loopSpecAt, renderLoopFrame, makeLoopMotionAt, makeBoundFaceAt, resolveBoundFaceBox, captureFaceLocal, loopMotionDelta, loopSeamScore, exportGIFLoop, exportGIFVariants, downloadBlob,
 } from '@/lib/gifloop';
-import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
+import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
 import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off, Drama } from 'lucide-react';
@@ -65,6 +65,7 @@ const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string }[] = [
   { kind: 'jitter', label: '疯狂抖', emoji: '⚡' },
   { kind: 'punch', label: '怼脸', emoji: '🥊' },
   { kind: 'swing', label: '钟摆', emoji: '🎐' },
+  { kind: 'flip', label: '翻转', emoji: '🪞' },
 ];
 // 动作 kind → 图标/名 (含 customMove); 时间轴 chip + clip 角标 + 弹层网格共用
 const motionMeta = (kind?: LoopMotionKind): { kind: LoopMotionKind; label: string; emoji: string } =>
@@ -461,7 +462,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           if (!boundDone) {
             const md = loopMotionDelta(ic.loopMotion, t, dd, w, h, ic.transform);
             const baseRot = ic.transform?.rotation ?? 0;
-            el.style.transform = `translate(${(md.dx * sx).toFixed(2)}px, ${(md.dy * sy).toFixed(2)}px) rotate(${(baseRot + md.dRot).toFixed(2)}deg) scale(${md.dScale.toFixed(4)})`;
+            el.style.transform = `translate(${(md.dx * sx).toFixed(2)}px, ${(md.dy * sy).toFixed(2)}px) rotate(${(baseRot + md.dRot).toFixed(2)}deg) scale(${(md.dScale * (md.dScaleX ?? 1)).toFixed(4)}, ${md.dScale.toFixed(4)})`;
           }
           // 变脸溶解: opacity 设在内层(带 mix-blend 的 img/canvas, el 首子) 而非外层 div — 防 opacity<1 隔离 blend → 正确交叉溶解
           const xfi = ic.xfadeIn ?? 0, xfo = ic.xfadeOut ?? 0;
@@ -1190,7 +1191,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     if (cap.length > GIF_CAP_MAXCHARS) cap = cap.slice(0, GIF_CAP_MAXCHARS);
     // 更丰富的随机: 脸动作从全集挑(含鬼畜系) + 随机幅度/周期; 身体 ~40% 也来个轻动作; 随机循环方式
     const rPick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
-    const faceMotions: LoopMotionKind[] = ['bob', 'shimmy', 'sway', 'breathe', 'pulseLoop', 'bounce', 'orbit', 'hop', 'wobble', 'jitter', 'punch', 'swing'];
+    const faceMotions: LoopMotionKind[] = ['bob', 'shimmy', 'sway', 'breathe', 'pulseLoop', 'bounce', 'orbit', 'hop', 'wobble', 'jitter', 'punch', 'swing', 'flip'];
     const bodyMotions: LoopMotionKind[] = ['bob', 'sway', 'breathe', 'wobble', 'shimmy', 'float', 'bounce', 'pulseLoop'];  // 壳也必有动作 (去掉 none, 脸+壳都动)
     const rRange = (a: number, b: number) => Number((a + Math.random() * (b - a)).toFixed(2));
     const faceMotion = rPick(faceMotions);
@@ -1642,12 +1643,20 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     </div>
                   </>
                 )}
-                {assetSub === 'scene' && (
-                  <div className="sidebar-grid">
-                    {gifUploads.filter(u => u.kind === 'scene').filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
-                    {SCENE_LIB.filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={addFromPayload} />)}
-                  </div>
-                )}
+                {assetSub === 'scene' && (() => {
+                  const scenes = gifUploads.filter(u => u.kind === 'scene');
+                  return scenes.length === 0 ? (
+                    <div className="am-upload-zone" onClick={() => { setGifUploadKind('scene'); setAssetSub('upload'); }}>
+                      <Upload size={22} strokeWidth={1.6} />
+                      <div className="am-upload-ttl">场景 = 纯自定义</div>
+                      <div className="am-upload-hint">点这里去「上传」传你自己的背景图 (自动归到场景)</div>
+                    </div>
+                  ) : (
+                    <div className="sidebar-grid">
+                      {scenes.filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
+                    </div>
+                  );
+                })()}
                 {assetSub === 'draft' && (
                   draftSlots.length === 0 ? (
                     <div className="gm-draft-empty">
@@ -2251,6 +2260,21 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 </div>
               )}
               {lm.kind === 'customMove' && <div className="gm-motionpop-hint">🎯 在画板拖橙色 A·B 两点设置起止位置</div>}
+              {/* 动效分段: 在游标处把这层切两段 → 后半段可设另一个动作 (同层不同时段不同动效) */}
+              {(() => {
+                const cutT = clampN(loopTimeMap(scrubT, D, project.loop.mode), 0, D);
+                const canSplit = cutT > mc.start + 0.1 && cutT < mc.end - 0.1;
+                return (
+                  <div className="gm-motionpop-foot">
+                    <button type="button" className="gm-motionpop-split" disabled={!canSplit}
+                      onClick={() => { gifSplit(motionPop.id, cutT); setMotionPop(null); }}
+                      title={canSplit ? `在游标 ${cutT.toFixed(1)}s 处把这层切成两段` : '把顶部橙色游标拖到这层中间才能切'}>
+                      <Scissors size={11} /> 切两段 · 各设动效
+                    </button>
+                    <span className="gm-motionpop-foot-tip">{canSplit ? '后半段点开设另一个动作 → 不同时段不同动效' : '想分时段套不同动效? 先把游标拖到这层中间'}</span>
+                  </div>
+                );
+              })()}
             </div>
           </>
         );
