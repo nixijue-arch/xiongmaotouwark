@@ -5082,7 +5082,7 @@ function PreviewPane({
             const isSel = c.id === selectedId;
             const isEditing = c.id === editingCaptionId;
             const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style);
+            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
             // meme/bar 默认白字, panel 默认黑字 (跟样式背景反色)
             const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
             // v23-k: 字幕入场动效 — 实时计算 (编辑时禁用动效, 不打扰)
@@ -5098,7 +5098,8 @@ function PreviewPane({
                   left: `${50 + tr.x}%`,
                   top: `${50 + tr.y}%`,
                   fontSize: cFontSize,
-                  width: c.fontSize == null ? canvasSize.w * 0.92 : undefined,
+                  width: cAutoMeme ? canvasSize.w * 0.92 : undefined,
+                  boxSizing: cAutoMeme ? 'content-box' : undefined,
                   color: cColor,
                   cursor: isEditing ? 'text' : (isSel ? 'move' : 'pointer'),
                   ...xformStyle,
@@ -5121,7 +5122,7 @@ function PreviewPane({
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setEditingCaptionId(null); }
                     }}
                     onPointerDown={(e) => e.stopPropagation()}
-                    style={{ fontSize: cFontSize, color: cColor }}
+                    style={{ fontSize: Math.min(cFontSize, 48), color: cColor }}
                   />
                 ) : (
                   ent.visibleText || (c.text ? '' : '空字幕')
@@ -6782,7 +6783,7 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
             {activeCaptionClips.map(c => {
               const tr = c.transform ?? DEFAULT_CAPTION_TRANSFORM;
               const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style);
+              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
               const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
               const ent = computeCaptionEntrance(c, playhead);
               const xformStyle = (ent.opacity < 1 || Math.abs(ent.scale - 1) > 0.01)
@@ -6796,7 +6797,8 @@ function PreviewModal({ project, userBGMs, onClose }: { project: ProjectState; u
                     left: `${50 + tr.x}%`,
                     top: `${50 + tr.y}%`,
                     fontSize: cFontSize,
-                    width: c.fontSize == null ? canvasSize.w * 0.92 : undefined,
+                    width: cAutoMeme ? canvasSize.w * 0.92 : undefined,
+                    boxSizing: cAutoMeme ? 'content-box' : undefined,
                     color: cColor,
                     ...xformStyle,
                   }}

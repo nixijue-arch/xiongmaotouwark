@@ -311,7 +311,7 @@ export function drawableAt(m: MediaAsset, t: number, clipStart: number, edit?: G
 // 内容 bbox (alpha>阈值 的边界) 占整图的比例 {x,y,w,h} (0~1). 用于"绑定脸"椭圆裁切 — 透明化脸返回五官实际区域,
 // 白底矩形脸/跨域脸返回整框 (内切椭圆仍裁掉矩形角). 缩到 128px 扫描 + WeakMap 缓存 (每脸一次).
 const _bboxFracCache = new WeakMap<CanvasImageSource, { x: number; y: number; w: number; h: number }>();
-const FULL_BBOX_FRAC = { x: 0, y: 0, w: 1, h: 1 };
+const FULL_BBOX_FRAC = Object.freeze({ x: 0, y: 0, w: 1, h: 1 });  // 共享 fallback (冻结防调用方误改污染缓存)
 export function contentBboxFrac(media: MediaAsset): { x: number; y: number; w: number; h: number } {
   const d = drawableAt(media, 0, 0);
   const cached = _bboxFracCache.get(d);
@@ -564,7 +564,7 @@ export function renderExportFrame(
     for (const cap of activeCaps) {
       // v23-k: 加入场动效 — typewriter 截字 / fade pop slam 动画
       const ent = computeCaptionEntrance(cap, t);
-      drawCaption(ctx, ent.visibleText, W, H, cap.fontSize, cap.color, cap.style ?? DEFAULT_CAPTION_STYLE, cap.transform ?? DEFAULT_CAPTION_TRANSFORM, { opacity: ent.opacity, scale: ent.scale });
+      drawCaption(ctx, ent.visibleText, W, H, cap.fontSize, cap.color, cap.style ?? DEFAULT_CAPTION_STYLE, cap.transform ?? DEFAULT_CAPTION_TRANSFORM, { opacity: ent.opacity, scale: ent.scale }, cap.text);
     }
   }
   // 仅没录音 + 没 active caption 的 TTS 才烧字幕
@@ -641,8 +641,8 @@ export function fitCaptionLayout(text: string, W: number, H: number, style: Capt
   const isBox = style === 'panel' || style === 'bar';   // 字幕条/面板 = 副标题感, 别太大
   const maxTextW = W * (isBox ? 0.84 : 0.92);            // 左右接近边缘 (meme 92%)
   const maxBlockH = H * (isBox ? 0.22 : 0.40);           // 文本块总高预算 (不喧宾夺主)
-  const FONT_MAX = Math.round(Math.min(W * 0.46, H * (isBox ? 0.12 : 0.30)));  // 2 字撑满宽 / 单字按高封顶
   const FONT_MIN = Math.max(13, Math.round(W * 0.022));
+  const FONT_MAX = Math.max(FONT_MIN, Math.round(Math.min(W * 0.46, H * (isBox ? 0.12 : 0.30))));  // 2 字撑满宽 / 单字按高封顶; ≥FONT_MIN 保证循环至少跑一次
   let best = FONT_MIN, bestLines: string[] = [text || ''];
   if (mc) {
     for (let fs = FONT_MAX; fs >= FONT_MIN; fs -= 2) {
@@ -673,6 +673,7 @@ export function drawCaption(
   style: CaptionStyle = DEFAULT_CAPTION_STYLE,
   tr: CaptionTransform = DEFAULT_CAPTION_TRANSFORM,
   entranceState: { opacity: number; scale: number } = { opacity: 1, scale: 1 },
+  fitText?: string,   // 自适应字号按"完整文案"算 (typewriter 逐字入场时 text 是部分 → 防字号逐帧跳变, 且导出≈预览)
 ): void {
   if (!text) return;
   if (entranceState.opacity <= 0.01) return;  // v23-k: 完全透明 skip 绘制
@@ -684,10 +685,11 @@ export function drawCaption(
     ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
     lines = wrapLines(ctx, text, W * 0.92);   // 该分行分行 (跟预览 pre-wrap 对齐 → 导出≈预览)
   } else {
-    const fit = fitCaptionLayout(text, W, H, style);
+    const fit = fitCaptionLayout(fitText ?? text, W, H, style);   // 字号按完整文案 (稳定, 不随逐字入场变)
     fontSize = fit.fontSize;
-    lines = fit.lines;
     ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
+    // typewriter 等 text 是部分 → 在稳定字号下重排部分文案; 否则直接用 fit.lines
+    lines = (fitText != null && fitText !== text) ? wrapLines(ctx, text, W * 0.92) : fit.lines;
   }
   // meme/bar 默认白字, panel 默认黑字
   const color = capColor ?? (style === 'panel' ? '#000000' : '#ffffff');

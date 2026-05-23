@@ -122,7 +122,19 @@ function normalizeCombo(p: GifProject): GifProject {
 
 // 时长变化时夹紧 clip [start,end] (全幅的跟随新时长; 部分的只夹上限) — 不再强制全部全幅, 让用户能在时间轴自定时段
 function clampClipsToDuration(clips: Clip[], oldD: number, newD: number): Clip[] {
+  const k = newD / Math.max(0.01, oldD);
+  // 变脸组 (同一壳 ≥2 张绑定脸): 按比例缩放窗口 + xfade → 改时长后轮播节奏不破 (无缝/不闪)
+  const faceCount = new Map<string, number>();
+  for (const c of clips) { const b = (c as ImageClip).boundTo; if (c.trackId === 'image' && b) faceCount.set(b, (faceCount.get(b) ?? 0) + 1); }
+  const cycleShells = new Set<string>(); faceCount.forEach((n, s) => { if (n >= 2) cycleShells.add(s); });
   return clips.map(c => {
+    const ic = c as ImageClip;
+    if (ic.boundTo && cycleShells.has(ic.boundTo)) {
+      return { ...c,
+        start: Math.max(0, c.start * k), end: Math.min(newD, c.end * k),
+        xfadeIn: ic.xfadeIn != null ? ic.xfadeIn * k : undefined,
+        xfadeOut: ic.xfadeOut != null ? ic.xfadeOut * k : undefined } as Clip;
+    }
     const wasFull = c.start <= 0.001 && c.end >= oldD - 0.01;
     const end = wasFull ? newD : Math.min(c.end, newD);
     const start = Math.min(Math.max(0, c.start), Math.max(0, end - 0.1));
@@ -1663,9 +1675,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   ? c.fontSize * (fit.w || preset.width) / 1280
                   : fitCaptionFontPx(c.text, fit.w || preset.width, fit.h || preset.height, st);
                 const col = c.color ?? (st === 'panel' ? '#000' : '#fff');
+                // 自适应 meme 才显式定宽 (content-box 抵消 padding → DOM 换行 = 导出换行); panel/bar 让背景框贴文字
+                const autoMeme = c.fontSize == null && st === 'meme';
                 return (
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }} className={`am-caption-stage am-caption-style-${st}` + (c.id === selectedId ? ' is-selected' : '') + (isEditing ? ' is-editing' : '')}
-                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, width: c.fontSize == null ? (fit.w || preset.width) * 0.92 : undefined, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
+                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, width: autoMeme ? (fit.w || preset.width) * 0.92 : undefined, boxSizing: autoMeme ? 'content-box' : undefined, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
                     onPointerDown={e => startCaptionDrag(e, c)}
                     onContextMenu={e => { if (!isEditing) onGifClipContextMenu(e, c); }}
                     onDoubleClick={e => { e.stopPropagation(); setEditingCaptionId(c.id); setSelectedId(c.id); }}>
@@ -1675,7 +1689,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                         onBlur={() => setEditingCaptionId(null)}
                         onKeyDown={e => { if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); setEditingCaptionId(null); } }}
                         onPointerDown={e => e.stopPropagation()}
-                        style={{ fontSize: fontPx, color: col }} />
+                        style={{ fontSize: Math.min(fontPx, 48), color: col }} />
                     ) : (c.text || '空字幕')}
                   </div>
                 );
