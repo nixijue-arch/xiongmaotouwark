@@ -1,6 +1,0 @@
-# Caddy 自动申请 + 续期 Let's Encrypt 证书 (需要 TTS_DOMAIN 已解析到本机 + 80/443 放行).
-# TTS_DOMAIN 从 .env 注入 (docker-compose 已传).
-{$TTS_DOMAIN} {
-	encode gzip
-	reverse_proxy tts:5000
-}
