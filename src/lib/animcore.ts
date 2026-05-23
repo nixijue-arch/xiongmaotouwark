@@ -623,9 +623,11 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): s
   return out.length ? out : [''];
 }
 
-// 字幕自适应字号 (傻瓜式免调参): 短文案 → 撑到接近左右边缘的超大字号; 长文案 → 缩字号 + 分行.
-// 思路: 从"按高度封顶的最大字号"往下找, 第一个满足 (最宽行 ≤ 92%画宽 且 文本块高 ≤ 高度预算) 的字号即取.
-// 视频+GIF 通用 (drawCaption 导出 + 预览 DOM 都调). offscreen 测量 + memo (文案/尺寸/样式 不变时 O(1)).
+// 字幕自适应字号 (傻瓜式免调参):
+//   ① 单行优先 — 量整段宽度, 求"一行能装下"的最大字号; 只有该字号低于可读下限(WRAP_FLOOR)才分行 (短文案不轻易换行).
+//   ② 上下不超画板 — availH = 2·min(cy, H-cy) (按字幕 Y 位置算的对称可用高), 块高 ≤ availH → 居中绘制必在画板内.
+//   ③ 0.97 宽度安全余量 — 防 DOM 比 canvas 量出多换一行.
+// 视频+GIF 通用 (drawCaption 导出 + 预览 DOM 都调). offscreen 测量 + memo. availH 不传 = 全画板高 (旧行为).
 const _capFitCache = new Map<string, { fontSize: number; lines: string[] }>();
 let _capMeasureCtx: CanvasRenderingContext2D | null = null;
 function capMeasureCtx(): CanvasRenderingContext2D | null {
@@ -633,34 +635,52 @@ function capMeasureCtx(): CanvasRenderingContext2D | null {
   return _capMeasureCtx;
 }
 const CAP_FONT_FAMILY = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-export function fitCaptionLayout(text: string, W: number, H: number, style: CaptionStyle = 'meme'): { fontSize: number; lines: string[] } {
-  const key = `${Math.round(W)}|${Math.round(H)}|${style}|${text}`;
+const FIT_REF_FS = 100;   // 参考字号: 量一次整段宽度, 按比例换算各字号宽 (省得逐字号 measure)
+export function fitCaptionLayout(text: string, W: number, H: number, style: CaptionStyle = 'meme', availH?: number): { fontSize: number; lines: string[] } {
+  const t = text || '';
+  const isBox = style === 'panel' || style === 'bar';   // 字幕条/面板 = 副标题感, 别太大
+  const hb = Math.min(availH ?? H, H * (isBox ? 0.22 : 0.40));   // 高度预算 = min(位置可用高, 美观上限)
+  const key = `${Math.round(W)}|${Math.round(H)}|${style}|${Math.round(hb)}|${t}`;
   const hit = _capFitCache.get(key);
   if (hit) return hit;
   const mc = capMeasureCtx();
-  const isBox = style === 'panel' || style === 'bar';   // 字幕条/面板 = 副标题感, 别太大
-  const maxTextW = W * (isBox ? 0.84 : 0.92);            // 左右接近边缘 (meme 92%)
-  const maxBlockH = H * (isBox ? 0.22 : 0.40);           // 文本块总高预算 (不喧宾夺主)
+  const widthBudget = W * (isBox ? 0.84 : 0.92) * 0.97;   // 左右接近边缘 (meme 92%) × 0.97 安全余量
   const FONT_MIN = Math.max(13, Math.round(W * 0.022));
-  const FONT_MAX = Math.max(FONT_MIN, Math.round(Math.min(W * 0.46, H * (isBox ? 0.12 : 0.30))));  // 2 字撑满宽 / 单字按高封顶; ≥FONT_MIN 保证循环至少跑一次
-  let best = FONT_MIN, bestLines: string[] = [text || ''];
+  const FONT_MAX = Math.max(FONT_MIN, Math.round(Math.min(W * 0.46, H * (isBox ? 0.12 : 0.30))));
+  const WRAP_FLOOR = Math.max(FONT_MIN + 4, Math.round(H * 0.075));   // 单行字号 ≥ 此才保单行; 否则太小 → 分行换更大字
+  let res: { fontSize: number; lines: string[] } = { fontSize: FONT_MIN, lines: [t] };
   if (mc) {
-    for (let fs = FONT_MAX; fs >= FONT_MIN; fs -= 2) {
-      mc.font = `900 ${fs}px ${CAP_FONT_FAMILY}`;
-      const lines = wrapLines(mc, text, maxTextW);
-      const widest = lines.reduce((m, l) => Math.max(m, mc.measureText(l).width), 0);
-      if (widest <= maxTextW && lines.length * fs * 1.28 <= maxBlockH) { best = fs; bestLines = lines; break; }
-      if (fs - 2 < FONT_MIN) { best = FONT_MIN; mc.font = `900 ${FONT_MIN}px ${CAP_FONT_FAMILY}`; bestLines = wrapLines(mc, text, maxTextW); }  // 兜底: 最小字号也分行装
+    let done = false;
+    // ① 单行优先 (无硬换行时): 整段宽 wRef → 单行最大字号 = min(撑满宽, 撑满高, 上限)
+    if (!t.includes('\n')) {
+      mc.font = `900 ${FIT_REF_FS}px ${CAP_FONT_FAMILY}`;
+      const wRef = Math.max(1, mc.measureText(t).width);
+      const oneLineFs = Math.floor(Math.min(FONT_MAX, (widthBudget / wRef) * FIT_REF_FS, hb / 1.38));   // 1.38 = 行高1.28 + 描边余量 (防粗描边顶出边界)
+      if (t.length <= 1 || oneLineFs >= WRAP_FLOOR) { res = { fontSize: Math.max(FONT_MIN, oneLineFs), lines: [t] }; done = true; }
+    }
+    // ② 长文案 → 分行: 从高往下找最大且 (最宽行 ≤ budget 且 块高 ≤ hb) 的字号
+    if (!done) {
+      for (let fs = FONT_MAX; fs >= FONT_MIN; fs -= 2) {
+        mc.font = `900 ${fs}px ${CAP_FONT_FAMILY}`;
+        const lines = wrapLines(mc, t, widthBudget);
+        const widest = lines.reduce((m, l) => Math.max(m, mc.measureText(l).width), 0);
+        if (widest <= widthBudget && lines.length * fs * 1.38 <= hb) { res = { fontSize: fs, lines }; done = true; break; }   // 1.38: 含描边余量
+      }
+      if (!done) { mc.font = `900 ${FONT_MIN}px ${CAP_FONT_FAMILY}`; res = { fontSize: FONT_MIN, lines: wrapLines(mc, t, widthBudget) }; }   // 兜底: 最小字号也分行装
     }
   }
-  const res = { fontSize: best, lines: bestLines };
-  if (_capFitCache.size > 200) { const k = _capFitCache.keys().next().value; if (k !== undefined) _capFitCache.delete(k); }
+  if (_capFitCache.size > 240) { const k = _capFitCache.keys().next().value; if (k !== undefined) _capFitCache.delete(k); }
   _capFitCache.set(key, res);
   return res;
 }
+// 按字幕 Y 位置(% of stage)算对称可用高 px → 块居中绘制不超上/下边界
+export function captionAvailH(yPercent: number, H: number): number {
+  const cyFrac = Math.min(1, Math.max(0, 0.5 + yPercent / 100));
+  return 2 * Math.min(cyFrac, 1 - cyFrac) * H;
+}
 // 仅取自适应字号 px (预览 DOM 用 — 跟导出按各自画宽算 → 比例一致 = 所见即所得)
-export function fitCaptionFontPx(text: string, W: number, H: number, style: CaptionStyle = 'meme'): number {
-  return fitCaptionLayout(text || ' ', W, H, style).fontSize;
+export function fitCaptionFontPx(text: string, W: number, H: number, style: CaptionStyle = 'meme', availH?: number): number {
+  return fitCaptionLayout(text || ' ', W, H, style, availH).fontSize;
 }
 
 export function drawCaption(
@@ -685,7 +705,7 @@ export function drawCaption(
     ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
     lines = wrapLines(ctx, text, W * 0.92);   // 该分行分行 (跟预览 pre-wrap 对齐 → 导出≈预览)
   } else {
-    const fit = fitCaptionLayout(fitText ?? text, W, H, style);   // 字号按完整文案 (稳定, 不随逐字入场变)
+    const fit = fitCaptionLayout(fitText ?? text, W, H, style, captionAvailH(tr.y, H));   // 字号按完整文案(稳定) + 按 Y 位置限高(不超上下边界)
     fontSize = fit.fontSize;
     ctx.font = `900 ${fontSize}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`;
     // typewriter 等 text 是部分 → 在稳定字号下重排部分文案; 否则直接用 fit.lines

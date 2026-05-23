@@ -42,7 +42,7 @@ import './animatemode.css';
 import {
   clamp, loadMedia,
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
-  computeCaptionEntrance, renderExportFrame, fitCaptionFontPx,
+  computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
@@ -5093,7 +5093,7 @@ function PreviewPane({
             const isSel = c.id === selectedId;
             const isEditing = c.id === editingCaptionId;
             const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
+            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h)); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
             // meme/bar 默认白字, panel 默认黑字 (跟样式背景反色)
             const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
             // v23-k: 字幕入场动效 — 实时计算 (编辑时禁用动效, 不打扰)
@@ -6794,7 +6794,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
             {activeCaptionClips.map(c => {
               const tr = c.transform ?? DEFAULT_CAPTION_TRANSFORM;
               const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
+              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h)); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
               const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
               const ent = computeCaptionEntrance(c, playhead);
               const xformStyle = (ent.opacity < 1 || Math.abs(ent.scale - 1) > 0.01)

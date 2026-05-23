@@ -12,7 +12,7 @@ import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { pickRandomText } from '@/data/quickModeTexts';
 import {
   loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, GIF_MAX_DURATION, GIF_MIN_DURATION,
-  fitCaptionFontPx, contentBboxFrac,
+  fitCaptionFontPx, captionAvailH, contentBboxFrac,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
   type GifPresetId, type LoopMotionKind, type ProjectMode, type GifFrameEdit,
@@ -1702,7 +1702,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 // 有 fontSize = 手动 (1280-conv); 没有 = 自适应 (短超大/长缩字, 跟导出 drawCaption 同算法 → 所见即所得)
                 const fontPx = c.fontSize != null
                   ? c.fontSize * (fit.w || preset.width) / 1280
-                  : fitCaptionFontPx(c.text, fit.w || preset.width, fit.h || preset.height, st);
+                  : fitCaptionFontPx(c.text, fit.w || preset.width, fit.h || preset.height, st, captionAvailH(tr.y, fit.h || preset.height));
                 const col = c.color ?? (st === 'panel' ? '#000' : '#fff');
                 // 自适应 meme 才显式定宽 (content-box 抵消 padding → DOM 换行 = 导出换行); panel/bar 让背景框贴文字
                 const autoMeme = c.fontSize == null && st === 'meme';
@@ -1908,12 +1908,12 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               </Field>
               <Field label={selCap.fontSize != null
                 ? `字号 · ${Math.round(selCap.fontSize * preset.width / 1280)}px`
-                : `字号 · 自动 (${fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme')}px)`}>
+                : `字号 · 自动 (${fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme', captionAvailH(selCap.transform?.y ?? 35, preset.height))}px)`}>
                 <div className="am-row" style={{ gap: 6, alignItems: 'center' }}>
                   <button type="button" className={'am-chip' + (selCap.fontSize == null ? ' is-active' : '')}
                     onClick={() => patchClip(selCap.id, { fontSize: undefined })} title="自适应字号 — 短文案超大撑边, 长文案缩字分行 (免手动调)">自动</button>
                   <input type="range" min={12} max={Math.round(preset.width * 0.4)} step={1}
-                    value={selCap.fontSize != null ? Math.round(selCap.fontSize * preset.width / 1280) : fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme')} className="am-range"
+                    value={selCap.fontSize != null ? Math.round(selCap.fontSize * preset.width / 1280) : fitCaptionFontPx(selCap.text, preset.width, preset.height, selCap.style ?? 'meme', captionAvailH(selCap.transform?.y ?? 35, preset.height))} className="am-range"
                     onChange={e => patchClip(selCap.id, { fontSize: Math.round(parseInt(e.target.value) * 1280 / preset.width) })} />
                 </div>
               </Field>
