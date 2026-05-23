@@ -5,6 +5,10 @@ dist/
 # Local container experiments not part of this UI change
 Dockerfile
 .dockerignore
+# ...but the edge-tts 代理部署包要带 Dockerfile (是正式交付物, 不是临时实验)
+!tools/tts-proxy/Dockerfile
+# 代理本地 .env (含域名/key) 不入库, 只留 .env.example
+tools/tts-proxy/.env
 
 .shell-backup-pre-cutout/
 devlog.txt

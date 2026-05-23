@@ -1,0 +1,40 @@
+# edge-tts 代理 — BWH/VPS 一键部署 (含 Caddy 自动 HTTPS).
+#   1. cp .env.example .env  并编辑 (至少填 TTS_DOMAIN = 解析到本机的子域名)
+#   2. docker compose up -d --build
+#   3. curl https://<你的域名>/healthz  应返回 {"ok": true}
+#
+# 不想用 Caddy/域名? 删掉 caddy 服务, 把 tts 的 expose 改成 ports: ["5000:5000"],
+# 再用 Cloudflare Tunnel / 你自己的反代 给它套 HTTPS (见 README).
+services:
+  tts:
+    build: .
+    restart: unless-stopped
+    environment:
+      TTS_API_KEY: ${TTS_API_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      MAX_TEXT_LEN: ${MAX_TEXT_LEN:-300}
+    expose:
+      - "5000"
+    # 若 edge-tts 从本机 IP 被墙/限流 (少见), 取消下面注释走你的 NX 机场 http 代理:
+    # environment:
+    #   HTTPS_PROXY: http://<nx-node-host>:<port>
+    #   HTTP_PROXY: http://<nx-node-host>:<port>
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TTS_DOMAIN: ${TTS_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - tts
+
+volumes:
+  caddy_data:
+  caddy_config:

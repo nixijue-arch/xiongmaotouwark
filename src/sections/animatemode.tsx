@@ -193,7 +193,18 @@ async function playYoudao(text: string, lang: 'zh' | 'en' = 'zh'): Promise<void>
 
 // 统一 TTS fetch — 用 voice.preferredEngine + voice.baiduPer (baidu 时), 严格 noFallback 时失败不降级
 // 所有 fetch (auto-gen / VoiceRow 试听 / Inspector 试听+生成) 都用这个, 保证一致性
-async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dataUrl: string; engine: 'youdao' | 'baidu' }> {
+async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dataUrl: string; engine: 'youdao' | 'baidu' | 'proxy' }> {
+  // 配了自部署 edge-tts 代理 (VITE_TTS_PROXY_URL 或 设置里填) → 优先走真 Azure Neural 音色 (稳定一致, 不挑 IP);
+  //   代理失败 (没起/超时) 再回退 youdao/baidu — 绝不因代理挂了而无声. 这是「生产端配音终极解」的接入点.
+  if (_userTTSProxyURL) {
+    try {
+      const dataUrl = await fetchTTSFromProxy(text, voice.azureName, 0, 0);
+      return { dataUrl, engine: 'proxy' };
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[TTS] 代理失败, 退云端 (${voice.id}):`, (e as Error)?.message);
+    }
+  }
   const lang: 'zh' | 'en' = voice.lang.startsWith('zh') ? 'zh' : 'en';
   const preferred: 'youdao' | 'baidu' = voice.preferredEngine || 'youdao';
   const fallback: 'youdao' | 'baidu' = preferred === 'youdao' ? 'baidu' : 'youdao';
@@ -221,7 +232,9 @@ async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dat
 // TTS HTTP 代理 — 用户自部署 edge-tts 反代 (Cloudflare Worker / Vercel)
 // 拿真 Azure Neural Yunjian/Xiaoxiao 男女童声, 国内秒通免费
 // ============================================================
-let _userTTSProxyURL = '';
+// 构建期默认 (Netlify 站点环境变量 VITE_TTS_PROXY_URL=https://你的代理域名 → 全站默认走真 Azure 语音);
+//   用户在设置里填的值 (IndexedDB) 会在 mount 时覆盖它. 二者都没有 = 走 youdao/baidu.
+let _userTTSProxyURL = ((import.meta.env as Record<string, string | undefined>).VITE_TTS_PROXY_URL || '').trim();
 export function setTTSProxyURL(url: string) { _userTTSProxyURL = url.trim(); }
 export function getTTSProxyURL() { return _userTTSProxyURL; }
 
@@ -2871,6 +2884,11 @@ export function AnimateMode() {
     idbGet<Material[]>(AM_UPLOADS_IDB_KEY).then(loaded => {
       if (Array.isArray(loaded)) setUploads(loaded.slice(0, AM_UPLOAD_MAX_COUNT));
     }).catch(() => {});
+  }, []);
+  // TTS 代理 URL 早期 hydrate (mount 即读, 不依赖配音面板 VoiceDiagBtn 挂载) → auto-gen 也能用上真 Azure 语音.
+  //   用户存的 (IDB) 覆盖构建期 VITE_TTS_PROXY_URL 默认; 都没有则维持 youdao/baidu.
+  useEffect(() => {
+    idbGet<string>(AM_TTS_PROXY_IDB_KEY).then(v => { if (typeof v === 'string' && v.trim()) setTTSProxyURL(v.trim()); }).catch(() => {});
   }, []);
   // 粘贴图片 (跟编辑器一致): 截图/复制图 (二进制) 或图片 URL (复制图片地址) → 存进上传素材池 (缓存) + 右上角 toast.
   //   仅 video 视图生效 (GIF 视图在 GifMode 自己处理, 各自存自己的池). 输入框内不劫持.
@@ -6565,24 +6583,15 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
               style={clip.genFailed ? { background: '#ef4444', color: '#fff', fontWeight: 700 } : undefined}
               onClick={async () => {
                 if (!clip.text?.trim()) { toast.error('先填台词'); return; }
-                const tid = toast.loading(clip.genFailed ? '🔄 重试生成 (youdao → baidu)…' : '云端生成中…');
-                const lang: 'zh' | 'en' = v.lang.startsWith('zh') ? 'zh' : 'en';
+                const tid = toast.loading(clip.genFailed ? '🔄 重试生成…' : '生成配音中…');
                 try {
-                  let dataUrl: string;
-                  let usedEngine: 'youdao' | 'baidu' = 'youdao';
-                  try {
-                    dataUrl = await fetchTTSBlob(clip.text, 'youdao', lang);
-                  } catch (youdaoErr) {
-                    // eslint-disable-next-line no-console
-                    console.warn('[inspector] youdao 失败, 试 baidu:', (youdaoErr as Error).message);
-                    dataUrl = await fetchTTSBlob(clip.text, 'baidu', lang);
-                    usedEngine = 'baidu';
-                  }
+                  // 走统一入口: 配了代理→真 Azure 语音; 否则 youdao→baidu (跟 auto-gen 一致)
+                  const { dataUrl, engine } = await fetchTTSForVoice(clip.text, v);
                   toast.dismiss(tid);
-                  await applyAudioSrc(dataUrl, usedEngine === 'baidu' ? 'baidu fallback' : '有道');
+                  await applyAudioSrc(dataUrl, engine === 'proxy' ? '真 Azure 语音' : engine === 'baidu' ? 'baidu' : '有道');
                 } catch (e) {
                   toast.dismiss(tid);
-                  toast.error(`youdao + baidu 都失败: ${(e as Error).message}`);
+                  toast.error(`配音生成失败: ${(e as Error).message}`);
                   onUpdate({ genFailed: true });
                 }
               }}
