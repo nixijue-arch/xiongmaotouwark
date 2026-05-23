@@ -816,7 +816,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         ? ({ ...base, trackId: 'image', src: (c as ImageClip).src, label: (c as ImageClip).label, fx: (c as ImageClip).fx, kind: (c as ImageClip).kind,
             transform: { ...((c as ImageClip).transform ?? DEFAULT_TRANSFORM) },
             gifEdit: (c as ImageClip).gifEdit ? { ...(c as ImageClip).gifEdit! } : undefined,
-            loopMotion: (c as ImageClip).loopMotion ? { ...(c as ImageClip).loopMotion! } : undefined } as ImageClip)
+            loopMotion: (c as ImageClip).loopMotion ? { ...(c as ImageClip).loopMotion! } : undefined,
+            // 保留配套元数据 (切分后 B 段仍是合法的壳/脸, 绑定不丢; 只拆脸时两半都自动跟随整壳)
+            boundTo: (c as ImageClip).boundTo, faceLocal: (c as ImageClip).faceLocal ? { ...(c as ImageClip).faceLocal! } : undefined,
+            role: (c as ImageClip).role, blend: (c as ImageClip).blend, shellPandaId: (c as ImageClip).shellPandaId } as ImageClip)
         : ({ ...base, trackId: 'caption', text: (c as CaptionClip).text, fontSize: (c as CaptionClip).fontSize,
             color: (c as CaptionClip).color, style: (c as CaptionClip).style, transform: (c as CaptionClip).transform } as CaptionClip);
       return { ...p, clips: [...p.clips.map(x => x.id === id ? ({ ...x, end: t } as Clip) : x), b] };
@@ -1223,7 +1226,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     if (!face) return;
     const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
     if (others.length === 0) { toast('没有可绑定的熊猫头壳'); return; }
-    const shell = others.find(o => o.role === 'shell') ?? others.find(o => o.blend === 'multiply') ?? others.find(o => !(o.label ?? '').endsWith('·脸')) ?? others.slice().sort((a, b) => b.lane - a.lane)[0];  // 壳 = role shell / blend multiply / 非·脸 / 兜底
+    // 壳候选 = role shell / blend multiply / 非·脸; 多个壳(切分后)时挑跟脸时段重叠最多的那段 → face_B 自动绑 shell_B
+    const shellCands = others.filter(o => o.role === 'shell' || o.blend === 'multiply' || !(o.label ?? '').endsWith('·脸'));
+    const cands = shellCands.length ? shellCands : others;
+    const ov = (s: ImageClip) => Math.max(0, Math.min(face.end, s.end) - Math.max(face.start, s.start));
+    const shell = cands.slice().sort((a, b) => ov(b) - ov(a) || b.lane - a.lane)[0];
     const sMedia = cacheRef.current.get(shell.src), fMedia = cacheRef.current.get(face.src);
     if (!sMedia || !fMedia) { toast('素材还在加载, 稍后再绑'); return; }
     const W = preset.width, H = preset.height;
@@ -1401,6 +1408,28 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const dxPct = (ev.clientX - startX) / cw * 100;
       const dyPct = (ev.clientY - startY) / ch * 100;
       patchClip(clip.id, { transform: { x: Math.max(-50, Math.min(50, startT.x + dxPct)), y: Math.max(-50, Math.min(50, startT.y + dyPct)) } });
+    };
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
+  };
+  // 字幕轮廓 SE 手柄拖拽改字号 (像拖图片一样缩放); 落到手动 fontSize(1280 空间), 从当前有效字号起算
+  const startCaptionResize = (e: React.PointerEvent, clip: CaptionClip) => {
+    if (e.button !== 0 || editingCaptionId === clip.id) return;
+    e.preventDefault(); e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (clip.id !== selectedId) setSelectedId(clip.id);
+    beginDrag();
+    const dispW = fit.w || preset.width, dispH = fit.h || preset.height;
+    const st = clip.style ?? 'meme', ty = clip.transform?.y ?? 35;
+    // 起始字号 → 1280 空间 (手动直接用; 自适应先按显示像素反推, 保证接手不跳)
+    const startFs = clip.fontSize != null
+      ? clip.fontSize
+      : fitCaptionFontPx(clip.text, dispW, dispH, st, captionAvailH(ty, dispH)) * 1280 / dispW;
+    const startX = e.clientX, startY = e.clientY;
+    const onMove = (ev: PointerEvent) => {
+      const drag = Math.max(ev.clientX - startX, ev.clientY - startY);  // SE 手柄: 往右下放大
+      const next = startFs + drag * (1280 / dispW) * 1.25;              // 显示像素 → 1280 空间 + 手感系数
+      patchClip(clip.id, { fontSize: Math.round(Math.max(20, Math.min(360, next))) });
     };
     const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
@@ -1744,6 +1773,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                         onPointerDown={e => e.stopPropagation()}
                         style={{ fontSize: Math.min(fontPx, 48), color: col }} />
                     ) : (c.text || '空字幕')}
+                    {c.id === selectedId && !isEditing && (
+                      <div className="am-stage-handle am-stage-handle-se am-cap-handle-se"
+                        onPointerDown={e => { e.stopPropagation(); startCaptionResize(e, c); }} title="拖动改字号" />
+                    )}
                   </div>
                 );
               })}

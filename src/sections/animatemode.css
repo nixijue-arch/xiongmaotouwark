@@ -3184,6 +3184,8 @@
 }
 .am-stage-handle-se { right: -10px; bottom: -10px; }
 .am-stage-handle:hover { background: #ff7a2f; transform: scale(1.15); }
+/* 字幕选中时的字号缩放手柄 (复用上面圆点样式 + SE 位置), 仅补 touch-action 让移动端可拖 */
+.am-cap-handle-se { touch-action: none; }
 /* 旋转手柄 — 选框正上方, 拖拽旋转 (Shift 锁 15°); 视频/GIF 共用 */
 .am-stage-handle-rot { left: 50%; top: -26px; transform: translateX(-50%); cursor: grab; display: flex; align-items: center; justify-content: center; color: #fff; }
 .am-stage-handle-rot svg { pointer-events: none; }
