@@ -317,6 +317,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
   // 每个 clip 一个 DOM 元素 (image=am-stage-img / caption=am-caption-stage); rAF 套动画 transform + 按时段显隐
   const overlayRefs = useRef<Map<string, HTMLElement | null>>(new Map());
+  const cycleHintRef = useRef(false);   // 重叠层 click-cycle 一次性提示
   // 时间轴
   const playheadRef = useRef<HTMLDivElement>(null);
   const playheadHandleRef = useRef<HTMLDivElement>(null);
@@ -1319,26 +1320,36 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const selGifTotal = selGifMedia && isGifFrames(selGifMedia) ? selGifMedia.frames.length : 0;
 
   // ---- 画板编辑 (DOM 元素拖拽, 跟视频 startStageDrag / startCaptionDrag 同款数学; canvasSize → fit 显示尺寸) ----
+  // 智能命中: elementsFromPoint 取点下图层栈(已按 z 上→下), 当前选中在栈里则选"下一层"(循环穿透), 否则选最顶.
+  // 取代旧"点壳→重定向到脸"的位置启发式 — 大脸/重叠遮挡时也能逐次点到每一层 (Figma 式 click-cycle).
+  const resolveClickLayer = (e: React.PointerEvent): ImageClip | null => {
+    const stack: string[] = [];
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      const box = (el as HTMLElement).closest?.('.am-stage-img') as HTMLElement | null;
+      const id = box?.dataset.clipId;
+      if (id && !stack.includes(id)) stack.push(id);
+    }
+    if (stack.length === 0) return null;
+    if (stack.length > 1 && !cycleHintRef.current) {   // 一次性提示: 重叠层可逐层点选
+      cycleHintRef.current = true;
+      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 画板同一处再点一次, 可逐层选中下面的层 (也可点右侧图层面板)', { duration: 4500 }); } } catch { /* ignore */ }
+    }
+    const idx = selectedId ? stack.indexOf(selectedId) : -1;
+    const pickId = idx >= 0 ? stack[(idx + 1) % stack.length] : stack[0];   // 选中在栈→下一层(循环); 否则最顶
+    return (projectRef.current.clips.find(c => c.id === pickId && c.trackId === 'image') as ImageClip | undefined) ?? null;
+  };
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
-    // 点击优先选脸: 壳在脸之上(multiply), 但点脸区域应直接选中脸. 用脸 overlay 的实时 rect 命中(含旋转/动画). 点壳非脸区域仍选壳.
-    if (kind === 'move') {
-      const isShell = clip.role === 'shell' || clip.blend === 'multiply' || projectRef.current.clips.some(f => f.trackId === 'image' && (f as ImageClip).boundTo === clip.id);
-      if (isShell) {
-        const px = e.clientX, py = e.clientY;
-        const hit = (projectRef.current.clips.filter(f => f.trackId === 'image' && (f as ImageClip).boundTo === clip.id) as ImageClip[])
-          .find(f => { const el = overlayRefs.current.get(f.id); if (!el) return false; const r = el.getBoundingClientRect(); return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom; });
-        if (hit) { startStageDrag(e, hit, 'move'); return; }
-      }
-    }
+    // move = 智能命中(循环穿透重叠层); scale/rotate(手柄) = 拖当前选中层
+    const target = kind === 'move' ? (resolveClickLayer(e) ?? clip) : clip;
     e.preventDefault(); e.stopPropagation();
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (clip.id !== selectedId) setSelectedId(clip.id);
+    if (target.id !== selectedId) setSelectedId(target.id);
     beginDrag();
-    const startT = clip.transform ?? DEFAULT_TRANSFORM;
+    const startT = target.transform ?? DEFAULT_TRANSFORM;
     const startX = e.clientX, startY = e.clientY;
     const cw = fit.w || preset.width, ch = fit.h || preset.height;
-    const _box = (e.currentTarget as HTMLElement).closest('.am-stage-img') as HTMLElement | null;
+    const _box = overlayRefs.current.get(target.id) ?? ((e.currentTarget as HTMLElement).closest('.am-stage-img') as HTMLElement | null);
     const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
     const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
     const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
@@ -1346,17 +1357,17 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / cw * 100;
         const dyPct = (ev.clientY - startY) / ch * 100;
-        patchTransform(clip.id, { x: Math.max(-200, Math.min(200, startT.x + dxPct)), y: Math.max(-200, Math.min(200, startT.y + dyPct)) });
+        patchTransform(target.id, { x: Math.max(-200, Math.min(200, startT.x + dxPct)), y: Math.max(-200, Math.min(200, startT.y + dyPct)) });
       } else if (kind === 'scale') {
         const baseSize = Math.min(cw, ch) * 0.6;
         const drag = Math.max(ev.clientX - startX, ev.clientY - startY);
-        patchTransform(clip.id, { scale: Math.max(0.2, Math.min(4, startT.scale + (drag * 2) / Math.max(1, baseSize))) });
+        patchTransform(target.id, { scale: Math.max(0.2, Math.min(4, startT.scale + (drag * 2) / Math.max(1, baseSize))) });
       } else {
         // 拖拽旋转 (Shift 锁 15°)
         const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
         let rot = startT.rotation + (a - _startAngle);
         if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
-        patchTransform(clip.id, { rotation: Math.max(-180, Math.min(180, rot)) });
+        patchTransform(target.id, { rotation: Math.max(-180, Math.min(180, rot)) });
       }
     };
     const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
@@ -1675,7 +1686,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 // 绑定脸: 按内容 bbox 内切椭圆裁切 (跟编辑器/导出一致), 防脸矩形角/白边盖到壳透明区
                 const faceClip = c.boundTo ? (() => { const fb = contentBboxFrac(media); return `ellipse(${(fb.w * 52).toFixed(1)}% ${(fb.h * 52).toFixed(1)}% at ${((fb.x + fb.w / 2) * 100).toFixed(1)}% ${((fb.y + fb.h / 2) * 100).toFixed(1)}%)`; })() : undefined;
                 return (
-                  <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }}
+                  <div key={c.id} data-clip-id={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }}
                     className={'am-stage-img' + (c.id === selectedId ? ' is-selected' : '') + (isScene ? ' am-stage-scene' : '')}
                     style={{ left: (b.cx - b.iw / 2) * sx, top: (b.cy - b.ih / 2) * sy, width: b.iw * sx, height: b.ih * sy, cursor: c.id === selectedId ? 'move' : 'pointer', zIndex: 50 - c.lane }}
                     onPointerDown={e => startStageDrag(e, c, 'move')} onContextMenu={e => onGifClipContextMenu(e, c)} onDragStart={e => e.preventDefault()}>

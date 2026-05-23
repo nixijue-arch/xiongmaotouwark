@@ -4790,15 +4790,35 @@ function PreviewPane({
   };
 
   // 拖动 selected image clip
+  const cycleHintRef = useRef(false);   // 重叠层 click-cycle 一次性提示
+  // 智能命中: elementsFromPoint 取点下图层栈(z 上→下), 当前选中在栈里则选下一层(循环穿透), 否则最顶 — 解决重叠/场景遮挡点不到下层
+  const resolveClickLayer = (e: React.PointerEvent): ImageClip | null => {
+    const stack: string[] = [];
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      const box = (el as HTMLElement).closest?.('.am-stage-img') as HTMLElement | null;
+      const id = box?.dataset.clipId;
+      if (id && !stack.includes(id)) stack.push(id);
+    }
+    if (stack.length === 0) return null;
+    if (stack.length > 1 && !cycleHintRef.current) {
+      cycleHintRef.current = true;
+      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 画板同一处再点一次, 可逐层选中下面的层 (也可点右侧图层面板)', { duration: 4500 }); } } catch { /* ignore */ }
+    }
+    const idx = selectedId ? stack.indexOf(selectedId) : -1;
+    const pickId = idx >= 0 ? stack[(idx + 1) % stack.length] : stack[0];
+    return (clips.find(c => c.id === pickId && c.trackId === 'image') as ImageClip | undefined) ?? null;
+  };
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    // move = 智能命中(循环穿透重叠层); scale/rotate(手柄) = 拖当前选中层
+    const target = kind === 'move' ? (resolveClickLayer(e) ?? clip) : clip;
     // pointer capture 让 pointer 离开元素后仍能收到事件
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
-    onSelect(clip.id);
+    onSelect(target.id);
     onBeginDrag();
-    const startT = getTransform(clip);
+    const startT = getTransform(target);
     const startX = e.clientX;
     const startY = e.clientY;
     const _box = (e.currentTarget as HTMLElement).closest('.am-stage-img') as HTMLElement | null;
@@ -4811,7 +4831,7 @@ function PreviewPane({
         const dyPct = (ev.clientY - startY) / canvasSize.h * 100;
         // 自由度优先 — 不再 clamp image bbox 在 canvas 内, user 想拖出框就拖出 (overflow:hidden 自然裁掉超出部分)
         // 上限 ±200% 防极端值 (user 不可能想拖到 canvas 外 2x). px-based positioning 让 image 出框也合理
-        onTransformLive(clip.id, {
+        onTransformLive(target.id, {
           x: clamp(startT.x + dxPct, -200, 200),
           y: clamp(startT.y + dyPct, -200, 200),
         });
@@ -4825,13 +4845,13 @@ function PreviewPane({
         // 用 max(dx, dy) 让单轴拖动也跟手 (取主导方向)
         const drag = Math.max(dx, dy);
         const newScale = clamp(startT.scale + (drag * 2) / Math.max(1, baseSize), 0.2, 4);
-        onTransformLive(clip.id, { scale: newScale });
+        onTransformLive(target.id, { scale: newScale });
       } else {
         // 拖拽旋转 (Shift 锁 15°)
         const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
         let rot = startT.rotation + (a - _startAngle);
         if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
-        onTransformLive(clip.id, { rotation: clamp(rot, -180, 180) });
+        onTransformLive(target.id, { rotation: clamp(rot, -180, 180) });
       }
     };
     const onUp = () => {
@@ -4965,6 +4985,7 @@ function PreviewPane({
             return (
               <div
                 key={c.id}
+                data-clip-id={c.id}
                 className={`am-stage-img${isSel ? ' is-selected' : ''}${isScene ? ' am-stage-scene' : ''}${c.id === fxTargetImageId ? ' am-stage-fx-target' : ''}`}
                 style={{
                   // px-based positioning — 不再用 % + translate(-50%) 双重转换, 不用 scale transform
