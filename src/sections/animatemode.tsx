@@ -191,11 +191,84 @@ async function playYoudao(text: string, lang: 'zh' | 'en' = 'zh'): Promise<void>
   });
 }
 
-// 统一 TTS fetch — 用 voice.preferredEngine + voice.baiduPer (baidu 时), 严格 noFallback 时失败不降级
+// ============================================================
+// 浏览器直连 edge-tts (微软 Edge 朗读同款 Azure Neural 语音) — 配音终极方案 (2026-05-24 实测可行):
+//   • 各用户自己的浏览器/IP 直接连微软 WSS → 零服务器、零 VPS, 不烧任何节点
+//   • 真 Azure Neural 音色 (晓晓/云健/云希…) + 返回真 mp3 → 能录进 MP4 导出 (SpeechSynthesis 做不到)
+//   • 免费, 全社区可用; CDP 实测非 MS Origin 浏览器能开 WS 拿到音频
+//   失败 (某些网络拦 bing wss) → 回退代理/youdao/baidu. 连续失败 2 次本会话停用直连 (免每条等超时).
+// ============================================================
+let _edgeTTSFails = 0;
+function _escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+async function fetchEdgeTTSDirect(text: string, voiceName: string): Promise<string> {
+  if (typeof WebSocket === 'undefined' || !crypto?.subtle) throw new Error('环境不支持 (需 WSS + SubtleCrypto / HTTPS)');
+  // Sec-MS-GEC token = SHA256(windows_filetime 取整5分钟 + TrustedClientToken), 大写 hex
+  const TCT = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+  let ticks = (Date.now() / 1000 + 11644473600) * 10000000;
+  ticks = ticks - (ticks % 3000000000);
+  const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(Math.floor(ticks)) + TCT));
+  const gec = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TCT}&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-131.0.2903.86`;
+  return await new Promise<string>((resolve, reject) => {
+    let sock: WebSocket;
+    try { sock = new WebSocket(url); } catch (e) { reject(e as Error); return; }
+    sock.binaryType = 'arraybuffer';
+    const chunks: Uint8Array[] = [];
+    let settled = false;
+    const finish = (ok: boolean, val: string | Error) => {
+      if (settled) return; settled = true;
+      try { sock.close(); } catch { /* ignore */ }
+      if (ok) resolve(val as string); else reject(val as Error);
+    };
+    const timer = setTimeout(() => finish(false, new Error('edge-tts 超时')), 12000);
+    sock.onopen = () => {
+      const reqId = (crypto.randomUUID?.() || (Date.now().toString(16) + Math.random().toString(16).slice(2))).replace(/-/g, '').slice(0, 32);
+      sock.send(`X-Timestamp:${new Date().toString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
+        JSON.stringify({ context: { synthesis: { audio: { metadataoptions: { sentenceBoundaryEnabled: false, wordBoundaryEnabled: false }, outputFormat: 'audio-24khz-48kbitrate-mono-mp3' } } } }));
+      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'><voice name='${voiceName}'>${_escapeXml(text)}</voice></speak>`;
+      sock.send(`X-RequestId:${reqId}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${new Date().toString()}Z\r\nPath:ssml\r\n\r\n${ssml}`);
+    };
+    sock.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        if (e.data.includes('Path:turn.end')) {
+          clearTimeout(timer);
+          if (!chunks.length) { finish(false, new Error('edge-tts 无音频')); return; }
+          const fr = new FileReader();
+          fr.onload = () => finish(true, String(fr.result || ''));
+          fr.onerror = () => finish(false, new Error('FileReader 失败'));
+          fr.readAsDataURL(new Blob(chunks as BlobPart[], { type: 'audio/mpeg' }));
+        }
+      } else {
+        // 二进制帧: [2字节 headerLen][header 文本][音频数据] — 剥掉 header 只留音频
+        const buf = e.data as ArrayBuffer;
+        if (buf.byteLength < 2) return;
+        const headerLen = new DataView(buf).getUint16(0);
+        if (buf.byteLength > 2 + headerLen) chunks.push(new Uint8Array(buf, 2 + headerLen));
+      }
+    };
+    sock.onerror = () => { clearTimeout(timer); finish(false, new Error('edge-tts WS 错误 (网络可能拦了 bing wss)')); };
+    sock.onclose = (ev) => { clearTimeout(timer); finish(false, new Error('edge-tts WS 关闭 code=' + ev.code)); };
+  });
+}
+
+// 统一 TTS fetch — 优先浏览器直连 edge-tts(真 Azure 语音/零 VPS) → 代理 → youdao/baidu
 // 所有 fetch (auto-gen / VoiceRow 试听 / Inspector 试听+生成) 都用这个, 保证一致性
-async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dataUrl: string; engine: 'youdao' | 'baidu' | 'proxy' }> {
-  // 配了自部署 edge-tts 代理 (VITE_TTS_PROXY_URL 或 设置里填) → 优先走真 Azure Neural 音色 (稳定一致, 不挑 IP);
-  //   代理失败 (没起/超时) 再回退 youdao/baidu — 绝不因代理挂了而无声. 这是「生产端配音终极解」的接入点.
+async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dataUrl: string; engine: 'youdao' | 'baidu' | 'proxy' | 'edge' }> {
+  // 1. 浏览器直连 edge-tts (真 Azure 语音, 各用户自己 IP, 零 VPS, 可录进 MP4) — 首选.
+  if (_edgeTTSFails < 2) {
+    try {
+      const dataUrl = await fetchEdgeTTSDirect(text, voice.azureName);
+      _edgeTTSFails = 0;
+      return { dataUrl, engine: 'edge' };
+    } catch (e) {
+      _edgeTTSFails++;
+      // eslint-disable-next-line no-console
+      console.warn(`[TTS] edge-tts 直连失败 (${_edgeTTSFails}/2), 试代理/云端 (${voice.id}):`, (e as Error)?.message);
+    }
+  }
+  // 2. 配了自部署 edge-tts 代理 → 真 Azure 语音 (兜底直连被拦的网络)
   if (_userTTSProxyURL) {
     try {
       const dataUrl = await fetchTTSFromProxy(text, voice.azureName, 0, 0);
