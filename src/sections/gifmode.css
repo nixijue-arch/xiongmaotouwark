@@ -108,7 +108,10 @@
 .gm-tl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; }
 .gm-tl-title { font-size: 12px; font-weight: 800; color: #0a356d; }
 .gm-tl-headright { display: flex; align-items: center; gap: 8px; flex: none; }
-.gm-tl-loopbadge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--retro-stroke, #7f9dc8); color: #0a356d; background: linear-gradient(180deg, #ffffff, #e3f0ff); white-space: nowrap; }
+.gm-tl-loopbadge { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--retro-stroke, #7f9dc8); color: #0a356d; background: linear-gradient(180deg, #ffffff, #e3f0ff); white-space: nowrap; cursor: pointer; font-family: inherit; line-height: 1; display: inline-flex; align-items: center; gap: 3px; transition: filter 120ms ease, transform 80ms ease; }
+.gm-tl-loopbadge:hover { filter: brightness(1.05); }
+.gm-tl-loopbadge:active { transform: scale(0.94); }
+.gm-tl-loopbadge-swap { opacity: 0.5; font-weight: 900; }
 .gm-tl-loopbadge.gm-loop-boomerang { color: #8a4a08; border-color: #d6a55c; background: linear-gradient(180deg, #fff4d1, #ffd97a); }
 .gm-tl-loopbadge.gm-loop-crossfade { color: #4a2070; border-color: #8a4abf; background: linear-gradient(180deg, #f3e6ff, #d8b4f8); }
 /* 内容高 + 封顶 38vh — 时间轴只占图层所需高度 (不再固定 38vh 留大片空白浪费).
@@ -309,9 +312,12 @@
   .gm-tl-durhandle, .am-tl-playhead-handle, .am-stage-img, .am-caption-stage, .am-move-marker { touch-action: none; }
   .gm-tl-body { overflow-y: auto; -webkit-overflow-scrolling: touch; }   /* 轨道多时纵向滚 */
 
-  /* 工具栏换行铺开 (不横滚) — 折叠仅 1 行主操作, 「⋯ 更多」展开多行全显 (data-mobile-hide 规则在 animatemode.css, .am-toolbar 共用) */
-  .gm-toolbar { flex-wrap: wrap; overflow-x: visible; align-content: flex-start; scrollbar-width: none; height: auto; min-height: 44px; padding: 6px 8px; }
+  /* 工具栏换行铺开 (不横滚) — 主操作全常驻铺 2 行, 不再「⋯ 更多」展开 (data-mobile-hide=桌面专属藏, 规则在 animatemode.css, .am-toolbar 共用) */
+  .gm-toolbar { flex-wrap: wrap; overflow-x: visible; align-content: flex-start; scrollbar-width: none; height: auto; min-height: 44px; padding: 5px 7px; gap: 5px 4px; }
   .gm-toolbar::-webkit-scrollbar { display: none; }
+  .gm-toolbar .gm-tb-select { max-width: 88px; height: 32px; }   /* GIF 预设下拉手机收窄 */
+  .gm-toolbar .gm-tb-num { font-size: 11px; }
+  .gm-toolbar .gm-tb-num input { width: 38px; }
   .gm-draftpop { width: min(280px, 92vw); }
   .gm-variant-grid { grid-template-columns: 1fr; }
   .gm-motionpop { z-index: 320; }  /* 压过 sheet (z301) */

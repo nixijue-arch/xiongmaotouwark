@@ -1755,6 +1755,13 @@
 .am-move-marker-a {
   background: linear-gradient(135deg, #6aa9ff, #2a5fa3);
 }
+/* 绑定脸: A = 脸静止锚点 (不可拖, 拖脸本体改起点) — 虚线描边 + 默认光标, 区别于可拖的 B */
+.am-move-marker-a.is-anchor {
+  cursor: default;
+  border-style: dashed;
+  opacity: 0.82;
+}
+.am-move-marker-a.is-anchor:hover { transform: translate(-50%, -50%); box-shadow: 0 2px 5px rgba(0,0,0,0.4); }
 .am-move-marker-b {
   background: linear-gradient(135deg, #FF8C42, #FF5E00);
 }
@@ -4633,34 +4640,39 @@
     position: relative;
   }
 
-  /* Toolbar 简化: 隐藏次要 button (草稿/JSON 进 sheet) */
+  /* Toolbar 手机版 (2026-05-24 重做 — 剪映式 2 行常驻, 不再 ⋯更多 展开/横滚):
+     主操作 (mode/时长/撤回重做/新建随机清空/保存草稿/预览/导出) 全 icon-only 平铺自然换 2 行;
+     高级功能 (名字/整理/JSON/快捷键/对比变体) data-mobile-hide 桌面专属, 手机直接藏. */
   .am-toolbar {
-    padding: 6px 8px;
-    gap: 4px;
-    height: auto;              /* 关键: 覆盖桌面 height:42px, 否则展开多行被裁→按钮"消失"到预览下面 */
+    padding: 5px 7px;
+    gap: 5px 4px;
+    height: auto;              /* 覆盖桌面 height:42px, 多行不裁 */
     min-height: 44px;
     flex: none;
-    flex-wrap: wrap;            /* 换行铺开, 不横滚 — 折叠仅 1 行(主操作), 展开多行全显 */
+    flex-wrap: wrap;            /* 换行铺开, 不横滚 */
     overflow: visible;
     align-content: flex-start;
+    justify-content: flex-start;
     scrollbar-width: none;
   }
   .am-toolbar::-webkit-scrollbar { display: none; }
-  .am-tb-more-toggle { display: inline-flex; }   /* 手机端显示「⋯ 更多」开关 */
-  .am-toolbar-spacer { display: none; }          /* 手机端去弹簧 — 按钮自然左排+换行, 不把导出挤出屏 */
-  .am-toolbar-name { min-width: 0; flex: 0 0 auto; }
-  .am-toolbar-name-text { max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
-  .am-toolbar-stat { display: none; } /* mobile 不显片段数 */
-  .am-tb-btn { height: 36px; padding: 0 10px; font-size: 11.5px; }
-  .am-tb-btn span { display: none; } /* 只剩 icon (省宽度) */
-  .am-tb-btn-icon { min-width: 36px; }
-  .am-tb-mode-btn { height: 30px; padding: 0 8px; font-size: 11px; }
-  .am-tb-mode-btn { min-width: 0; }
-  /* 折叠时隐藏次要按钮 (剩 mode/随机/undo/redo/更多/导出 主操作常驻 1 行); 点「⋯ 更多」加 .is-expanded → 全显换行铺开, 永不横滚 */
-  /* 通用 [data-mobile-hide] — 覆盖 button/div/select/label (GIF 工具栏的预设 select + 时长 label) */
-  .am-toolbar:not(.is-expanded) > [data-mobile-hide] { display: none; }
-  /* 第 1 个 sep 保留, 后续 sep 隐藏 (通用兄弟组合器 — 任何前面已有 sep 的 sep) */
-  .am-toolbar > .am-tb-sep ~ .am-tb-sep { display: none; }
+  .am-tb-more-toggle { display: none !important; }   /* 手机端不再用「⋯ 更多」(主按钮全常驻) */
+  .am-toolbar-spacer { display: none; }              /* 去弹簧 — 按钮自然左排换行 */
+  .am-toolbar-name { display: none !important; }     /* 名字 label 手机藏 (省整行) */
+  .am-toolbar-stat { display: none; }                /* 片段数手机藏 */
+  .am-tb-btn { height: 34px; min-width: 33px; padding: 0 7px; font-size: 11.5px; justify-content: center; gap: 3px; }
+  .am-tb-btn span { display: none; }                 /* 只剩 icon (省宽度) */
+  .am-tb-btn-icon { min-width: 33px; }
+  .am-tb-duration { flex: 0 0 auto; }
+  .am-tb-duration-btn { padding: 0 6px; }            /* 时长按钮保留 ⏱4.0s 文字 (用 strong 不是 span) */
+  .am-tb-duration-btn strong { font-size: 11px; }
+  .am-tb-duration-btn svg { display: none; }         /* 省掉下拉箭头, 点开仍是菜单 */
+  .am-tb-mode { flex: 0 0 auto; }
+  .am-tb-mode-btn { height: 30px; padding: 0 7px; font-size: 11px; min-width: 0; }
+  .gm-tb-select { max-width: 92px; height: 32px; }   /* GIF 预设下拉 — 手机收窄 */
+  /* 高级功能手机直接藏 (不再有 is-expanded 展开态) */
+  .am-toolbar > [data-mobile-hide] { display: none !important; }
+  .am-toolbar > .am-tb-sep { display: none; }        /* 分隔线手机省掉 (换行已分组) */
 
   /* Workspace: vertical stack, preview top */
   .am-workspace {

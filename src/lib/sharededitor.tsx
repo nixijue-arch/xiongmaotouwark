@@ -323,7 +323,10 @@ function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
 }) {
   // 单独 panda/face 拖入沙雕动画时, flattenAlphaShell 把内部 transparent fill 白, 防场景透出
   // scene 不处理 (本身就是背景), upload 用户图也不动 (尊重用户原图)
-  const needsFlattenShell = kind === 'panda' || kind === 'face';
+  // ⚠️ 联网搜的网络梗图是「完整图」(不是透明熊猫壳): 绝不能跑 flattenAlphaShell — 否则白底填充+四角洪泛
+  //    会把整张梗图填白/抠烂 (= 用户报的「联网搜在沙雕动画完全不可用」根因). 网络图 id 恒以 network- 开头, 直接用原图.
+  const isNetworkFullImage = item.kind === 'network' || item.id.startsWith('network-');
+  const needsFlattenShell = (kind === 'panda' || kind === 'face') && !isNetworkFullImage;
   const buildPayload = useCallback(async (): Promise<DragPayload> => {
     let src = item.src;
     if (needsFlattenShell) {

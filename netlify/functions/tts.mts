@@ -80,7 +80,11 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
       headers: {
         ...CORS_HEADERS,
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600',
+        // ⚠️ no-store (修「随机配音全是同一段、且不是当前文案」严重 bug):
+        //   旧 'public, max-age=3600' 让 Netlify 边缘/中间层缓存本响应. 若缓存键按 path 忽略 ?text=
+        //   query → 不同文案的请求全部命中同一条旧缓存 → 4 段配音听到的是更早某次请求的同一段音频.
+        //   客户端 (ttsAudioCacheRef 内存缓存 + clip.audioSrc dataURL 落 IDB) 已自带缓存, 共享缓存零收益、纯风险.
+        'Cache-Control': 'no-store',
       },
     });
   } catch (e) {

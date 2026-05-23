@@ -22,6 +22,7 @@ import {
   loopTimeMap, loopSpecAt, renderLoopFrame, makeLoopMotionAt, makeBoundFaceAt, resolveBoundFaceBox, captureFaceLocal, loopMotionDelta, loopSeamScore, exportGIFLoop, exportGIFVariants, downloadBlob,
 } from '@/lib/gifloop';
 import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
+import { fetchAsDataUrl } from '@/lib/networkImage';
 import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
 import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off, Drama } from 'lucide-react';
@@ -230,6 +231,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [gifDrafts, setGifDrafts] = useState<GifDraftSlot[]>([]);
   const [draftPopOpen, setDraftPopOpen] = useState(false);
   const [gifUploads, setGifUploads] = useState<Material[]>([]); // GIF 素材池 (上传/搜图/抠脸沉淀, 隔离于 video)
+  const gifUploadsRef = useRef<Material[]>([]);
+  useEffect(() => { gifUploadsRef.current = gifUploads; }, [gifUploads]);
   const [gifUploadKind, setGifUploadKind] = useState<'general' | 'panda' | 'face' | 'scene'>('general'); // 上传归类 → 决定进哪个 subtab
   const [gifTbMore, setGifTbMore] = useState(false); // 手机端工具栏折叠/展开 (跟视频一致, 避免横向滚动)
   const uploadsLoadedRef = useRef(false); // 防"持久化在加载前跑→把池写空"竞态
@@ -858,7 +861,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const to = ic.loopMotion?.to ?? { ...baseT, x: clampN(baseT.x + 24, -120, 120) };
       patchClip(id, { loopMotion: { kind: 'customMove', amp: ic.loopMotion?.amp ?? 1, cycles: ic.loopMotion?.cycles ?? 1, to } });
       setSelectedId(id); setCustomEdit(true);
-      toast.success('来回动作 ✓ — 自定义往返 (画板拖 A·B 点)');
+      toast.success('来回动作 ✓ — 拖画板橙色 B 点设「移动到哪」');
     }
   }, [patchClip]);
   const duplicateClipGif = useCallback((id: string) => {
@@ -963,6 +966,49 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     else { startRef.current = now - frozenRef.current * 1000; }
     setPlaying(v => !v);
   }, [playing]);
+
+  // 粘贴图片 (跟编辑器/视频视图一致): 截图二进制 或 图片 URL → 存进 GIF 素材池 (缓存) + 右上角 toast. 仅 GIF 视图.
+  useEffect(() => {
+    if (view !== 'gif') return;
+    const addPasted = (dataUrl: string) => {
+      const cur = gifUploadsRef.current;
+      if (cur.length >= GIF_UPLOAD_MAX) { toast.error(`GIF 素材库已达 ${GIF_UPLOAD_MAX} 张上限`); return; }
+      const usedBytes = cur.reduce((a, m) => a + (m.src?.length || 0), 0);
+      if (usedBytes + dataUrl.length > GIF_UPLOAD_MAX_BYTES) { toast.error(`GIF 素材库存储已满 (${(GIF_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)}MB)`); return; }
+      const mat: Material = { id: `paste-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: dataUrl, labelCn: '粘贴图', labelEn: 'Pasted', tags: [], tagsEn: [], faceOffset: { x: 100, y: 70, w: 250, h: 250 }, kind: 'upload' };
+      setGifUploads(prev => [mat, ...prev].slice(0, GIF_UPLOAD_MAX));
+      toast.success('✓ 已粘贴到 GIF 素材库「上传」分页 — 点缩略图加入');
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile(); if (!blob) continue;
+          e.preventDefault();
+          const r = new FileReader();
+          r.onload = () => addPasted(String(r.result || ''));
+          r.readAsDataURL(blob);
+          return;
+        }
+      }
+      for (const item of items) {
+        if (item.kind === 'string' && item.type === 'text/plain') {
+          item.getAsString((raw) => {
+            const url = raw.trim();
+            if (!/^https?:\/\//i.test(url) || !/\.(jpe?g|png|gif|webp|bmp|avif)(\?|#|$)/i.test(url)) return;
+            const tid = toast.loading('下载链接图片中…');
+            fetchAsDataUrl(url).then(d => { toast.dismiss(tid); addPasted(d); }).catch(err => toast.error(`粘贴失败: ${(err as Error).message}`, { id: tid }));
+          });
+          return;
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [view]);
 
   // GIF 自己的快捷键 (仅 GIF 视图, 跟视频彻底分开) — Space 播放/暂停循环
   useEffect(() => {
@@ -1550,22 +1596,43 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     });
   }, []);
 
-  // 自定义移动 A(base) / B(to) 圆点在画板上的显示坐标
+  // 自定义移动 A(起点=元素静止位) / B(终点) 圆点在画板上的显示坐标
+  //   关键修 (2026-05-24): 绑定脸的渲染位 = resolveBoundFaceBox(壳+faceLocal), 不是 transform!
+  //   旧版 A 画在 transform / B 画在 to (绝对坐标) → 跟绑定脸实际位置完全错位 ("不是AB点/反向").
+  //   现在 A = 脸实际静止位 (绑定→bound rest @t0; 独立→transform), B = A + (to-transform) 位移向量 → 所见即所动.
   const markerPos = useMemo(() => {
     if (!selImg || !customEdit || selImg.loopMotion?.kind !== 'customMove' || !selImg.loopMotion.to) return null;
     const cw = fit.w || preset.width, ch = fit.h || preset.height;
     const sx = cw / preset.width, sy = ch / preset.height;
     const base = selImg.transform ?? DEFAULT_TRANSFORM;
     const to = selImg.loopMotion.to;
+    // 起点 A = 元素静止渲染中心 (画布坐标)
+    let restCx = preset.width / 2 + (base.x / 100) * preset.width;
+    let restCy = preset.height / 2 + (base.y / 100) * preset.height;
+    let isBound = false;
+    if (selImg.boundTo) {
+      const shellC = imageClips.find(s => s.id === selImg.boundTo);
+      const sMediaC = shellC ? cacheRef.current.get(shellC.src) : undefined;
+      const fMediaC = cacheRef.current.get(selImg.src);
+      if (shellC && sMediaC && fMediaC) {
+        const sWHc = mediaWH(sMediaC), fWHc = mediaWH(fMediaC);
+        const fb0 = resolveBoundFaceBox(selImg, shellC, 0, project.duration, preset.width, preset.height, sWHc.w, sWHc.h, fWHc.w, fWHc.h);
+        if (Number.isFinite(fb0.cx) && Number.isFinite(fb0.cy)) { restCx = fb0.cx; restCy = fb0.cy; isBound = true; }
+      }
+    }
+    // 终点 B = 静止位 + (to - transform) 位移 (跟 loopMotionDelta customMove 的 dx/dy 一致)
+    const dxC = ((to.x - base.x) / 100) * preset.width;
+    const dyC = ((to.y - base.y) / 100) * preset.height;
     // 渲染位置再夹一层 (留 14px 边距), 即使数据异常 A/B 也不会跑出画板被遮挡
     const cl = (v: number, max: number) => Math.max(14, Math.min(max - 14, v));
     return {
-      ax: cl((preset.width / 2 + (base.x / 100) * preset.width) * sx, cw),
-      ay: cl((preset.height / 2 + (base.y / 100) * preset.height) * sy, ch),
-      bx: cl((preset.width / 2 + (to.x / 100) * preset.width) * sx, cw),
-      by: cl((preset.height / 2 + (to.y / 100) * preset.height) * sy, ch),
+      ax: cl(restCx * sx, cw),
+      ay: cl(restCy * sy, ch),
+      bx: cl((restCx + dxC) * sx, cw),
+      by: cl((restCy + dyC) * sy, ch),
+      isBound,
     };
-  }, [selImg, customEdit, fit, preset]);
+  }, [selImg, customEdit, fit, preset, imageClips, project.duration]);
 
   return (
     <>
@@ -1584,11 +1651,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             className={'am-tb-mode-btn' + (view === 'gif' ? ' is-active' : '')}
             onClick={() => onSwitchView('gif')} title="GIF 模式 — 无声 + 短时长 + 循环直出">🎞️ GIF</button>
         </div>
-        <select className="gm-tb-select" value={project.preset} title="尺寸预设" data-mobile-hide
+        <select className="gm-tb-select" value={project.preset} title="尺寸预设"
           onChange={e => setPresetId(e.target.value as GifPresetId)}>
           {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
-        <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`} data-mobile-hide>
+        <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`}>
           ⏱<input type="number" min={GIF_MIN_DURATION} max={maxDur} step={0.5}
             value={Number(D.toFixed(1))} onChange={e => setDuration(Number(e.target.value || '1'))} /><span>s</span>
         </label>
@@ -1598,14 +1665,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <button className="am-tb-btn" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z / Ctrl+Y)"><Redo2 size={14} /></button>
         </div>
         <div className="am-toolbar-spacer" />
-        <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF" data-mobile-hide><FilePlus size={14} /> <span>新建</span></button>
+        <button className="am-tb-btn" onClick={newProject} title="新建空白 GIF"><FilePlus size={14} /> <span>新建</span></button>
         <button className="am-tb-btn" onClick={gifRandomize} title="随机熊猫头+表情+字幕+循环动作 (清空重来)">
           <Shuffle size={13} /> <span>随机</span>
         </button>
-        <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)" data-mobile-hide><Trash2 size={14} /> <span>清空</span></button>
+        <button className="am-tb-btn" onClick={clearAll} disabled={project.clips.length === 0} title="清空画板 (Ctrl+Z 可撤回)"><Trash2 size={14} /> <span>清空</span></button>
         <div className="am-tb-sep" data-mobile-hide />
-        <button className="am-tb-btn" onClick={saveGifDraft} title="保存当前为新草稿" data-mobile-hide><Save size={13} /> <span>保存</span></button>
-        <div className="gm-draftwrap" data-mobile-hide>
+        <button className="am-tb-btn" onClick={saveGifDraft} title="保存当前为新草稿"><Save size={13} /> <span>保存</span></button>
+        <div className="gm-draftwrap">
           <button className={'am-tb-btn' + (draftPopOpen ? ' am-tb-btn-primary' : '')} onClick={() => setDraftPopOpen(o => !o)} title="GIF 草稿 — 存 / 读 当前作品">
             <FolderOpen size={13} /> <span>草稿{gifDrafts.length ? ` ${gifDrafts.length}` : ''}</span>
           </button>
@@ -1636,12 +1703,12 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             </>
           )}
         </div>
-        <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title="全屏预览 — 大图看循环" data-mobile-hide><Maximize2 size={13} /> <span>预览</span></button>
+        <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title="全屏预览 — 大图看循环"><Maximize2 size={13} /> <span>预览</span></button>
         <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓/溶解 三变体并排对比" data-mobile-hide>
           <Layers size={13} /> <span>对比变体</span>
         </button>
         <button className="am-tb-btn am-tb-more-toggle" onClick={() => setGifTbMore(v => !v)} title="更多功能">{gifTbMore ? '收起 ▲' : '⋯ 更多'}</button>
-        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF" data-mobile-hide>
+        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
           {exporting ? <Loader2 size={13} className="gm-spin" /> : <Download size={13} />} <span>{exporting ? '生成中' : '导出 GIF'}</span>
         </button>
       </div>
@@ -1678,7 +1745,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   <>
                     <MaterialSourceButtons kind="panda" onAdd={(m) => setGifUploads(prev => [m, ...prev].slice(0, GIF_UPLOAD_MAX))} />
                     <div className="sidebar-grid">
-                      {gifUploads.filter(u => u.kind === 'panda').filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
+                      {gifUploads.filter(u => u.kind === 'panda' && !u.id.startsWith('network-')).filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
                       {ALL_PANDAS.filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={addFromPayload} />)}
                     </div>
                   </>
@@ -1694,10 +1761,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 )}
                 {assetSub === 'netsearch' && (
                   <div className="gm-netsearch-tab">
-                    <MaterialSourceButtons kind="panda" onAdd={(m) => setGifUploads(prev => [{ ...m, kind: 'panda' }, ...prev].slice(0, GIF_UPLOAD_MAX))} />
-                    <div className="gm-hint" style={{ marginTop: 10, lineHeight: 1.7 }}>
-                      🌐 点上面「联网搜图」搜全网熊猫头梗图 → 点选即存进素材池 (到「熊猫」分页用)。<br />
+                    <MaterialSourceButtons kind="panda" onAdd={(m) => setGifUploads(prev => [{ ...m, kind: 'panda' }, ...prev.filter(u => u.id !== m.id)].slice(0, GIF_UPLOAD_MAX))} />
+                    <div className="gm-hint" style={{ marginTop: 8, lineHeight: 1.6 }}>
+                      🌐 搜全网熊猫头梗图 → 点选即存进下方池子 → 再点缩略图加入时间轴 (完整梗图, 原样使用不二次合成)。<br />
                       弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+                    </div>
+                    <div className="sidebar-grid" style={{ marginTop: 8 }}>
+                      {gifUploads.filter(u => u.id.startsWith('network-')).filter(matchQ).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={addFromPayload} onDelete={() => setGifUploads(prev => prev.filter(x => x.id !== m.id))} />)}
+                      {gifUploads.filter(u => u.id.startsWith('network-')).length === 0 && <p className="am-empty-line">还没搜过 — 点上面「联网搜图」开始</p>}
                     </div>
                   </div>
                 )}
@@ -1894,8 +1965,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               {markerPos && (
                 <>
                   <div className="gm-marker-line" style={{ left: markerPos.ax, top: markerPos.ay, width: Math.hypot(markerPos.bx - markerPos.ax, markerPos.by - markerPos.ay), transform: `rotate(${Math.atan2(markerPos.by - markerPos.ay, markerPos.bx - markerPos.ax)}rad)` }} />
-                  <div className="am-move-marker am-move-marker-a" style={{ left: markerPos.ax, top: markerPos.ay }} onPointerDown={e => startMarker(e, 'a')} title="起点 A">A</div>
-                  <div className="am-move-marker am-move-marker-b" style={{ left: markerPos.bx, top: markerPos.by }} onPointerDown={e => startMarker(e, 'b')} title="目标 B">B</div>
+                  <div className={'am-move-marker am-move-marker-a' + (markerPos.isBound ? ' is-anchor' : '')} style={{ left: markerPos.ax, top: markerPos.ay }}
+                    onPointerDown={markerPos.isBound ? undefined : e => startMarker(e, 'a')}
+                    title={markerPos.isBound ? '起点 A = 脸当前位置 (想改起点就直接拖脸本体)' : '起点 A — 拖动设置起始位置'}>A</div>
+                  <div className="am-move-marker am-move-marker-b" style={{ left: markerPos.bx, top: markerPos.by }} onPointerDown={e => startMarker(e, 'b')} title="终点 B — 拖动设置「循环移动到哪」(画面会在 A↔B 间来回)">B</div>
                 </>
               )}
             </div>
@@ -2043,7 +2116,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               )}
               {selImg.loopMotion?.kind === 'customMove' && selImg.loopMotion.to && (
                 <>
-                  <div className="am-field-sublabel" style={{ padding: '4px 0' }}>🎯 自定义移动 — 画板拖 A / B 点定义往返</div>
+                  <div className="am-field-sublabel" style={{ padding: '4px 0' }}>🎯 自定义移动 — A=当前位置, 拖橙色 <b>B</b> 点设「移动到哪」(循环里 A↔B 来回)</div>
                   <label className="gm-toggle-row"><input type="checkbox" checked={customEdit} onChange={e => setCustomEdit(e.target.checked)} /> 显示 A / B 手柄</label>
                   <button className="am-chip" onClick={swapAB} type="button"><ArrowLeftRight size={12} /> 互换 A ↔ B</button>
                   <Field label={`B 缩放 · ${selImg.loopMotion.to.scale.toFixed(2)}x`}>
@@ -2133,7 +2206,16 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 </button>
               );
             })()}
-            <span className={'gm-tl-loopbadge gm-loop-' + project.loop.mode} title={loopInfo?.hint}>{loopGlyph} {loopInfo?.short}</span>
+            <button
+              type="button"
+              className={'gm-tl-loopbadge gm-loop-' + project.loop.mode}
+              title={`循环方式: ${loopInfo?.short ?? ''} — 点击切换 · ${loopInfo?.hint ?? ''}`}
+              onClick={() => {
+                const idx = LOOP_MODES.findIndex(m => m.mode === project.loop.mode);
+                const next = LOOP_MODES[(idx + 1) % LOOP_MODES.length];
+                setLoopMode(next.mode);
+                toast(`循环方式 → ${next.short} · ${next.hint}`, { duration: 2200 });
+              }}>{loopGlyph} {loopInfo?.short} <span className="gm-tl-loopbadge-swap">⇄</span></button>
             <button className="am-tb-btn" onClick={applyMotionToAll} disabled={!selImg?.loopMotion || selImg.loopMotion.kind === 'none'} title="把选中主体的动作套到所有图层">动作 → 全部</button>
           </div>
         </div>
@@ -2317,7 +2399,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                     onChange={e => patchClip(motionPop.id, { loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} /><b>{lm.cycles}x</b></label>
                 </div>
               )}
-              {lm.kind === 'customMove' && <div className="gm-motionpop-hint">🎯 在画板拖橙色 A·B 两点设置起止位置</div>}
+              {lm.kind === 'customMove' && <div className="gm-motionpop-hint">🎯 画板上拖橙色 <b>B</b> 点设「移动到哪」(画面在 当前位↔B 来回); 想改起点直接拖元素本体</div>}
               {/* 动效分段: 在游标处把这层切两段 → 后半段可设另一个动作 (同层不同时段不同动效) */}
               {(() => {
                 const cutT = clampN(loopTimeMap(scrubT, D, project.loop.mode), 0, D);

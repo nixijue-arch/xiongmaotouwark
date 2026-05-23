@@ -54,6 +54,7 @@ import {
 import { GifMode } from '@/sections/gifmode';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { VOICE_LIB, VOICE_BY_ID, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
+import { fetchAsDataUrl } from '@/lib/networkImage';
 
 // ============================================================
 // Types
@@ -1732,6 +1733,10 @@ export function AnimateMode() {
     const timer = setTimeout(async () => {
       if (genRunningRef.current) return;   // 已有生成循环在跑 → 不并发 → 串行抓取 → 同一音色 (晓晓), 不被 baidu 串味
       genRunningRef.current = true;
+      // 批量串台检测: 同一轮生成里, 若两条「不同文案」拿到字节完全相同的音频 →
+      //   = CDN/youdao 缓存或限流串台 (修「随机配音全是同一段、且不是当前文案」). 拒绝错误音频, 标记重生成.
+      const batchAudioSeen = new Map<string, string>();   // audioSrc(dataURL) → 首次出现的文案
+      let dupBadCount = 0;
       try {
       for (const c of project.clips) {
         if (c.trackId !== 'tts') continue;
@@ -1775,6 +1780,23 @@ export function AnimateMode() {
           const duration = await getAudioDuration(dataUrl);
           if (ttsGenSigRef.current.get(ts.id) !== `pending:${sig}`) continue;
           const wallDuration = duration / rate;
+          // 串台检测: 不同文案却拿到完全相同音频字节 = 服务端缓存/限流 bug → 拒绝, 标记重生成 (不污染本地缓存)
+          const dupText = batchAudioSeen.get(dataUrl);
+          if (dupText !== undefined && dupText !== text) {
+            dupBadCount++;
+            ttsGenSigRef.current.set(ts.id, `fail:${sig}`);
+            setProjectLive(p => ({
+              ...p,
+              clips: p.clips.map(cc => cc.id === ts.id
+                ? ({ ...cc, genFailed: true, audioSrc: undefined, audioEngine: undefined } as Clip)
+                : cc),
+            }));
+            // eslint-disable-next-line no-console
+            console.warn(`[auto-gen TTS] ${ts.id} "${text.slice(0, 16)}" 与 "${dupText.slice(0, 16)}" 音频字节相同 → 判串台错误, 标记重生成`);
+            await new Promise(r => setTimeout(r, 400));
+            continue;
+          }
+          batchAudioSeen.set(dataUrl, text);
           // FIFO 上限 80 (每条 mp3 dataURL ~30-80KB, 长 session 防无限涨; 源在 clip.audioSrc 上, 淘汰只多一次重生成)
           const _ttsCache = ttsAudioCacheRef.current;
           if (_ttsCache.size >= 80 && !_ttsCache.has(cacheKey)) { const _old = _ttsCache.keys().next().value; if (_old) _ttsCache.delete(_old); }
@@ -2828,6 +2850,8 @@ export function AnimateMode() {
     return { total, done, failed, pending };
   }, [project.clips]);
   const [uploads, setUploads] = useState<Material[]>([]);
+  const uploadsRef = useRef<Material[]>([]);
+  useEffect(() => { uploadsRef.current = uploads; }, [uploads]);
   const [userBGMs, setUserBGMs] = useState<BGMPreset[]>([]);
   const userBGMsRef = useRef<BGMPreset[]>([]);
   useEffect(() => { userBGMsRef.current = userBGMs; }, [userBGMs]);
@@ -2841,6 +2865,49 @@ export function AnimateMode() {
       if (Array.isArray(loaded)) setUploads(loaded.slice(0, AM_UPLOAD_MAX_COUNT));
     }).catch(() => {});
   }, []);
+  // 粘贴图片 (跟编辑器一致): 截图/复制图 (二进制) 或图片 URL (复制图片地址) → 存进上传素材池 (缓存) + 右上角 toast.
+  //   仅 video 视图生效 (GIF 视图在 GifMode 自己处理, 各自存自己的池). 输入框内不劫持.
+  useEffect(() => {
+    if (view !== 'video') return;
+    const addPasted = (dataUrl: string) => {
+      const cur = uploadsRef.current;
+      if (cur.length >= AM_UPLOAD_MAX_COUNT) { toast.error(`素材库已达 ${AM_UPLOAD_MAX_COUNT} 张上限`); return; }
+      const usedBytes = cur.reduce((a, m) => a + (m.src?.length || 0), 0);
+      if (usedBytes + dataUrl.length > AM_UPLOAD_MAX_BYTES) { toast.error(`素材库存储已满 (${(AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)}MB)`); return; }
+      const mat: Material = { id: `paste-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: dataUrl, labelCn: '粘贴图', labelEn: 'Pasted', tags: [], tagsEn: [], faceOffset: { x: 100, y: 70, w: 250, h: 250 }, kind: 'upload' };
+      setUploads(prev => [mat, ...prev].slice(0, AM_UPLOAD_MAX_COUNT));
+      toast.success('✓ 已粘贴到素材库「上传」分页 — 点缩略图加入时间轴');
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      for (const item of items) {   // 1. 图片二进制 (截图工具)
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile(); if (!blob) continue;
+          e.preventDefault();
+          const r = new FileReader();
+          r.onload = () => addPasted(String(r.result || ''));
+          r.readAsDataURL(blob);
+          return;
+        }
+      }
+      for (const item of items) {   // 2. 图片 URL 文本 (右键复制图片地址)
+        if (item.kind === 'string' && item.type === 'text/plain') {
+          item.getAsString((raw) => {
+            const url = raw.trim();
+            if (!/^https?:\/\//i.test(url) || !/\.(jpe?g|png|gif|webp|bmp|avif)(\?|#|$)/i.test(url)) return;
+            const tid = toast.loading('下载链接图片中…');
+            fetchAsDataUrl(url).then(d => { toast.dismiss(tid); addPasted(d); }).catch(err => toast.error(`粘贴失败: ${(err as Error).message}`, { id: tid }));
+          });
+          return;
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [view]);
   useEffect(() => {
     if (userBgmsLoadedRef.current) return;
     userBgmsLoadedRef.current = true;
@@ -3580,7 +3647,7 @@ function AnimateToolbar({
           </span>
         )}
       </div>
-      <div className="am-tb-duration" ref={durRef} data-mobile-hide>
+      <div className="am-tb-duration" ref={durRef}>
         <button
           className="am-tb-btn am-tb-duration-btn"
           onClick={() => setDurOpen(o => !o)}
@@ -3638,10 +3705,9 @@ function AnimateToolbar({
           if (res.confirmed) onReset();
         }}
         title="新建空白项目 (会清空当前)"
-        data-mobile-hide
       ><Plus size={13} /> <span>新建</span></button>
       <button className="am-tb-btn" onClick={onRandomize} title="随机生成"><Shuffle size={13} /> <span>随机</span></button>
-      <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)" data-mobile-hide><Trash2 size={13} /> <span>清空</span></button>
+      <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)"><Trash2 size={13} /> <span>清空</span></button>
       <button
         className="am-tb-btn"
         onClick={async () => {
@@ -3658,8 +3724,8 @@ function AnimateToolbar({
         ⤓ <span>整理</span>
       </button>
       <div className="am-tb-sep" />
-      <button className="am-tb-btn" onClick={onSaveDraft} title="保存为新草稿 (Ctrl+S)" data-mobile-hide><Save size={13} /> <span>保存</span></button>
-      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={`管理 ${draftsCount} 个草稿`} data-mobile-hide>
+      <button className="am-tb-btn" onClick={onSaveDraft} title="保存为新草稿 (Ctrl+S)"><Save size={13} /> <span>保存</span></button>
+      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={`管理 ${draftsCount} 个草稿`}>
         <FolderOpen size={13} /> <span>草稿 ({draftsCount})</span>
       </button>
       {/* v23-k Phase A: 项目 JSON 导入/导出 (跨设备 / 备份 / 分享) */}
@@ -3675,10 +3741,10 @@ function AnimateToolbar({
       )}
       <div className="am-tb-sep" data-mobile-hide />
       <button className="am-tb-btn" onClick={onOpenShortcuts} title="完整快捷键列表" data-mobile-hide><span style={{ fontSize: 14 }}>⌨️</span> <span>快捷键</span></button>
-      <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览" data-mobile-hide><Eye size={13} /> <span>预览</span></button>
-      {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (桌面 CSS 隐藏) */}
+      <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览"><Eye size={13} /> <span>预览</span></button>
+      {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (现 CSS 全隐藏 — 主按钮已全常驻 2 行) */}
       <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title="更多功能">{mobileMore ? '收起 ▲' : '⋯ 更多'}</button>
-      <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件" data-mobile-hide>
+      <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件">
         <Download size={13} /> <span>导出视频</span>
       </button>
       {import.meta.env.DEV && (onOpenTemplates || onOpenBgmAlign || onOpenStateDump) && (
@@ -4059,8 +4125,8 @@ function LeftPane({
             <>
               <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [m, ...prev].slice(0, AM_UPLOAD_MAX_COUNT))} />
               <div className="sidebar-grid">
-                {/* v23-b: 内置 panda 池 + 用户上传 kind=panda + 联网搜图沉淀 */}
-                {filter(uploads.filter(u => u.kind === 'panda')).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
+                {/* v23-b: 内置 panda 池 + 用户上传 kind=panda (联网搜的完整梗图改放「联网搜」分页, 这里只放可合成的熊猫底图) */}
+                {filter(uploads.filter(u => u.kind === 'panda' && !u.id.startsWith('network-'))).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
                 {filter(ALL_PANDAS).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} />)}
                 {filter(ALL_PANDAS).length === 0 && <p className="am-empty-line">无匹配素材</p>}
               </div>
@@ -4079,9 +4145,13 @@ function LeftPane({
           )}
           {seg === 'asset' && sub === 'netsearch' && (
             <div className="am-netsearch-tab">
-              <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [{ ...m, kind: 'panda' }, ...prev].slice(0, AM_UPLOAD_MAX_COUNT))} />
-              <div className="am-scene-hint" style={{ marginTop: 10, lineHeight: 1.7 }}>
-                🌐 点上面「联网搜图」搜全网熊猫头梗图 → 点选即存进素材池 (到「熊猫」分页用)。弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+              <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [{ ...m, kind: 'panda' }, ...prev.filter(u => u.id !== m.id)].slice(0, AM_UPLOAD_MAX_COUNT))} />
+              <div className="am-scene-hint" style={{ marginTop: 8, lineHeight: 1.6 }}>
+                🌐 搜全网熊猫头梗图 → 点选即存进下方池子 → 再点缩略图加入时间轴 (完整梗图, 原样使用不二次合成)。弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+              </div>
+              <div className="sidebar-grid" style={{ marginTop: 8 }}>
+                {filter(uploads.filter(u => u.id.startsWith('network-'))).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
+                {uploads.filter(u => u.id.startsWith('network-')).length === 0 && <p className="am-empty-line">还没搜过 — 点上面「联网搜图」开始</p>}
               </div>
             </div>
           )}
