@@ -24,7 +24,7 @@ import {
 import { ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, SCENE_LIB, draftToLayers, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off } from 'lucide-react';
+import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off, Drama } from 'lucide-react';
 import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
 import './gifmode.css';
 
@@ -205,6 +205,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const [swapPop, setSwapPop] = useState<{ id: string; kind: 'panda' | 'face' } | null>(null);  // 点图层换素材弹窗
   const [swapQ, setSwapQ] = useState('');
   const [swapBusy, setSwapBusy] = useState(false);
+  // 变脸 (face-cycle): 同一壳上多张脸依次轮播 (默认溶解过渡)
+  const [cyclePop, setCyclePop] = useState<{ shellId: string; faceId: string } | null>(null);
+  const [cycleSel, setCycleSel] = useState<string[]>([]);   // 选中脸 material id (顺序 = 播放顺序)
+  const [cycleDissolve, setCycleDissolve] = useState(true);
+  const [cycleQ, setCycleQ] = useState('');
 
   // rAF 用 ref 读最新值, 避免每次编辑都拆/重建动画循环
   const projectRef = useRef(project); projectRef.current = project;
@@ -420,6 +425,17 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             const md = loopMotionDelta(ic.loopMotion, t, dd, w, h, ic.transform);
             const baseRot = ic.transform?.rotation ?? 0;
             el.style.transform = `translate(${(md.dx * sx).toFixed(2)}px, ${(md.dy * sy).toFixed(2)}px) rotate(${(baseRot + md.dRot).toFixed(2)}deg) scale(${md.dScale.toFixed(4)})`;
+          }
+          // 变脸溶解: opacity 设在内层(带 mix-blend 的 img/canvas, el 首子) 而非外层 div — 防 opacity<1 隔离 blend → 正确交叉溶解
+          const xfi = ic.xfadeIn ?? 0, xfo = ic.xfadeOut ?? 0;
+          const inner = el.firstElementChild as HTMLElement | null;
+          if (inner) {
+            if (xfi || xfo) {
+              let op = 1;
+              if (xfi && t - ic.start < xfi) op = Math.max(0, (t - ic.start) / xfi);
+              if (xfo && ic.end - t < xfo) op = Math.min(op, Math.max(0, (ic.end - t) / xfo));
+              inner.style.opacity = op.toFixed(3);
+            } else if (inner.style.opacity) inner.style.opacity = '';
           }
           // 导入 GIF: 当前帧 (按 gifEdit 反转/调速/裁帧) 画到 clip canvas — 跟循环 + 微调同步 (WYSIWYG)
           const gm = cacheRef.current.get(ic.src);
@@ -1221,6 +1237,39 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     } catch { toast.error('换熊猫头失败', { id: tid }); }
     finally { setSwapBusy(false); }
   }, [preset]);
+  // 变脸: 打开多选弹窗 (从选中的脸 / 壳解析出 shell + 基础脸)
+  const openFaceCycle = useCallback((clip: ImageClip) => {
+    let face: ImageClip | undefined, shellId: string | undefined;
+    if (clip.boundTo) { face = clip; shellId = clip.boundTo; }
+    else { face = projectRef.current.clips.find(c => c.trackId === 'image' && (c as ImageClip).boundTo === clip.id) as ImageClip | undefined; shellId = clip.id; }
+    if (!face || !shellId) { toast.error('先做一个配套 (熊猫头 + 表情) 才能变脸'); return; }
+    setCyclePop({ shellId, faceId: face.id });
+    const curMat = ALL_FACES.find(m => m.src === face!.src);
+    setCycleSel(curMat ? [curMat.id] : []);
+    setCycleDissolve(true); setCycleQ('');
+  }, []);
+  // 变脸: 生成 N 个绑定脸 (共享基础脸的 faceLocal/transform/lane/blend), 时段平分循环, 溶解则相邻重叠 + xfade
+  const applyFaceCycle = useCallback((shellId: string, baseFaceId: string, faceMats: Material[], dissolve: boolean) => {
+    const p0 = projectRef.current;
+    const base = p0.clips.find(c => c.id === baseFaceId && c.trackId === 'image') as ImageClip | undefined;
+    const shell = p0.clips.find(c => c.id === shellId && c.trackId === 'image') as ImageClip | undefined;
+    if (!base || !shell || faceMats.length < 2) return;
+    const D = p0.duration, N = faceMats.length, seg = D / N;
+    const xf = dissolve ? Math.min(0.35, seg * 0.45) : 0;
+    const baseFL = base.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+    const baseTr = base.transform ?? { ...DEFAULT_TRANSFORM };
+    const cycleFaces: ImageClip[] = faceMats.map((m, i) => ({
+      id: uid('fc'), trackId: 'image', lane: base.lane, start: i * seg, end: (i < N - 1) ? (i + 1) * seg + xf : D,
+      src: m.src, label: m.labelCn + '·脸', fx: 'none', blend: base.blend,
+      transform: { ...baseTr }, loopMotion: { kind: 'none', amp: 1, cycles: 1 },
+      boundTo: shellId, faceLocal: { ...baseFL }, role: 'face',
+      xfadeIn: (dissolve && i > 0) ? xf : undefined,
+      xfadeOut: (dissolve && i < N - 1) ? xf : undefined,
+    } as ImageClip));
+    setProject(p => ({ ...p, clips: [...p.clips.filter(c => !(c.trackId === 'image' && (c as ImageClip).boundTo === shellId)), ...cycleFaces] }));
+    setCyclePop(null); setSelectedId(cycleFaces[0].id);
+    toast.success(`🎭 变脸 · ${N} 张表情${dissolve ? ' · 溶解过渡' : ' · 快切'}`);
+  }, []);
   const selImg = selected && selected.trackId === 'image' ? (selected as ImageClip) : null;
   const selCap = selected && selected.trackId === 'caption' ? (selected as CaptionClip) : null;
   const tr = selImg?.transform ?? DEFAULT_TRANSFORM;
@@ -1721,6 +1770,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   </Field>
                 );
               })()}
+              {selImg.kind !== 'scene' && (selImg.boundTo || imageClips.some(c => c.id !== selImg.id && (c as ImageClip).boundTo === selImg.id)) && (
+                <Field label="变脸 · 多表情轮播">
+                  <button type="button" className="am-chip" onClick={() => openFaceCycle(selImg)} title="选 2-6 张表情, 在循环里依次轮播 (默认溶解淡入淡出) — 变脸特效, 壳照常可做动作">
+                    <Drama size={12} /> 做变脸
+                  </button>
+                </Field>
+              )}
               <Field label="标签">
                 <input className="am-input" value={selImg.label || ''} onChange={e => patchClip(selImg.id, { label: e.target.value })} placeholder="图层标签…" />
               </Field>
@@ -1971,6 +2027,47 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   </button>
                 ))}
                 {list.length === 0 && <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {cyclePop && (() => {
+        const k = cycleQ.trim().toLowerCase();
+        const list = ALL_FACES.filter(m => !k || m.labelCn.toLowerCase().includes(k) || m.labelEn.toLowerCase().includes(k) || m.tags.some(tg => tg.toLowerCase().includes(k)));
+        const selMats = cycleSel.map(id => ALL_FACES.find(m => m.id === id)).filter(Boolean) as Material[];
+        const toggle = (id: string) => setCycleSel(s => s.includes(id) ? s.filter(x => x !== id) : (s.length >= 6 ? s : [...s, id]));
+        return (
+          <div className="am-combo-picker-overlay" onClick={() => setCyclePop(null)}>
+            <div className="am-combo-picker win7-panel" onClick={e => e.stopPropagation()}>
+              <div className="am-combo-picker-head">
+                <span>🎭 变脸 · 选 2-6 张表情依次轮播 · 已选 {cycleSel.length}/6</span>
+                <button className="am-popover-close" onClick={() => setCyclePop(null)} type="button"><X size={14} /></button>
+              </div>
+              <div className="am-combo-picker-search material-search-box">
+                <Search size={12} color="#888" />
+                <input autoFocus type="text" className="material-search-input" placeholder="搜表情…" value={cycleQ} onChange={e => setCycleQ(e.target.value)} />
+              </div>
+              <div className="am-combo-picker-grid">
+                {list.map(m => {
+                  const idx = cycleSel.indexOf(m.id);
+                  return (
+                    <button key={m.id} type="button" className={'am-combo-picker-card' + (idx >= 0 ? ' is-active' : '')} onClick={() => toggle(m.id)} title={m.labelCn}>
+                      <img src={m.src} alt={m.labelCn} className="am-combo-picker-thumb" loading="lazy" draggable={false} />
+                      <span className="am-combo-picker-name">{m.labelCn}</span>
+                      {idx >= 0 && <span className="gm-cycle-badge">{idx + 1}</span>}
+                    </button>
+                  );
+                })}
+                {list.length === 0 && <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>}
+              </div>
+              <div className="am-combo-picker-foot">
+                <button type="button" className={'am-chip' + (cycleDissolve ? ' is-active' : '')} onClick={() => setCycleDissolve(d => !d)} title="溶解 = 脸之间淡入淡出过渡; 关 = 直接快切(鬼畜)">
+                  {cycleDissolve ? '✓ 溶解过渡' : '○ 硬切快换'}
+                </button>
+                <button type="button" className="gm-cycle-make" disabled={cycleSel.length < 2} onClick={() => applyFaceCycle(cyclePop.shellId, cyclePop.faceId, selMats, cycleDissolve)}>
+                  生成变脸 · {cycleSel.length} 张
+                </button>
               </div>
             </div>
           </div>

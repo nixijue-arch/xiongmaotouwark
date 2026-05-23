@@ -24,7 +24,7 @@ export interface BaseClip { id: string; trackId: TrackType; lane: number; start:
 // 脸跟壳绑定: boundTo = 此 face 绑定的 shell(熊猫头) clip id; faceLocal = 绑定时 face 相对 shell 渲染框的局部位姿 (dxN/dyN 按 shell 半宽归一, scaleRatio=face/shell, rotation=相对角). face 渲染时 = shell 实时框(transform+loopMotion) ∘ faceLocal + face 自身 loopMotion.
 export interface FaceLocal { dxN: number; dyN: number; scaleRatio: number; rotation: number; }
 export interface BoundFaceBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; }
-export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; blend?: 'multiply'; role?: 'shell' | 'face' | 'scene' | 'image'; shellPandaId?: string; }
+export interface ImageClip extends BaseClip { trackId: 'image'; src: string; label: string; caption?: string; fx: ImageFx; transform?: Transform; endTransform?: Transform; kind?: 'scene'; gifEdit?: GifFrameEdit; loopMotion?: LoopMotion; boundTo?: string; faceLocal?: FaceLocal; blend?: 'multiply'; role?: 'shell' | 'face' | 'scene' | 'image'; shellPandaId?: string; xfadeIn?: number; xfadeOut?: number; /* 变脸溶解: 窗口首/尾秒数内 alpha 渐变 (相邻脸时段重叠 → 交叉溶解); 硬切则不设 */ }
 export interface CaptionTransform { x: number; y: number; }
 export const DEFAULT_CAPTION_TRANSFORM: CaptionTransform = { x: 0, y: 35 };
 // 'meme' = 白字 + 黑描边 (跟编辑器对齐, meme 经典款); 'panel' = 白底黑框; 'bar' = 黑底白字
@@ -486,6 +486,11 @@ export function renderExportFrame(
         const sWH = mediaWH(sMedia);
         const bf = boundFaceAt(c, shell, t, sWH.w, sWH.h, naturalW, naturalH);
         ctx.save();
+        // 变脸 (face-cycle) 溶解: 窗口边缘按 xfadeIn/Out 渐变 alpha (相邻脸时段重叠 → 交叉溶解; 硬切无 xfade)
+        let cyA = 1;
+        if (c.xfadeIn && t - c.start < c.xfadeIn) cyA *= Math.max(0, (t - c.start) / c.xfadeIn);
+        if (c.xfadeOut && c.end - t < c.xfadeOut) cyA *= Math.max(0, (c.end - t) / c.xfadeOut);
+        if (cyA < 1) ctx.globalAlpha = cyA;
         if (c.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';  // 不透明壳方案: 脸在上 multiply (脸盖白底, 壳黑特征透出)
         ctx.translate(bf.cx, bf.cy);
         ctx.rotate(bf.rotation * Math.PI / 180);

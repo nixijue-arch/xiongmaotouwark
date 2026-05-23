@@ -4506,6 +4506,7 @@
   gap: 6px;
 }
 .am-combo-picker-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4515,6 +4516,45 @@
   border: 1px solid #b8c8de;
   border-radius: 5px;
   cursor: pointer;
+}
+/* 变脸多选: 顺序角标 + 底栏 + 生成按钮 */
+.gm-cycle-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  background: #ff5e00;
+  color: #fff;
+  border-radius: 9px;
+  font-size: 10px;
+  line-height: 17px;
+  text-align: center;
+  font-weight: 800;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.am-combo-picker-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(10, 53, 109, 0.14);
+}
+.gm-cycle-make {
+  background: linear-gradient(180deg, #ff7a2e 0%, #ff5e00 100%);
+  color: #fff;
+  border: 1px solid #d24e00;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gm-cycle-make:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .am-combo-picker-card:hover {
   background: #fffae3;
