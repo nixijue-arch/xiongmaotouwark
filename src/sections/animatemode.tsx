@@ -9,7 +9,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Play, Pause, Mic, Music, Sparkles, Search, Upload, Download,
+  Play, Pause, Mic, Music, Sparkles, Search, Upload, Download, Loader2,
   Trash2, Eye, Shuffle, Image as ImageIcon, SkipBack,
   SkipForward, X, Settings, Scissors, Copy as CopyIcon,
   ChevronUp, ChevronDown, Undo2, Redo2, Plus, Minus,
@@ -934,8 +934,16 @@ const audioEngine = (() => {
     const all = getVoices();
     return { count: all.length, sample: all.slice(0, 5).map(av => `${av.name} (${av.lang})`) };
   }
+  // iOS/移动端解锁: 必须在"用户手势内同步" resume AudioContext + 播一帧静音 buffer, 否则之后
+  // createMediaElementSource 路由的音频全程静音 (手机端"没配音"根因 — 之前 resume 都在 await/rAF 后, 非手势).
+  function unlock() {
+    const ac = getAC();
+    if (!ac) return;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    try { const b = ac.createBuffer(1, 1, 22050); const s = ac.createBufferSource(); s.buffer = b; s.connect(ac.destination); s.start(0); } catch { /* ignore */ }
+  }
   return {
-    speak, cancel, previewVoice,
+    speak, cancel, previewVoice, unlock,
     startBGM, stopBGM: _stopAllBGM, cancelAll, destroyAll,
     ready: () => getVoices().length > 0, getDiagnostics,
     startExportCapture, stopExportCapture,
@@ -2070,6 +2078,7 @@ export function AnimateMode() {
 
   // 播放/暂停 — 播到末尾再按播放 = 从头播 (剪映/CapCut 直觉)
   const togglePlay = useCallback(() => {
+    audioEngine.unlock();   // 必须在播放按钮手势内解锁 AudioContext (iOS), 否则配音全程静音
     if (!isPlaying && playheadRef.current >= project.duration - 0.05) {
       setPlayhead(0); playheadRef.current = 0;
     }
@@ -4600,6 +4609,8 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
   const pk = usePreviewKey();
   const pkey = 'voice:' + item.id;
   const previewing = pk === pkey;
+  const [voLoading, setVoLoading] = useState(false);   // 试听抓取中 (网络) → 转圈给反馈, 不再"等很久没动静"
+  useEffect(() => { if (!previewing) setVoLoading(false); }, [previewing]);
   const payload: DragPayload = {
     type: 'tts', voice: item.id,
     text: item.lang.startsWith('zh') ? '点击编辑文字' : 'Click to edit text',
@@ -4633,14 +4644,17 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
         className="am-list-play"
         onClick={(e) => {
           e.stopPropagation();
+          audioEngine.unlock();   // 手势内解锁 AudioContext (iOS), 否则试听静音
           if (previewing) { previewStop(); return; }
           const rate = item.playbackRate ?? 1.0;
+          setVoLoading(true);
           previewStart(pkey, async (onDone, isCurrent) => {
             // 1. proxy 优先: 配了自部署 → 真 Neural (Azure Yunjian 等)
             if (_userTTSProxyURL) {
               try {
                 const dataUrl = await fetchTTSFromProxy(item.sampleText, item.azureName, 0, 0);
                 if (!isCurrent()) return;
+                setVoLoading(false);
                 audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
                 return;
               } catch (err) {
@@ -4652,9 +4666,11 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
             try {
               const { dataUrl } = await fetchTTSForVoice(item.sampleText, item);
               if (!isCurrent()) return;
+              setVoLoading(false);
               audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
             } catch (err) {
               if (!isCurrent()) return;
+              setVoLoading(false);
               // 3. 云端都挂 → SS 兜底
               toast.error(`云端试听失败 (${(err as Error).message.slice(0, 40)}), 退化浏览器 SS`);
               const u = audioEngine.previewVoice(item); if (u) u.addEventListener('end', onDone); else onDone();
@@ -4663,7 +4679,7 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
         }}
         title={previewing ? '停止试听' : `试听 (${item.preferredEngine || 'youdao'} 云端) · 跟时间轴 audio 一致`}
       >
-        {previewing ? <Pause size={10} /> : <Play size={10} />}
+        {voLoading ? <Loader2 size={10} style={{ animation: 'am-spin 0.8s linear infinite' }} /> : previewing ? <Pause size={10} /> : <Play size={10} />}
       </button>
     </div>
   );

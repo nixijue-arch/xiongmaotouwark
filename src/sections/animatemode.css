@@ -4637,9 +4637,11 @@
   .am-toolbar {
     padding: 6px 8px;
     gap: 4px;
+    height: auto;              /* 关键: 覆盖桌面 height:42px, 否则展开多行被裁→按钮"消失"到预览下面 */
     min-height: 44px;
+    flex: none;
     flex-wrap: wrap;            /* 换行铺开, 不横滚 — 折叠仅 1 行(主操作), 展开多行全显 */
-    overflow-x: visible;
+    overflow: visible;
     align-content: flex-start;
     scrollbar-width: none;
   }
