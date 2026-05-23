@@ -2484,10 +2484,14 @@ export function AnimateMode() {
         : Math.max(cursor, 8);
       // v24: GIF 模式跳过 BGM clip (无声音)
       if (!isGifMode) {
-        const bgm = BGM_LIB[Math.floor(Math.random() * BGM_LIB.length)];
+        // 优先挑真发声/可识别的 BGM (file 内置"机构进场了" + 用户上传的); 都没有才退合成音
+        // → 用户上传抖音神曲(哈基米等)后, 随机会直接用上 (合成 BGM 太弱听不出 = "没带 BGM")
+        const goodBgms = [...BGM_LIB.filter(b => b.kind === 'file'), ...userBGMsRef.current];
+        const pool = goodBgms.length ? goodBgms : BGM_LIB;
+        const bgm = pool[Math.floor(Math.random() * pool.length)];
         next.push({
           id: `rb-${ts}`, trackId: 'bgm', lane: 0, start: 0, end: totalDur,
-          bgmId: bgm.id, name: bgm.name, volume: 0.5,
+          bgmId: bgm.id, name: bgm.name, volume: 0.55,
         });
       }
       const newProject: ProjectState = {
@@ -2765,6 +2769,12 @@ export function AnimateMode() {
   // Modals
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  // 草图本"导出视频" → 载入草稿后自动开导出弹窗 (一次性标记, mount 读+清)
+  useEffect(() => {
+    let on = false;
+    try { on = localStorage.getItem('xmw.animate-open-export') === '1'; if (on) localStorage.removeItem('xmw.animate-open-export'); } catch { /* ignore */ }
+    if (on) { const t = setTimeout(() => setExportModalOpen(true), 450); return () => clearTimeout(t); }
+  }, []);
   const [draftPopoverOpen, setDraftPopoverOpen] = useState(false);
   // DEV-only modals (import.meta.env.DEV 控制是否能开 — 按钮 toolbar 内 gate, 这里 state 反正不耗)
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false);

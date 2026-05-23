@@ -8,9 +8,11 @@ import { useMeme } from '@/context/memecontext';
 import type { DraftSlot, ImageElement, MemeElement, TextElement } from '@/context/memecontext';
 import {
   listGifDrafts, listAnimateDrafts, deleteGifDraft, deleteAnimateDraft,
-  openGifDraftInAnimate, openVideoDraftInAnimate,
+  openGifDraftInAnimate, openVideoDraftInAnimate, openVideoDraftForExport,
+  renameGifDraft, renameAnimateDraft,
   type GifDraftSlot, type AnimateDraftSlot,
 } from '@/lib/animatedrafts';
+import { exportGIFLoop } from '@/lib/gifloop';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getLiveCaptionOffset } from '@/data/materials';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { captureNode, copyImageToClipboard, downloadImage } from '@/lib/exportImage';
@@ -147,6 +149,15 @@ export function Collection({ onOpenQuick, onOpenEditor, onOpenAnimate }: Collect
   const openVideo = useCallback(async (slot: AnimateDraftSlot) => { await openVideoDraftInAnimate(slot); onOpenAnimate(); }, [onOpenAnimate]);
   const delGif = useCallback(async (id: string) => { setGifDrafts(await deleteGifDraft(id)); toast.success(lang === 'zh' ? '已删除' : 'Deleted'); }, [lang]);
   const delVideo = useCallback(async (id: string) => { setVideoDrafts(await deleteAnimateDraft(id)); toast.success(lang === 'zh' ? '已删除' : 'Deleted'); }, [lang]);
+  const renGif = useCallback(async (id: string, name: string) => { setGifDrafts(await renameGifDraft(id, name)); toast.success(lang === 'zh' ? '已改名' : 'Renamed'); }, [lang]);
+  const renVideo = useCallback(async (id: string, name: string) => { setVideoDrafts(await renameAnimateDraft(id, name)); toast.success(lang === 'zh' ? '已改名' : 'Renamed'); }, [lang]);
+  // 下载=导出: GIF 直接编码下载 (gif.js); 视频 → 载入编辑器自动开导出弹窗 (完整带配音/分辨率)
+  const expGif = useCallback(async (slot: GifDraftSlot) => {
+    const tid = toast.loading(lang === 'zh' ? '导出 GIF…' : 'Exporting GIF…');
+    try { await exportGIFLoop(slot.project, slot.name, (p) => toast.loading(`${lang === 'zh' ? '导出 GIF' : 'GIF'} ${Math.round(p * 100)}%`, { id: tid })); toast.success(lang === 'zh' ? 'GIF 已导出' : 'GIF exported', { id: tid }); }
+    catch { toast.error(lang === 'zh' ? '导出失败' : 'Export failed', { id: tid }); }
+  }, [lang]);
+  const expVideo = useCallback(async (slot: AnimateDraftSlot) => { await openVideoDraftForExport(slot); onOpenAnimate(); }, [onOpenAnimate]);
 
   const onBatchDelete = useCallback(() => {
     const count = selected.size;
@@ -310,6 +321,8 @@ export function Collection({ onOpenQuick, onOpenEditor, onOpenAnimate }: Collect
             thumbSrc={row.slot.thumbSrc}
             lang={lang}
             onOpen={() => { if (row.kind === 'gif') void openGif(row.slot); else void openVideo(row.slot); }}
+            onExport={() => { if (row.kind === 'gif') void expGif(row.slot); else void expVideo(row.slot); }}
+            onRename={(name) => { if (row.kind === 'gif') void renGif(row.id, name); else void renVideo(row.id, name); }}
             onDelete={() => { if (row.kind === 'gif') void delGif(row.id); else void delVideo(row.id); }}
           />
         ))}
@@ -559,14 +572,17 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
 }
 
 // GIF / 视频 草稿卡 — 缩略图(thumbSrc dataURL) + 类型角标 + 打开(切到沙雕动画)/删除
-function AnimateDraftCard({ kind, name, thumbSrc, lang, onOpen, onDelete }: {
+function AnimateDraftCard({ kind, name, thumbSrc, lang, onOpen, onExport, onRename, onDelete }: {
   kind: 'gif' | 'video';
   name: string;
   thumbSrc?: string;
   lang: 'zh' | 'en';
   onOpen: () => void;
+  onExport: () => void;
+  onRename: (name: string) => void;
   onDelete: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const badge = kind === 'gif' ? 'GIF' : (lang === 'zh' ? '视频' : 'Video');
   const badgeBg = kind === 'gif' ? '#7b3fe4' : '#0f7b5f';
   return (
@@ -579,12 +595,30 @@ function AnimateDraftCard({ kind, name, thumbSrc, lang, onOpen, onDelete }: {
             : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9bb', fontSize: 14, fontWeight: 800 }}>{badge}</div>}
         </div>
       </div>
-      <div className="draft-meta">
-        <span className="draft-name">{name || (lang === 'zh' ? '未命名' : 'Untitled')}</span>
+      <div className="draft-meta" onClick={(e) => e.stopPropagation()}>
+        {editing ? (
+          <RenameRow
+            key={`rename-${kind}-${name}`}
+            initialName={name}
+            placeholder={lang === 'zh' ? '起个名字...' : 'Name it...'}
+            onSubmit={(n) => { if (n && n !== name) onRename(n); setEditing(false); }}
+            onCancel={() => setEditing(false)}
+          />
+        ) : (
+          <div className="draft-name-row">
+            <span className="draft-name">{name || (lang === 'zh' ? '未命名' : 'Untitled')}</span>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} className="draft-icon-btn" title={lang === 'zh' ? '改名' : 'Rename'}>
+              <Edit2 size={11} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="draft-actions">
         <button onClick={(e) => { e.stopPropagation(); onOpen(); }} className="draft-icon-btn draft-icon-btn-accent" title={lang === 'zh' ? '打开继续编辑' : 'Open'}>
           <FolderInput size={13} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); onExport(); }} className="draft-icon-btn" title={kind === 'gif' ? (lang === 'zh' ? '导出 GIF' : 'Export GIF') : (lang === 'zh' ? '导出视频' : 'Export video')}>
+          <Download size={13} />
         </button>
         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="draft-icon-btn draft-icon-btn-danger" title={lang === 'zh' ? '删除' : 'Delete'}>
           <Trash2 size={13} />

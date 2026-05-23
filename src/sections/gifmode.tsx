@@ -1173,11 +1173,14 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     // 更丰富的随机: 脸动作从全集挑(含鬼畜系) + 随机幅度/周期; 身体 ~40% 也来个轻动作; 随机循环方式
     const rPick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
     const faceMotions: LoopMotionKind[] = ['bob', 'shimmy', 'sway', 'breathe', 'pulseLoop', 'bounce', 'orbit', 'hop', 'wobble', 'jitter', 'punch', 'swing'];
-    const bodyMotions: LoopMotionKind[] = ['none', 'none', 'none', 'bob', 'sway', 'breathe', 'wobble'];
+    const bodyMotions: LoopMotionKind[] = ['bob', 'sway', 'breathe', 'wobble', 'shimmy', 'float', 'bounce', 'pulseLoop'];  // 壳也必有动作 (去掉 none, 脸+壳都动)
+    const rRange = (a: number, b: number) => Number((a + Math.random() * (b - a)).toFixed(2));
     const faceMotion = rPick(faceMotions);
     const bodyMotion = rPick(bodyMotions);
-    const faceAmp = Number((0.8 + Math.random() * 0.7).toFixed(2)); // 0.8~1.5
-    const faceCycles = Math.random() < 0.35 ? 2 : 1;
+    const faceAmp = rRange(0.8, 1.6);            // 真随机幅度 (非默认)
+    const faceCycles = rPick([1, 1, 2, 2, 3]);   // 真随机速度
+    const bodyAmp = rRange(0.5, 1.2);
+    const bodyCycles = rPick([1, 1, 2, 2, 3]);
     const loopMode: GifLoopMode = (() => { const r = Math.random(); return r < 0.4 ? 'normal' : r < 0.65 ? 'boomerang' : r < 0.78 ? 'reverse' : r < 0.88 ? 'rewind' : 'crossfade'; })();
     try {
       const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
@@ -1197,7 +1200,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       const pandaOnTopR = layR.pandaZ > layR.faceZ;  // 透明壳→壳在上 multiply; 不透明壳→脸在上 multiply (跟编辑器一致)
       setProject(p => {
         const clips: Clip[] = [
-          { id: pid, trackId: 'image', lane: pandaOnTopR ? 0 : 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: layR.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id, transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: 0.8, cycles: 1 } } as ImageClip,
+          { id: pid, trackId: 'image', lane: pandaOnTopR ? 0 : 1, start: 0, end: p.duration, src: box.croppedSrc, label: panda.labelCn, fx: 'none', blend: layR.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id, transform: { ...DEFAULT_TRANSFORM, scale: fillScale }, loopMotion: { kind: bodyMotion, amp: bodyAmp, cycles: bodyCycles } } as ImageClip,
           { id: fid, trackId: 'image', lane: pandaOnTopR ? 1 : 0, start: 0, end: p.duration, src: face.src, label: face.labelCn + '·脸', fx: 'none', blend: layR.faceBlend === 'multiply' ? 'multiply' : undefined, transform: faceT, loopMotion: { kind: faceMotion, amp: faceAmp, cycles: faceCycles }, boundTo: pid, faceLocal: faceLocalR, role: 'face' } as ImageClip,
         ];
         if (cap) clips.push({ id: uid('cap'), trackId: 'caption', lane: 0, start: 0, end: p.duration, text: cap, style: 'meme', transform: { x: 0, y: 34 } } as CaptionClip);   // 自适应字号
@@ -1206,7 +1209,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
       setSelectedId(fid);
       setCustomEdit(false);
       const ml = LOOP_MOTIONS.find(x => x.kind === faceMotion);
-      toast.success(`随机生成 ✓ — ${ml?.label ?? faceMotion}${bodyMotion !== 'none' ? ' + 身体动' : ''} · ${LOOP_MODES.find(m => m.mode === loopMode)?.short ?? ''}循环`);
+      const bl = LOOP_MOTIONS.find(x => x.kind === bodyMotion);
+      toast.success(`随机生成 ✓ — 脸「${ml?.label ?? faceMotion}」+ 壳「${bl?.label ?? bodyMotion}」· ${LOOP_MODES.find(m => m.mode === loopMode)?.short ?? ''}循环`);
     } catch {
       toast.error('随机失败');
     }

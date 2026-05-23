@@ -10,6 +10,7 @@ export const AM_VIDEO_CURRENT_IDB_KEY = 'xiongmaotou.animate-current.video.v1'; 
 export const GIF_DRAFTS_IDB_KEY = 'xiongmaotou.gifmode-drafts.v1';     // GIF 草稿列表
 export const GIF_PROJECT_IDB_KEY = 'xiongmaotou.gifmode-current.v1';   // GIF"当前项目"(mount 时 hydrate)
 export const ANIMATE_VIEW_KEY = 'xmw.animate-view';                    // 'video' | 'gif' (AnimateMode 初始 view)
+export const ANIMATE_OPEN_EXPORT_KEY = 'xmw.animate-open-export';     // 置 '1' → AnimateMode mount 后自动开导出弹窗 (草图本"导出视频"用)
 
 export interface AnimateDraftSlot { id: string; name: string; updatedAt: number; project: ProjectState; note?: string; thumbSrc?: string; }
 export interface GifDraftSlot { id: string; name: string; updatedAt: number; project: GifProject; thumbSrc?: string; }
@@ -39,4 +40,20 @@ export async function openVideoDraftInAnimate(slot: AnimateDraftSlot): Promise<v
 export async function openGifDraftInAnimate(slot: GifDraftSlot): Promise<void> {
   try { localStorage.setItem(ANIMATE_VIEW_KEY, 'gif'); } catch { /* */ }
   try { await idbSet(GIF_PROJECT_IDB_KEY, slot.project); } catch { /* */ }
+}
+// 改名 (写回各自 IDB 列表)
+export async function renameGifDraft(id: string, name: string): Promise<GifDraftSlot[]> {
+  const a = (await listGifDrafts()).map(d => d.id === id ? { ...d, name } : d);
+  try { await idbSet(GIF_DRAFTS_IDB_KEY, a); } catch { /* */ }
+  return a;
+}
+export async function renameAnimateDraft(id: string, name: string): Promise<AnimateDraftSlot[]> {
+  const a = (await listAnimateDrafts()).map(d => d.id === id ? { ...d, name } : d);
+  try { await idbSet(AM_DRAFT_IDB_KEY, a); } catch { /* */ }
+  return a;
+}
+// 导出视频草稿 = 载入编辑器 + 标记自动开导出弹窗 (完整管线: 配音/BGM/分辨率/格式; 草图本不直接跑重型 MediaRecorder)
+export async function openVideoDraftForExport(slot: AnimateDraftSlot): Promise<void> {
+  await openVideoDraftInAnimate(slot);
+  try { localStorage.setItem(ANIMATE_OPEN_EXPORT_KEY, '1'); } catch { /* */ }
 }
