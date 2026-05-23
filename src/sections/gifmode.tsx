@@ -68,11 +68,11 @@ const motionMeta = (kind?: LoopMotionKind): { kind: LoopMotionKind; label: strin
   kind === 'customMove' ? { kind: 'customMove', label: '自定义', emoji: '🎯' }
     : (LOOP_MOTIONS.find(m => m.kind === kind) ?? LOOP_MOTIONS[0]);
 
+// 精简到 3 个最常用 + 导出与预览严格一致的: 直接/乒乓/溶解 (去掉 倒放/急退 — 较少用且观感复杂).
+// 注: GifLoopMode 类型仍保留 reverse/rewind, loopTimeMap/buildExportFrameTimes 仍能处理 → 老 GIF 草稿不破坏, 只是不再新建.
 const LOOP_MODES: { mode: GifLoopMode; short: string; hint: string }[] = [
   { mode: 'normal', short: '直接', hint: '正放循环 · 播完瞬间跳回开头 — 适合本身首尾闭环的动作 (内置动作都是)' },
-  { mode: 'boomerang', short: '乒乓', hint: '正放→倒放来回 · 任何动作都首尾无缝, 时长翻倍 — 最稳' },
-  { mode: 'reverse', short: '倒放', hint: '整段倒着放循环 · 跟正放反方向, 出反差/搞怪感' },
-  { mode: 'rewind', short: '急退', hint: '正放完急速倒带回开头 · 强节奏"卡带"感, 跟乒乓不同(回退极快)' },
+  { mode: 'boomerang', short: '乒乓', hint: '正放→倒放来回 · 任何动作都首尾无缝, 时长翻倍 — 最稳, 导出一致' },
   { mode: 'crossfade', short: '溶解', hint: '尾段淡入开头 · 专治不闭环素材 (导入 GIF / 不对称动作) 的接缝跳变' },
 ];
 
@@ -1181,7 +1181,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const faceCycles = rPick([1, 1, 2, 2, 3]);   // 真随机速度
     const bodyAmp = rRange(0.5, 1.2);
     const bodyCycles = rPick([1, 1, 2, 2, 3]);
-    const loopMode: GifLoopMode = (() => { const r = Math.random(); return r < 0.4 ? 'normal' : r < 0.65 ? 'boomerang' : r < 0.78 ? 'reverse' : r < 0.88 ? 'rewind' : 'crossfade'; })();
+    const loopMode: GifLoopMode = (() => { const r = Math.random(); return r < 0.5 ? 'normal' : r < 0.82 ? 'boomerang' : 'crossfade'; })();   // 精简后只随机 3 种
     try {
       const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
       const fl = await calcEditorFaceLayout({
@@ -1326,26 +1326,31 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   // ---- 画板编辑 (DOM 元素拖拽, 跟视频 startStageDrag / startCaptionDrag 同款数学; canvasSize → fit 显示尺寸) ----
   // 智能命中: elementsFromPoint 取点下图层栈(已按 z 上→下), 当前选中在栈里则选"下一层"(循环穿透), 否则选最顶.
   // 取代旧"点壳→重定向到脸"的位置启发式 — 大脸/重叠遮挡时也能逐次点到每一层 (Figma 式 click-cycle).
-  const resolveClickLayer = (e: React.PointerEvent): ImageClip | null => {
+  // 点下命中的图层栈 (elementsFromPoint, z 上→下)
+  const layerStackAt = (e: React.PointerEvent): string[] => {
     const stack: string[] = [];
     for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
       const box = (el as HTMLElement).closest?.('.am-stage-img') as HTMLElement | null;
       const id = box?.dataset.clipId;
       if (id && !stack.includes(id)) stack.push(id);
     }
-    if (stack.length === 0) return null;
-    if (stack.length > 1 && !cycleHintRef.current) {   // 一次性提示: 重叠层可逐层点选
+    if (stack.length > 1 && !cycleHintRef.current) {
       cycleHintRef.current = true;
-      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 画板同一处再点一次, 可逐层选中下面的层 (也可点右侧图层面板)', { duration: 4500 }); } } catch { /* ignore */ }
+      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 选中后"再单击"切到下面的层; 想拖动直接按住拖即可 (拖的是当前选中层)', { duration: 5000 }); } } catch { /* ignore */ }
     }
-    const idx = selectedId ? stack.indexOf(selectedId) : -1;
-    const pickId = idx >= 0 ? stack[(idx + 1) % stack.length] : stack[0];   // 选中在栈→下一层(循环); 否则最顶
-    return (projectRef.current.clips.find(c => c.id === pickId && c.trackId === 'image') as ImageClip | undefined) ?? null;
+    return stack;
   };
+  const imgClipById = (id: string | undefined): ImageClip | null =>
+    (id ? (projectRef.current.clips.find(c => c.id === id && c.trackId === 'image') as ImageClip | undefined) : undefined) ?? null;
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
-    // move = 智能命中(循环穿透重叠层); scale/rotate(手柄) = 拖当前选中层
-    const target = kind === 'move' ? (resolveClickLayer(e) ?? clip) : clip;
+    // move: 选中层在点下 → 拖它(不切换, 修"想拖脸却切到壳"); 否则选+拖最顶层. 只有"纯单击没拖动"才循环切下一层 (Figma 式).
+    let stack: string[] = [], selIdx = -1, target = clip;
+    if (kind === 'move') {
+      stack = layerStackAt(e);
+      selIdx = selectedId ? stack.indexOf(selectedId) : -1;
+      target = (selIdx >= 0 ? imgClipById(selectedId) : imgClipById(stack[0])) ?? clip;
+    }
     e.preventDefault(); e.stopPropagation();
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     if (target.id !== selectedId) setSelectedId(target.id);
@@ -1357,7 +1362,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
     const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
     const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
+    let moved = false;
     const onMove = (ev: PointerEvent) => {
+      if (!moved && (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4)) moved = true;
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / cw * 100;
         const dyPct = (ev.clientY - startY) / ch * 100;
@@ -1374,7 +1381,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         patchTransform(target.id, { rotation: Math.max(-180, Math.min(180, rot)) });
       }
     };
-    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
+      // 纯单击(没拖动) + 选中层就在点下 + 有重叠 → 切到下一层(循环穿透); 拖动则不切, 拖的就是当前选中层
+      if (kind === 'move' && !moved && selIdx >= 0 && stack.length > 1) setSelectedId(stack[(selIdx + 1) % stack.length]);
+    };
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
   };
   const startCaptionDrag = (e: React.PointerEvent, clip: CaptionClip) => {
@@ -1719,11 +1730,9 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   ? c.fontSize * (fit.w || preset.width) / 1280
                   : fitCaptionFontPx(c.text, fit.w || preset.width, fit.h || preset.height, st, captionAvailH(tr.y, fit.h || preset.height));
                 const col = c.color ?? (st === 'panel' ? '#000' : '#fff');
-                // 自适应 meme 才显式定宽 (content-box 抵消 padding → DOM 换行 = 导出换行); panel/bar 让背景框贴文字
-                const autoMeme = c.fontSize == null && st === 'meme';
                 return (
                   <div key={c.id} ref={el => { if (el) overlayRefs.current.set(c.id, el); else overlayRefs.current.delete(c.id); }} className={`am-caption-stage am-caption-style-${st}` + (c.id === selectedId ? ' is-selected' : '') + (isEditing ? ' is-editing' : '')}
-                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, width: autoMeme ? (fit.w || preset.width) * 0.92 : undefined, boxSizing: autoMeme ? 'content-box' : undefined, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
+                    style={{ left: `${50 + tr.x}%`, top: `${50 + tr.y}%`, fontSize: fontPx, color: col, cursor: isEditing ? 'text' : (c.id === selectedId ? 'move' : 'pointer'), zIndex: 60 }}
                     onPointerDown={e => startCaptionDrag(e, c)}
                     onContextMenu={e => { if (!isEditing) onGifClipContextMenu(e, c); }}
                     onDoubleClick={e => { e.stopPropagation(); setEditingCaptionId(c.id); setSelectedId(c.id); }}>

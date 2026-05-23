@@ -3107,9 +3107,16 @@
 .am-tl-handle {
   position: absolute;
   top: 0; bottom: 0;
-  width: 6px;
+  width: 9px;
   cursor: ew-resize;
-  z-index: 2;
+  z-index: 5;
+}
+/* 隐形扩大命中区 ±8px → 更好抓 (视觉手柄仍细, 不用非常精确才能拖) */
+.am-tl-handle::before {
+  content: '';
+  position: absolute;
+  top: -4px; bottom: -4px;
+  left: -8px; right: -8px;
 }
 .am-tl-handle-l { left: 0; }
 .am-tl-handle-r { right: 0; }
@@ -3890,7 +3897,9 @@
   text-align: center;
   white-space: pre-wrap;
   word-break: break-word;
+  width: max-content;          /* 内容宽: 不随 left% 收缩 → 拖到右边也不会塌成一字一行的竖排 (修拖拽变竖行 bug) */
   max-width: 92%;
+  box-sizing: content-box;     /* max-width 作用于内容 → DOM 换行点 = 导出 (92% 画宽), 所见即所得 */
   overflow: visible;
   line-height: 1.28;
   font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;

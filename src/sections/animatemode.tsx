@@ -4807,28 +4807,32 @@ function PreviewPane({
   // 拖动 selected image clip
   const cycleHintRef = useRef(false);   // 重叠层 click-cycle 一次性提示
   // 智能命中: elementsFromPoint 取点下图层栈(z 上→下), 当前选中在栈里则选下一层(循环穿透), 否则最顶 — 解决重叠/场景遮挡点不到下层
-  const resolveClickLayer = (e: React.PointerEvent): ImageClip | null => {
+  const layerStackAt = (e: React.PointerEvent): string[] => {
     const stack: string[] = [];
     for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
       const box = (el as HTMLElement).closest?.('.am-stage-img') as HTMLElement | null;
       const id = box?.dataset.clipId;
       if (id && !stack.includes(id)) stack.push(id);
     }
-    if (stack.length === 0) return null;
     if (stack.length > 1 && !cycleHintRef.current) {
       cycleHintRef.current = true;
-      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 画板同一处再点一次, 可逐层选中下面的层 (也可点右侧图层面板)', { duration: 4500 }); } } catch { /* ignore */ }
+      try { if (!localStorage.getItem('xmw.layer.cyclehint')) { localStorage.setItem('xmw.layer.cyclehint', '1'); toast('💡 图层重叠: 选中后"再单击"切到下面的层; 想拖动直接按住拖即可 (拖的是当前选中层)', { duration: 5000 }); } } catch { /* ignore */ }
     }
-    const idx = selectedId ? stack.indexOf(selectedId) : -1;
-    const pickId = idx >= 0 ? stack[(idx + 1) % stack.length] : stack[0];
-    return (clips.find(c => c.id === pickId && c.trackId === 'image') as ImageClip | undefined) ?? null;
+    return stack;
   };
+  const imgClipById = (id: string | undefined): ImageClip | null =>
+    (id ? (clips.find(c => c.id === id && c.trackId === 'image') as ImageClip | undefined) : undefined) ?? null;
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    // move = 智能命中(循环穿透重叠层); scale/rotate(手柄) = 拖当前选中层
-    const target = kind === 'move' ? (resolveClickLayer(e) ?? clip) : clip;
+    // move: 选中层在点下 → 拖它(不切换, 修"想拖脸却切到壳"); 否则选+拖最顶层. 只有"纯单击没拖动"才循环切下一层 (Figma 式).
+    let stack: string[] = [], selIdx = -1, target = clip;
+    if (kind === 'move') {
+      stack = layerStackAt(e);
+      selIdx = selectedId ? stack.indexOf(selectedId) : -1;
+      target = (selIdx >= 0 ? imgClipById(selectedId) : imgClipById(stack[0])) ?? clip;
+    }
     // pointer capture 让 pointer 离开元素后仍能收到事件
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     onSelect(target.id);
@@ -4840,7 +4844,9 @@ function PreviewPane({
     const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
     const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
     const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
+    let moved = false;
     const onMove = (ev: PointerEvent) => {
+      if (!moved && (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4)) moved = true;
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / canvasSize.w * 100;
         const dyPct = (ev.clientY - startY) / canvasSize.h * 100;
@@ -4873,6 +4879,8 @@ function PreviewPane({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       onEndDrag();
+      // 纯单击(没拖) + 选中层在点下 + 有重叠 → 切到下一层; 拖动则不切 (拖的是当前选中层)
+      if (kind === 'move' && !moved && selIdx >= 0 && stack.length > 1) onSelect(stack[(selIdx + 1) % stack.length]);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -5129,7 +5137,7 @@ function PreviewPane({
             const isSel = c.id === selectedId;
             const isEditing = c.id === editingCaptionId;
             const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h)); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
+            const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));
             // meme/bar 默认白字, panel 默认黑字 (跟样式背景反色)
             const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
             // v23-k: 字幕入场动效 — 实时计算 (编辑时禁用动效, 不打扰)
@@ -5145,8 +5153,6 @@ function PreviewPane({
                   left: `${50 + tr.x}%`,
                   top: `${50 + tr.y}%`,
                   fontSize: cFontSize,
-                  width: cAutoMeme ? canvasSize.w * 0.92 : undefined,
-                  boxSizing: cAutoMeme ? 'content-box' : undefined,
                   color: cColor,
                   cursor: isEditing ? 'text' : (isSel ? 'move' : 'pointer'),
                   ...xformStyle,
@@ -6830,7 +6836,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
             {activeCaptionClips.map(c => {
               const tr = c.transform ?? DEFAULT_CAPTION_TRANSFORM;
               const style: CaptionStyle = c.style ?? DEFAULT_CAPTION_STYLE;
-              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h)); const cAutoMeme = c.fontSize == null && style === 'meme';  /* 自适应 meme 才定宽 (content-box 抵消 padding → 换行=导出) */
+              const cFontSize = c.fontSize != null ? c.fontSize : fitCaptionFontPx(c.text, canvasSize.w, canvasSize.h, style, captionAvailH(tr.y, canvasSize.h));
               const cColor = c.color ?? (style === 'panel' ? '#000' : '#fff');
               const ent = computeCaptionEntrance(c, playhead);
               const xformStyle = (ent.opacity < 1 || Math.abs(ent.scale - 1) > 0.01)
@@ -6844,8 +6850,6 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
                     left: `${50 + tr.x}%`,
                     top: `${50 + tr.y}%`,
                     fontSize: cFontSize,
-                    width: cAutoMeme ? canvasSize.w * 0.92 : undefined,
-                    boxSizing: cAutoMeme ? 'content-box' : undefined,
                     color: cColor,
                     ...xformStyle,
                   }}
