@@ -3876,6 +3876,21 @@
 }
 .am-layer-item:hover .am-layer-del { opacity: 1; }
 .am-layer-del:hover { background: rgba(225,96,96,0.2); border-color: #c43030; }
+/* 图层上移/下移 — 始终可见 (手机端 HTML5 拖拽不触发, 靠按钮排序); 复用 del 尺寸 */
+.am-layer-move {
+  width: 20px; height: 20px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  background: rgba(127,157,200,0.12);
+  color: #5a7299;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+.am-layer-move:hover:not(:disabled) { background: rgba(127,157,200,0.28); color: #18324f; }
+.am-layer-move:disabled { opacity: 0.28; cursor: default; }
+/* 手机无 hover → 删除键也常显, 不然点不到 */
+@media (max-width: 768px) { .am-layer-del { opacity: 1; } }
 
 /* v6 stage-img 修复已并入上面 v7 块, 不再重复 */
 .am-stage-img.is-selected { cursor: move; }

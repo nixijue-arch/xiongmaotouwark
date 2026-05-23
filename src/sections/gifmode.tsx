@@ -1853,7 +1853,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
               return (
                 <div key={type} className="am-layer-group">
                   <div className={`am-layer-group-head am-layer-group-${type}`}>{type === 'image' ? '画面' : '字幕'}</div>
-                  {group.map(c => (
+                  {group.map((c, idx) => (
                     <div key={c.id}
                       className={`am-layer-item am-layer-item-${type}${c.id === selectedId ? ' is-selected' : ''}${layerOverId === c.id ? ' is-drag-over' : ''}${type === 'image' && (c as ImageClip).boundTo ? ' is-bound' : ''}`}
                       onClick={() => setSelectedId(c.id)}
@@ -1871,6 +1871,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                         <div className="am-layer-name">{type === 'image' ? ((c as ImageClip).label || '图层') : ((c as CaptionClip).text || '字幕')}</div>
                         <div className="am-layer-sub">{type === 'image' ? (() => { const ic = c as ImageClip; const role = ic.role ?? (ic.boundTo ? 'face' : ic.blend === 'multiply' ? 'shell' : ic.kind === 'scene' ? 'scene' : 'image'); return role === 'shell' ? '熊猫头壳' : role === 'face' ? '🔗 表情 · 跟随壳' : role === 'scene' ? '背景' : '图片'; })() : '字幕'}</div>
                       </div>
+                      <button className="am-layer-move" disabled={idx <= 0} onClick={e => { e.stopPropagation(); moveLayer(c.id, -1); }} title="上移一层 (更前)"><ChevronUp size={12} /></button>
+                      <button className="am-layer-move" disabled={idx >= group.length - 1} onClick={e => { e.stopPropagation(); moveLayer(c.id, 1); }} title="下移一层 (更后)"><ChevronDown size={12} /></button>
                       <button className="am-layer-del" onClick={e => { e.stopPropagation(); deleteClip(c.id); }} title="删除"><X size={10} /></button>
                     </div>
                   ))}
