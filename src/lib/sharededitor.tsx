@@ -457,6 +457,7 @@ export async function draftToLayers(slot: DraftSlot): Promise<{ imgSrc: string; 
     || n.startsWith('upload-panda-')
     || n.startsWith('network-panda-')
     || n.startsWith('custom-panda-')
+    || n === 'panda-head'   // handleAddFace 兜底命名 (跟 leftsidebar/collection 一致, 防草稿整图缩略图化)
   );
   const isFaceName = (n: string | undefined) => !!n && (
     ALL_FACES.some(f => f.id === n)

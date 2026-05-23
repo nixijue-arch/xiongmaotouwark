@@ -242,7 +242,8 @@ export function loopSeamScore(a: HTMLCanvasElement, b: HTMLCanvasElement): numbe
   const cb = document.createElement('canvas'); cb.width = S; cb.height = S;
   const xa = ca.getContext('2d');
   const xb = cb.getContext('2d');
-  if (!xa || !xb) return 0;
+  const release = () => { ca.width = ca.height = 0; cb.width = cb.height = 0; };   // 释放 backing store (每次编辑都调, 防累积)
+  if (!xa || !xb) { release(); return 0; }
   xa.drawImage(a, 0, 0, S, S);
   xb.drawImage(b, 0, 0, S, S);
   const da = xa.getImageData(0, 0, S, S).data;
@@ -251,6 +252,7 @@ export function loopSeamScore(a: HTMLCanvasElement, b: HTMLCanvasElement): numbe
   for (let i = 0; i < da.length; i += 4) {
     sum += Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]);
   }
+  release();
   return Math.round((sum / (S * S * 3) / 255) * 100);
 }
 
@@ -309,21 +311,28 @@ async function encodeGIFBlob(
   const motionAt = makeLoopMotionAt(D, RW, RH);  // 动作幅度按渲染尺寸 (2× 同步放大, 缩回后视觉一致)
   const boundFaceAt = makeBoundFaceAt(D, RW, RH);  // 绑定脸跟壳 (导出与预览共用 resolver)
   let lastYield = performance.now();
-  for (let i = 0; i < specs.length; i++) {
-    renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx, '#ffffff', boundFaceAt);
-    if (SS > 1) mctx.drawImage(render, 0, 0, W, H);  // 超采样缩回目标尺寸 (高质量插值)
-    gif.addFrame(main, { copy: true, delay: delayMs });
-    if (i % 4 === 0) onProgress(0.5 * (i / specs.length));
-    // 时间片让出: 大画布单帧重, 累计 >16ms 才让出主线程 (不卡 UI, 又不过度 await)
-    if (performance.now() - lastYield > 16) { await new Promise(r => setTimeout(r, 0)); lastYield = performance.now(); }
+  try {
+    for (let i = 0; i < specs.length; i++) {
+      renderLoopFrame(rctx, specs[i], project, RW, RH, imgCache, motionAt, sctx, '#ffffff', boundFaceAt);
+      if (SS > 1) mctx.drawImage(render, 0, 0, W, H);  // 超采样缩回目标尺寸 (高质量插值)
+      gif.addFrame(main, { copy: true, delay: delayMs });
+      if (i % 4 === 0) onProgress(0.5 * (i / specs.length));
+      // 时间片让出: 大画布单帧重, 累计 >16ms 才让出主线程 (不卡 UI, 又不过度 await)
+      if (performance.now() - lastYield > 16) { await new Promise(r => setTimeout(r, 0)); lastYield = performance.now(); }
+    }
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      gif.on('finished', (b: Blob) => resolve(b));
+      gif.on('progress', (p: number) => onProgress(0.5 + 0.5 * p));
+      gif.on('abort', () => reject(new Error('GIF encode aborted')));
+      gif.render();
+    });
+    return { blob, W, H, fps, frameCount: specs.length, durationSec: D };
+  } finally {
+    // 释放编码画布 backing store (成功/异常都释放; gif.js 已 copy 各帧, blob 独立于画布) — 降导出后峰值内存
+    main.width = main.height = 0;
+    if (render !== main) { render.width = render.height = 0; }
+    if (sctx) { sctx.canvas.width = sctx.canvas.height = 0; }
   }
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    gif.on('finished', (b: Blob) => resolve(b));
-    gif.on('progress', (p: number) => onProgress(0.5 + 0.5 * p));
-    gif.on('abort', () => reject(new Error('GIF encode aborted')));
-    gif.render();
-  });
-  return { blob, W, H, fps, frameCount: specs.length, durationSec: D };
 }
 
 export function downloadBlob(blob: Blob, name: string, ext = 'gif'): void {

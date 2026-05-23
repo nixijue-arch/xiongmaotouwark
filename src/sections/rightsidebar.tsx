@@ -223,7 +223,8 @@ function isPanda(e: MemeElement): boolean {
   return ALL_PANDAS.some(p => p.id === name)
     || name.startsWith('upload-panda-')
     || name.startsWith('network-panda-')
-    || name.startsWith('custom-panda-');
+    || name.startsWith('custom-panda-')
+    || name === 'panda-head';   // handleAddFace 兜底命名 (跟 leftsidebar/collection 一致)
 }
 
 function isFace(e: MemeElement): boolean {

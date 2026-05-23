@@ -16,7 +16,7 @@ export interface NetworkResult {
   id: string;            // `${source}:${hash}` 后端返
   src: string;           // 原图 URL
   thumb: string;         // 缩略图 URL (一般 = src 或更小)
-  source: 'duitang' | 'fabiaoqing' | 'bing';
+  source: 'duitang' | 'fabiaoqing' | 'bing' | 'baidu' | 'sogou' | 'so360';   // 跟后端 SourceName 对齐 (原漏 baidu/sogou/so360)
   w?: number;
   h?: number;
   hint?: string;

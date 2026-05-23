@@ -344,6 +344,7 @@ export function contentBboxFrac(media: MediaAsset): { x: number; y: number; w: n
         if (x2 >= x1 && y2 >= y1) res = { x: x1 / sw, y: y1 / sh, w: (x2 - x1 + 1) / sw, h: (y2 - y1 + 1) / sh };
       } catch { /* 跨域 face (搜图) → tainted canvas, 退回整框椭圆 */ }
     }
+    cv.width = cv.height = 0;   // 释放扫描画布 backing store (结果已进 WeakMap, 画布不必保留)
   }
   _bboxFracCache.set(d, res);
   return res;

@@ -4675,8 +4675,9 @@
     flex: 0 0 60px;
     flex: 0 0 calc(60px + env(safe-area-inset-bottom, 0px));
   }
-  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成滚动 (视频时间轴 clip/handle + 画板) */
-  .am-tl-clip, .am-tl-handle, .am-preview-canvas { touch-action: none; }
+  /* 可拖元素 touch-action:none — 否则 iOS 把拖拽吞成滚动 (视频时间轴 clip/handle/游标/时长手柄/标尺 + 画板) */
+  .am-tl-clip, .am-tl-handle, .am-preview-canvas,
+  .am-tl-playhead-handle, .am-tl-duration-handle, .am-tl-scrub-zone { touch-action: none; }
   .am-tb-mode-btn { min-width: 0; }
 
   /* 底栏 4 大 tab — 浮在底部, 按下展开 sheet */
