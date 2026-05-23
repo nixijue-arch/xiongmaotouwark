@@ -2396,14 +2396,18 @@ export function AnimateMode() {
     commit(p => ({ ...p, duration: Math.min(targetMax, p.duration + delta) }));
     toast(`时长已加长 ${delta}s`);
   }, [commit, project.mode]);
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
+    if (project.clips.length > 0) {
+      const { confirmed } = await showDialog({ title: '清空时间轴', message: `会清掉当前 ${project.clips.length} 个片段 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '清空', cancelText: '取消' });
+      if (!confirmed) return;
+    }
     // 清空 = 清 clips + 重置 lanes 到全 1 (傻瓜式默认)
     commit(p => ({ ...p, clips: [], lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 } }));
     setSelectedId(null);
     setPlayhead(0);
     audioEngine.cancelAll();
     toast('时间轴已清空');
-  }, [commit]);
+  }, [commit, project]);
   const nudge = useCallback((id: string, delta: number) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
@@ -2412,6 +2416,10 @@ export function AnimateMode() {
     updateClipCommit(id, { start: newStart, end: newStart + dur });
   }, [project, updateClipCommit]);
   const randomize = useCallback(async () => {
+    if (project.clips.length > 0) {
+      const { confirmed } = await showDialog({ title: '随机生成', message: `会清空当前 ${project.clips.length} 个片段重新随机 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '随机', cancelText: '取消' });
+      if (!confirmed) return;
+    }
     // 字幕走完整文案池 (quickModeTexts ~150 条) + pickRandomText 自带最近10去重 + exclude 防连续重复 → 每段都不一样 (原来固定 10 句翻来覆去)
     const fxs: ImageFx[] = ['none', 'none', 'shake', 'zoom', 'flash'];
     const isGifMode = (project.mode ?? 'video') === 'gif';
@@ -4437,6 +4445,14 @@ function VoiceDiagBtn() {
       setTesting(false);
     }
   };
+  // 生产端: 不展示自部署代理配置 (太技术), 改成引导提示 (上传自己的 mp3 等)
+  const showMoreVoices = async () => {
+    await showDialog({
+      title: '想要更多配音音色?',
+      message: '浏览器自带配音只有 1 个女声。想要更多 / 更像抖音的配音:\n\n①「上传配音」(下面): 上传你自己的 mp3 / wav 直接当配音 — 最简单, 会保存、可反复用。\n② 去 TTSMaker.cn 网页一键生成真 Neural mp3 (含男声 / 萝莉 / 晓晓), 下载后上传。',
+      confirmText: '知道了',
+    });
+  };
   return (
     <>
       <div className="am-voice-diag-row">
@@ -4445,20 +4461,20 @@ function VoiceDiagBtn() {
           href={TTSMAKER_URL}
           target="_blank"
           rel="noopener noreferrer"
-          title="网页一键生成真 Neural mp3 (含 Yunjian 男声), 下载后用 📂 上传"
+          title="网页一键生成真 Neural mp3 (含 Yunjian 男声), 下载后用「上传配音」上传"
         >
           🌐 TTSMaker.cn 生成 mp3 ↗
         </a>
         <button
-          className={'am-voice-diag-cfg' + (_userTTSProxyURL ? ' is-set' : '')}
-          onClick={() => setCfgOpen(true)}
+          className={'am-voice-diag-cfg' + (import.meta.env.DEV && _userTTSProxyURL ? ' is-set' : '')}
+          onClick={() => { if (import.meta.env.DEV) setCfgOpen(true); else void showMoreVoices(); }}
           type="button"
-          title={_userTTSProxyURL ? '已配代理 (真 Neural 试听)' : '官方 bing endpoint 全球下线 · 配代理拿真男声'}
+          title="想要更多配音音色 (上传自己的 mp3 等)"
         >
-          ⚙️
+          {import.meta.env.DEV ? '⚙️' : '💡 更多'}
         </button>
       </div>
-      {cfgOpen && (
+      {import.meta.env.DEV && cfgOpen && (
         <div className="am-popover-backdrop" onClick={() => setCfgOpen(false)}>
           <div className="am-popover am-tts-cfg win7-panel" onClick={(e) => e.stopPropagation()}>
             <div className="am-popover-head">

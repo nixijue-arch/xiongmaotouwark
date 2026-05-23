@@ -308,8 +308,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   }, [flushHist]);
   const canUndo = historyRef.current.past.length > 0;
   const canRedo = historyRef.current.future.length > 0;
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
     if (projectRef.current.clips.length === 0) return;
+    const { confirmed } = await showDialog({ title: '清空画板', message: `会清掉当前 ${projectRef.current.clips.length} 个图层 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '清空', cancelText: '取消' });
+    if (!confirmed) return;
     setProject(p => ({ ...p, clips: [] }));   // 自动历史捕获 → Ctrl+Z 可撤回
     setSelectedId(null);
     toast('已清空 · Ctrl+Z 撤回');
@@ -1195,6 +1197,10 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
 
   // ---- 一键随机: 随机 panda+face 两图层 + 随机字幕 + 脸随机循环动作 (身体不动, 清空重来, 无音轨) ----
   const gifRandomize = useCallback(async () => {
+    if (projectRef.current.clips.length > 0) {
+      const { confirmed } = await showDialog({ title: '随机生成', message: '会清空当前画板重新随机 (已存草稿/导出的不受影响). 继续?', variant: 'warning', confirmText: '随机', cancelText: '取消' });
+      if (!confirmed) return;
+    }
     const panda = ALL_PANDAS[Math.floor(Math.random() * ALL_PANDAS.length)];
     const face = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
     // 跟快速/编辑器同文案池 (pickRandomText), 但挑短的 (≤ GIF_CAP_MAXCHARS) 保证一行装下; 实在长就截断
