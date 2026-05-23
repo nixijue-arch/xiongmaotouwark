@@ -65,7 +65,7 @@ function App() {
             <AnimateMode />
           </Suspense>
         ) : page === 'collection' ? (
-          <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
+          <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} onOpenAnimate={() => setPage('animate')} />
         ) : page === 'editor' ? (
           <>
             <div className="editor-layout flex-1 flex overflow-hidden main-content">

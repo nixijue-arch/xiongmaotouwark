@@ -2,10 +2,15 @@
 // 数据源完全统一到 memecontext 的 draftSlots (与编辑器左上角"本地草稿"共享)
 // Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // JSZip 改为批量导出时动态 import (~28KB gz 不进主包, 见 packSelected)
 import { useMeme } from '@/context/memecontext';
 import type { DraftSlot, ImageElement, MemeElement, TextElement } from '@/context/memecontext';
+import {
+  listGifDrafts, listAnimateDrafts, deleteGifDraft, deleteAnimateDraft,
+  openGifDraftInAnimate, openVideoDraftInAnimate,
+  type GifDraftSlot, type AnimateDraftSlot,
+} from '@/lib/animatedrafts';
 import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getLiveCaptionOffset } from '@/data/materials';
 import { useLiveAnchor } from '@/hooks/useLiveAnchor';
 import { captureNode, copyImageToClipboard, downloadImage } from '@/lib/exportImage';
@@ -13,7 +18,7 @@ import { composeMeme } from '@/lib/composeMeme';
 import { PandaCanvas } from '@/components/pandacanvas';
 import {
   FolderOpen, Copy, Download, Trash2, SquarePen, Sparkles, Edit2, Check, X,
-  Package,
+  Package, FolderInput,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import './collection.css';
@@ -21,9 +26,15 @@ import './collection.css';
 interface CollectionProps {
   onOpenQuick: () => void;
   onOpenEditor: () => void;
+  onOpenAnimate: () => void;   // 打开 GIF/视频草稿 → 切到沙雕动画板块
 }
 
-type Filter = 'all' | 'recent';
+// 三格式: 图片(memecontext draftSlots) / GIF / 视频(沙雕动画两模式草稿)
+type Filter = 'all' | 'image' | 'gif' | 'video';
+type GalleryRow =
+  | { kind: 'image'; updatedAt: number; id: string; slot: DraftSlot }
+  | { kind: 'gif'; updatedAt: number; id: string; slot: GifDraftSlot }
+  | { kind: 'video'; updatedAt: number; id: string; slot: AnimateDraftSlot };
 
 // 判定 element 是不是 panda / face — 跟 leftsidebar / quickmode 同款
 function isPanda(e: MemeElement): boolean {
@@ -83,7 +94,7 @@ function extractSlotInfo(slot: DraftSlot): SlotInfo {
   };
 }
 
-export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
+export function Collection({ onOpenQuick, onOpenEditor, onOpenAnimate }: CollectionProps) {
   const { state, draftSlots, loadDraft, clearDraft, clearDrafts, renameDraft } = useMeme();
   const lang = state.language;
   // DEV: 校准工具改 anchor 时触发 re-render
@@ -91,14 +102,34 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Filter>('all');
+  const [gifDrafts, setGifDrafts] = useState<GifDraftSlot[]>([]);
+  const [videoDrafts, setVideoDrafts] = useState<AnimateDraftSlot[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const offscreenContainerRef = useRef<HTMLDivElement>(null);
 
-  // 草图列表 = draftSlots (按 updatedAt 倒序)
-  const items = useMemo<DraftSlot[]>(() => {
-    let list = [...draftSlots].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    if (filter === 'recent') list = list.slice(0, 12);
-    return list;
-  }, [draftSlots, filter]);
+  // 进页面读 GIF/视频草稿 (各自 IDB key, 见 animatedrafts) — 进来快照即可, 无需实时订阅
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const [g, v] = await Promise.all([listGifDrafts(), listAnimateDrafts()]);
+      if (alive) { setGifDrafts(g); setVideoDrafts(v); setLoaded(true); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const counts = useMemo(() => ({
+    all: draftSlots.length + gifDrafts.length + videoDrafts.length,
+    image: draftSlots.length, gif: gifDrafts.length, video: videoDrafts.length,
+  }), [draftSlots.length, gifDrafts.length, videoDrafts.length]);
+
+  // 三源聚合 → 按 updatedAt 倒序; 按 tab 过滤
+  const rows = useMemo<GalleryRow[]>(() => {
+    const img = draftSlots.map((s): GalleryRow => ({ kind: 'image', updatedAt: s.updatedAt ?? 0, id: s.id, slot: s }));
+    const gif = gifDrafts.map((s): GalleryRow => ({ kind: 'gif', updatedAt: s.updatedAt, id: s.id, slot: s }));
+    const vid = videoDrafts.map((s): GalleryRow => ({ kind: 'video', updatedAt: s.updatedAt, id: s.id, slot: s }));
+    const list = filter === 'image' ? img : filter === 'gif' ? gif : filter === 'video' ? vid : [...img, ...gif, ...vid];
+    return list.sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [draftSlots, gifDrafts, videoDrafts, filter]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelected((s) => {
@@ -109,8 +140,13 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
     });
   }, []);
 
-  const selectAll = useCallback(() => setSelected(new Set(items.map((i) => i.id))), [items]);
+  const selectAll = useCallback(() => setSelected(new Set(draftSlots.map((d) => d.id))), [draftSlots]);   // 多选/ZIP 仅图片
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+  // 打开 GIF/视频草稿 → 写当前项目 key + view, 切到沙雕动画 (mount 时 hydrate)
+  const openGif = useCallback(async (slot: GifDraftSlot) => { await openGifDraftInAnimate(slot); onOpenAnimate(); }, [onOpenAnimate]);
+  const openVideo = useCallback(async (slot: AnimateDraftSlot) => { await openVideoDraftInAnimate(slot); onOpenAnimate(); }, [onOpenAnimate]);
+  const delGif = useCallback(async (id: string) => { setGifDrafts(await deleteGifDraft(id)); toast.success(lang === 'zh' ? '已删除' : 'Deleted'); }, [lang]);
+  const delVideo = useCallback(async (id: string) => { setVideoDrafts(await deleteAnimateDraft(id)); toast.success(lang === 'zh' ? '已删除' : 'Deleted'); }, [lang]);
 
   const onBatchDelete = useCallback(() => {
     const count = selected.size;
@@ -124,7 +160,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
   // 批量 ZIP — 用 composeMeme 渲染 panda+face → 临时 DOM 加 caption → captureNode → 加进 zip
   const onBatchZip = useCallback(async () => {
     if (selected.size === 0) return;
-    const slotsToPack = items.filter((s) => selected.has(s.id));
+    const slotsToPack = draftSlots.filter((s) => selected.has(s.id));
     if (!slotsToPack.length || !offscreenContainerRef.current) return;
 
     toast.info(lang === 'zh' ? `打包 ${slotsToPack.length} 张...` : `Packing ${slotsToPack.length}...`);
@@ -180,7 +216,7 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
     } catch (e) {
       toast.error(lang === 'zh' ? `打包失败: ${e instanceof Error ? e.message : 'unknown'}` : `Pack failed`);
     }
-  }, [selected, items, lang]);
+  }, [selected, draftSlots, lang]);
 
   // 进编辑器 = loadDraft(slotId) + 切到 editor 页
   // 不再像之前那样拆元素手动 dispatch — 直接用 slot 已保存的 elements
@@ -193,8 +229,8 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
     setTimeout(() => onOpenEditor(), 30);
   }, [loadDraft, lang, onOpenEditor]);
 
-  // 空 state
-  if (draftSlots.length === 0) {
+  // 空 state (三源都空 + 已读完 GIF/视频)
+  if (loaded && counts.all === 0) {
     return (
       <div className="about-container about-arcade-shell col-root">
         <div className="about-page">
@@ -204,12 +240,18 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
               {lang === 'zh' ? '草图本是空的' : 'No drafts yet'}
             </h3>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: '#456' }}>
-              {lang === 'zh' ? '去快速生图收藏几张，或在编辑器里存草图' : 'Save from Quick or Editor'}
+              {lang === 'zh' ? '图片 / GIF / 视频 草稿都会出现在这 · 去快速生图收藏，或在编辑器/沙雕动画里存草稿' : 'Image / GIF / Video drafts show up here'}
             </p>
-            <button onClick={onOpenQuick} className="about-arcade-btn">
-              <Sparkles size={14} />
-              {lang === 'zh' ? '打开快速生图' : 'Open Quick Mode'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onOpenQuick} className="about-arcade-btn">
+                <Sparkles size={14} />
+                {lang === 'zh' ? '快速生图' : 'Quick Mode'}
+              </button>
+              <button onClick={onOpenAnimate} className="about-arcade-btn">
+                <Sparkles size={14} />
+                {lang === 'zh' ? '沙雕动画' : 'Animate'}
+              </button>
+            </div>
           </section>
         </div>
       </div>
@@ -224,47 +266,51 @@ export function Collection({ onOpenQuick, onOpenEditor }: CollectionProps) {
           <div className="about-banner-icon"><FolderOpen size={32} color="#1767c7" /></div>
           <div>
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0a356d', display: 'flex', alignItems: 'center', gap: 10 }}>
-              {lang === 'zh' ? '我的草图' : 'My Drafts'}
-              <span className="about-chip" style={{ padding: '4px 10px', fontSize: 12 }}>{items.length}</span>
+              {lang === 'zh' ? '我的草图本' : 'My Drafts'}
+              <span className="about-chip" style={{ padding: '4px 10px', fontSize: 12 }}>{counts.all}</span>
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: '#456' }}>
-              {lang === 'zh' ? '点卡片多选 → 批量打包 ZIP / 删除 · 跟编辑器"本地草稿"是同一个池' : 'Click card to multi-select → batch ZIP / delete · Shared with editor "Local Draft"'}
+              {lang === 'zh' ? '图片 / GIF / 视频 三种草稿都在这 · 点开继续编辑 · 图片可多选打包 ZIP' : 'Image / GIF / Video drafts · click to open · multi-select images to ZIP'}
             </p>
           </div>
         </div>
         <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'rgba(15, 93, 175, 0.1)', borderRadius: 12 }}>
-          {(['all', 'recent'] as Filter[]).map((f) => (
+          {(['all', 'image', 'gif', 'video'] as Filter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={filter === f ? 'about-arcade-btn' : ''}
               style={filter === f
-                ? { padding: '6px 14px', fontSize: 13, borderRadius: 10 }
-                : { padding: '6px 14px', fontSize: 13, color: '#0a356d', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                ? { padding: '6px 12px', fontSize: 13, borderRadius: 10 }
+                : { padding: '6px 12px', fontSize: 13, color: '#0a356d', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
             >
-              {lang === 'zh' ? (f === 'all' ? '全部' : '最近') : (f === 'all' ? 'All' : 'Recent')}
+              {(lang === 'zh' ? { all: '全部', image: '图片', gif: 'GIF', video: '视频' } : { all: 'All', image: 'Image', gif: 'GIF', video: 'Video' })[f]}{counts[f] > 0 ? ` ${counts[f]}` : ''}
             </button>
           ))}
         </div>
       </section>
 
       <div className="col-grid">
-        {items.map((slot) => (
+        {rows.map((row) => row.kind === 'image' ? (
           <DraftCard
-            key={slot.id}
-            slot={slot}
+            key={'i-' + row.id}
+            slot={row.slot}
             lang={lang}
-            isSelected={selected.has(slot.id)}
-            onToggleSelect={() => toggleSelect(slot.id)}
-            onDelete={() => {
-              clearDraft(slot.id);
-              toast.success(lang === 'zh' ? '已删除' : 'Deleted');
-            }}
-            onRename={(name) => {
-              renameDraft(slot.id, name);
-              toast.success(lang === 'zh' ? '已改名' : 'Renamed');
-            }}
-            onSendToEditor={() => onSendToEditor(slot)}
+            isSelected={selected.has(row.id)}
+            onToggleSelect={() => toggleSelect(row.id)}
+            onDelete={() => { clearDraft(row.id); toast.success(lang === 'zh' ? '已删除' : 'Deleted'); }}
+            onRename={(name) => { renameDraft(row.id, name); toast.success(lang === 'zh' ? '已改名' : 'Renamed'); }}
+            onSendToEditor={() => onSendToEditor(row.slot)}
+          />
+        ) : (
+          <AnimateDraftCard
+            key={row.kind + '-' + row.id}
+            kind={row.kind}
+            name={row.slot.name}
+            thumbSrc={row.slot.thumbSrc}
+            lang={lang}
+            onOpen={() => { if (row.kind === 'gif') void openGif(row.slot); else void openVideo(row.slot); }}
+            onDelete={() => { if (row.kind === 'gif') void delGif(row.id); else void delVideo(row.id); }}
           />
         ))}
       </div>
@@ -503,6 +549,42 @@ function DraftCard({ slot, lang, isSelected, onToggleSelect, onDelete, onRename,
         </button>
         <button onClick={(e) => { e.stopPropagation(); onSendToEditor(); }} className="draft-icon-btn draft-icon-btn-accent" title={lang === 'zh' ? '进编辑器精修' : 'Open in Editor'}>
           <SquarePen size={13} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="draft-icon-btn draft-icon-btn-danger" title={lang === 'zh' ? '删除' : 'Delete'}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// GIF / 视频 草稿卡 — 缩略图(thumbSrc dataURL) + 类型角标 + 打开(切到沙雕动画)/删除
+function AnimateDraftCard({ kind, name, thumbSrc, lang, onOpen, onDelete }: {
+  kind: 'gif' | 'video';
+  name: string;
+  thumbSrc?: string;
+  lang: 'zh' | 'en';
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const badge = kind === 'gif' ? 'GIF' : (lang === 'zh' ? '视频' : 'Video');
+  const badgeBg = kind === 'gif' ? '#7b3fe4' : '#0f7b5f';
+  return (
+    <div className="draft-card" style={{ cursor: 'default', position: 'relative' }}>
+      <span style={{ position: 'absolute', top: 8, left: 8, zIndex: 6, background: badgeBg, color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 8, letterSpacing: 0.5, boxShadow: '0 1px 3px rgba(0,0,0,.25)' }}>{badge}</span>
+      <div className="draft-preview" onClick={onOpen} style={{ cursor: 'pointer' }} title={lang === 'zh' ? '点击打开继续编辑' : 'Open'}>
+        <div className="draft-panda-frame">
+          {thumbSrc
+            ? <img src={thumbSrc} alt={name} className="draft-panda-img" style={{ width: '100%', height: '100%', objectFit: 'contain' }} draggable={false} />
+            : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9bb', fontSize: 14, fontWeight: 800 }}>{badge}</div>}
+        </div>
+      </div>
+      <div className="draft-meta">
+        <span className="draft-name">{name || (lang === 'zh' ? '未命名' : 'Untitled')}</span>
+      </div>
+      <div className="draft-actions">
+        <button onClick={(e) => { e.stopPropagation(); onOpen(); }} className="draft-icon-btn draft-icon-btn-accent" title={lang === 'zh' ? '打开继续编辑' : 'Open'}>
+          <FolderInput size={13} />
         </button>
         <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="draft-icon-btn draft-icon-btn-danger" title={lang === 'zh' ? '删除' : 'Delete'}>
           <Trash2 size={13} />
