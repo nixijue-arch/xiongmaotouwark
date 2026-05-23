@@ -1217,6 +1217,16 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   // ---- 画板编辑 (DOM 元素拖拽, 跟视频 startStageDrag / startCaptionDrag 同款数学; canvasSize → fit 显示尺寸) ----
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
+    // 点击优先选脸: 壳在脸之上(multiply), 但点脸区域应直接选中脸. 用脸 overlay 的实时 rect 命中(含旋转/动画). 点壳非脸区域仍选壳.
+    if (kind === 'move') {
+      const isShell = clip.role === 'shell' || clip.blend === 'multiply' || projectRef.current.clips.some(f => f.trackId === 'image' && (f as ImageClip).boundTo === clip.id);
+      if (isShell) {
+        const px = e.clientX, py = e.clientY;
+        const hit = (projectRef.current.clips.filter(f => f.trackId === 'image' && (f as ImageClip).boundTo === clip.id) as ImageClip[])
+          .find(f => { const el = overlayRefs.current.get(f.id); if (!el) return false; const r = el.getBoundingClientRect(); return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom; });
+        if (hit) { startStageDrag(e, hit, 'move'); return; }
+      }
+    }
     e.preventDefault(); e.stopPropagation();
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     if (clip.id !== selectedId) setSelectedId(clip.id);

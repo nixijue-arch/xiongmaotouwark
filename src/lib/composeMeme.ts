@@ -473,23 +473,31 @@ export async function calcEditorFaceLayout(args: {
     panda350OffsetX = 75, panda350OffsetY = 75,
     panda350W = 350, panda350H = 350,
   } = args;
-  const [, face] = await Promise.all([loadImage(pandaSrc), loadImage(faceSrc)]);
+  const [panda, face] = await Promise.all([loadImage(pandaSrc), loadImage(faceSrc)]);
   const fbb = getContentBbox(face);
   const fcw = Math.max(1, fbb[2] - fbb[0]);
   const fch = Math.max(1, fbb[3] - fbb[1]);
-  // 350-coord 的 faceOffset 在 panda 实际 box 里的 scale (panda 可能 letterbox 或非 1:1)
-  const scaleX = panda350W / 350;
-  const scaleY = panda350H / 350;
-  const fowActual = faceOffset350.w * scaleX;
-  const fohActual = faceOffset350.h * scaleY;
+  // ⭐ 对齐修复: faceOffset350 是"350 帧含 letterbox 原图"坐标 → 必须三步换算 (350→native px→content-bbox fraction),
+  //    跟 composeMemeCanvas 一致. 旧版直接 *(panda350W/350) 漏了 letterbox + bbox 原点, 当 content-bbox 与 native aspect
+  //    不一致 (panda 留白不对称, 如拍桌款上方透明) 时脸偏移 ~0.17 panda 高 → 编辑器 + GIF 都对不上校准. 修这一个函数两端同时正.
+  const [bx1, by1, bx2, by2] = getContentBbox(panda);
+  const BW = Math.max(1, bx2 - bx1), BH = Math.max(1, by2 - by1);
+  const NW = panda.naturalWidth, NH = panda.naturalHeight;
+  const scaleOrig = Math.min(350 / NW, 350 / NH);
+  const padXOrig = (350 - NW * scaleOrig) / 2, padYOrig = (350 - NH * scaleOrig) / 2;
+  const nfx1 = (faceOffset350.x - padXOrig) / scaleOrig, nfy1 = (faceOffset350.y - padYOrig) / scaleOrig;
+  const nfw = faceOffset350.w / scaleOrig, nfh = faceOffset350.h / scaleOrig;
+  const fracCx = (nfx1 + nfw / 2 - bx1) / BW, fracCy = (nfy1 + nfh / 2 - by1) / BH;
+  const outScaleX = panda350W / BW, outScaleY = panda350H / BH;
+  const fowActual = nfw * outScaleX, fohActual = nfh * outScaleY;
   const fScale = Math.min(fowActual / fcw, fohActual / fch) * faceFill;
   const dispW = face.naturalWidth * fScale;
   const dispH = face.naturalHeight * fScale;
   const ccX = ((fbb[0] + fbb[2]) / 2) * fScale;
   const ccY = ((fbb[1] + fbb[3]) / 2) * fScale;
-  // anchor center 在编辑器画布坐标系 — panda 实际左上 + faceOffset 按 panda box 缩放后的中心
-  const anchorCx = panda350OffsetX + (faceOffset350.x + faceOffset350.w / 2) * scaleX;
-  const anchorCy = panda350OffsetY + (faceOffset350.y + faceOffset350.h / 2) * scaleY;
+  // anchor center 在编辑器画布坐标系 — panda 实际左上 + faceOffset 在 content-bbox 里的 fraction × panda box
+  const anchorCx = panda350OffsetX + fracCx * panda350W;
+  const anchorCy = panda350OffsetY + fracCy * panda350H;
   return {
     x: Math.round(anchorCx - ccX),
     y: Math.round(anchorCy - ccY),

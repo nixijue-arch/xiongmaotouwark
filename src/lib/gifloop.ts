@@ -298,11 +298,12 @@ async function encodeGIFBlob(
     import('gif.js/dist/gif.worker.js?url'),
   ]);
   // 画质优化: quality 10→5 (NeuQuant 调色板更准) + FloydSteinberg 抖动 (人脸照片渐变更顺) + 白底 (跟画板一致) + 4 workers 抵消 quality 开销
-  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0 };
+  // 体积敏感预设(微信/朋友圈)用全局调色板 → 更小 + 消除帧间调色板闪烁(纯色背景 shimmer); 大预设(X 480²)保留每帧调色板求极致画质
+  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.id === 'wechat' || preset.id === 'moments' };
   const gif = new GIF(gifOpts as ConstructorParameters<typeof GIF>[0]);
 
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
-  const delayMs = Math.round(1000 / fps);
+  const delayMs = Math.round(100 / fps) * 10;  // 对齐 GIF 厘秒(cs)网格 → 各播放器渲染时序一致, 跟预览节奏对齐 (fps=25→40ms, 30→30ms)
   const motionAt = makeLoopMotionAt(D, RW, RH);  // 动作幅度按渲染尺寸 (2× 同步放大, 缩回后视觉一致)
   const boundFaceAt = makeBoundFaceAt(D, RW, RH);  // 绑定脸跟壳 (导出与预览共用 resolver)
   let lastYield = performance.now();
