@@ -44,7 +44,7 @@ import {
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
   computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
-  GIF_PRESETS, GIF_MAX_DURATION,
+  GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
   type ImageClip, type CaptionStyle,
   type CaptionClip, type TTSClip, type BGMClip, type FXClip, type Clip, type LaneCount,
@@ -6875,7 +6875,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
   // v23-l: GIF preset (仅 mode=gif 用)
   const isGif = (project.mode ?? 'video') === 'gif';
   const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'wechat');
-  const gifPreset = GIF_PRESETS.find(p => p.id === gifPresetId) ?? GIF_PRESETS[0];
+  const gifPreset = resolveGifPreset(gifPresetId);
 
   const supportedMime = useMemo(() => pickBestMime(format === 'mp4'), [format]);
   const [phase, setPhase] = useState<'ready' | 'rendering' | 'done'>('ready');

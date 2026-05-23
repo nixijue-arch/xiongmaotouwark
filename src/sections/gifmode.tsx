@@ -11,7 +11,7 @@ import { useMeme, type DraftSlot } from '@/context/memecontext';
 import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { pickRandomText } from '@/data/quickModeTexts';
 import {
-  loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, GIF_MAX_DURATION, GIF_MIN_DURATION,
+  loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION, GIF_MIN_DURATION,
   fitCaptionFontPx, captionAvailH, contentBboxFrac,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
@@ -190,7 +190,7 @@ function normGifEdit(clip: ImageClip, total: number, patch: Partial<GifFrameEdit
 
 function makeDefaultGifProject(): GifProject {
   const panda = ALL_PANDAS[7] ?? ALL_PANDAS[0];
-  const preset = GIF_PRESETS[0]; // wechat
+  const preset = resolveGifPreset(); // 默认"标准" (推荐档)
   const dur = preset.defaultDuration;
   const clip: ImageClip = {
     id: uid('img'), trackId: 'image', lane: 0, start: 0, end: dur,
@@ -334,7 +334,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const layerDragId = useRef<string | null>(null);
   const [layerOverId, setLayerOverId] = useState<string | null>(null);
 
-  const preset = useMemo(() => GIF_PRESETS.find(p => p.id === project.preset) ?? GIF_PRESETS[0], [project.preset]);
+  const preset = useMemo(() => resolveGifPreset(project.preset), [project.preset]);
   const D = project.duration;
   const selected = project.clips.find(c => c.id === selectedId) ?? null;
   const imageClips = project.clips.filter(c => c.trackId === 'image') as ImageClip[];
@@ -424,7 +424,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     let raf = 0;
     const draw = () => {
       const p = projectRef.current;
-      const pr = GIF_PRESETS.find(x => x.id === p.preset) ?? GIF_PRESETS[0];
+      const pr = resolveGifPreset(p.preset);
       const w = pr.width, h = pr.height, dd = p.duration;
       const now = performance.now();
       const playPos = playingRef.current ? (now - startRef.current) / 1000 : frozenRef.current;
@@ -935,7 +935,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   }, [preset]);
 
   const setPresetId = useCallback((id: GifPresetId) => {
-    const pr = GIF_PRESETS.find(x => x.id === id) ?? GIF_PRESETS[0];
+    const pr = resolveGifPreset(id);
     setProject(p => {
       const dd = Math.min(p.duration, pr.maxDuration, GIF_MAX_DURATION);
       return { ...p, preset: id, duration: dd, clips: clampClipsToDuration(p.clips, p.duration, dd) };
@@ -1116,7 +1116,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         const data = JSON.parse(String(reader.result || '')) as GifProject;
         if (data?.kind !== 'gif-project' || !Array.isArray(data.clips)) { toast.error('不是有效的 GIF 项目 JSON'); return; }
         // 容错: loop/duration/lanes/clips 缺失或非法 → 补默认 + 夹范围, 防外来 JSON 让渲染崩
-        const pr = GIF_PRESETS.find(p => p.id === data.preset) ?? GIF_PRESETS[0];
+        const pr = resolveGifPreset(data.preset);
         const dur = Number.isFinite(data.duration) ? Math.max(GIF_MIN_DURATION, Math.min(data.duration, GIF_MAX_DURATION, pr.maxDuration)) : pr.defaultDuration;
         const safe: GifProject = {
           kind: 'gif-project', version: 1, preset: pr.id, duration: dur,
@@ -1143,7 +1143,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   useEffect(() => {
     if (!previewOpen) return;
     const cv = previewCanvasRef.current; if (!cv) return;
-    const pr0 = GIF_PRESETS.find(x => x.id === projectRef.current.preset) ?? GIF_PRESETS[0];
+    const pr0 = resolveGifPreset(projectRef.current.preset);
     cv.width = pr0.width; cv.height = pr0.height;
     const ctx = cv.getContext('2d', { alpha: false }); if (!ctx) return;
     const scratch = document.createElement('canvas'); scratch.width = pr0.width; scratch.height = pr0.height;
@@ -1152,7 +1152,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     let raf = 0;
     const draw = () => {
       const p = projectRef.current;
-      const pr = GIF_PRESETS.find(x => x.id === p.preset) ?? GIF_PRESETS[0];
+      const pr = resolveGifPreset(p.preset);
       const D = p.duration;
       const t = loopTimeMap((performance.now() - t0) / 1000, D, p.loop.mode);
       renderLoopFrame(ctx, loopSpecAt(t, D, p.loop, pr.fps), p, pr.width, pr.height, cacheRef.current, makeLoopMotionAt(D, pr.width, pr.height), sctx, '#ffffff', makeBoundFaceAt(D, pr.width, pr.height));

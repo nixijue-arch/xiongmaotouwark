@@ -73,15 +73,20 @@ export interface GifPreset {
   maxDuration: number;
   note: string;
 }
-// fps 提到流畅区间 (微信 20 控体积; 其余 25 = 整数 cs 延时无漂移, 接近预览流畅度). 编码加抖动+超采样画质提升, 见 gifloop.
+// 按"质量/体积"直接命名 (旧的微信/朋友圈/TG/X 平台名其实只是尺寸不同, 精简成 3 档 + 自定义).
+// fps: 小巧 20 控体积; 标准/高清 25 = 整数 cs 延时无漂移, 接近预览流畅度. 编码加抖动+超采样, 见 gifloop.
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat',      label: '微信表情',     width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '微信表情 · ≤500KB · 240×240 · 20fps' },
-  { id: 'moments',     label: '朋友圈/微博',  width: 400, height: 400, fps: 20, defaultDuration: 4,   maxDuration: 10, note: '朋友圈微博 · ≤2MB · 400×400 · 20fps' },
-  { id: 'tg',          label: 'TG 贴纸',      width: 512, height: 512, fps: 25, defaultDuration: 2.5, maxDuration: 10, note: 'Telegram · ≤256KB · 512×512 · 25fps' },
-  { id: 'quick-share', label: '快速分享',     width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '通用 · ≤1MB · 360×360 · 25fps' },
-  { id: 'x',           label: 'X (推特)',     width: 480, height: 480, fps: 25, defaultDuration: 6,   maxDuration: 10, note: 'X/Twitter · ≤15MB · 480×480 · 25fps' },
-  { id: 'custom',      label: '自定义',       width: 480, height: 360, fps: 25, defaultDuration: 6,   maxDuration: 10, note: '自由 · 上限 10s · 480×360 · 25fps' },
+  { id: 'wechat',      label: '小巧 · 省流', width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '体积最小 · 240² · 表情包/省流量' },
+  { id: 'quick-share', label: '标准 · 推荐', width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享 (推荐)' },
+  { id: 'x',           label: '高清',        width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰, 体积较大 · 480²' },
+  { id: 'custom',      label: '自定义',      width: 480, height: 360, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '自由尺寸 · 上限 10s' },
 ];
+// 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)→高清(480²) — 老草稿无质量崩塌, 不落回 240².
+const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x' };
+export function resolveGifPreset(id?: GifPresetId): GifPreset {
+  const rid = id ? (GIF_PRESET_REMAP[id] ?? id) : 'quick-share';
+  return GIF_PRESETS.find(p => p.id === rid) ?? GIF_PRESETS[0];
+}
 export const GIF_MAX_DURATION = 10; // s, GIF 总上限 (用户定 10s; 时间轴满宽=0..10s, 10s 在最右)
 export const GIF_MIN_DURATION = 1;
 

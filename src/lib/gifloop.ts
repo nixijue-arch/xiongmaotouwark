@@ -1,7 +1,7 @@
 // gifloop.ts — GIF 循环引擎 (P1: normal + boomerang). 纯逻辑, 在 animcore 合成器之上加
 // "时间重映射 + 帧序列 + 循环安全动作". crossfade / 多变体 / onion-skin 见 P2.
 import {
-  renderExportFrame, loadMedia, clamp, GIF_PRESETS, GIF_MAX_DURATION, DEFAULT_TRANSFORM,
+  renderExportFrame, loadMedia, clamp, resolveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM,
   type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform, type FaceLocal, type BoundFaceBox,
 } from '@/lib/animcore';
 
@@ -266,7 +266,7 @@ async function preloadImgCache(project: GifProject): Promise<Map<string, MediaAs
 async function encodeGIFBlob(
   project: GifProject, mode: GifLoopMode, imgCache: Map<string, MediaAsset>, onProgress: (p: number) => void,
 ): Promise<{ blob: Blob; W: number; H: number; fps: number; frameCount: number; durationSec: number }> {
-  const preset = GIF_PRESETS.find(p => p.id === project.preset) ?? GIF_PRESETS[0];
+  const preset = resolveGifPreset(project.preset);
   const { width: W, height: H, fps } = preset;
   const D = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
@@ -299,7 +299,7 @@ async function encodeGIFBlob(
   ]);
   // 画质优化: quality 10→5 (NeuQuant 调色板更准) + FloydSteinberg 抖动 (人脸照片渐变更顺) + 白底 (跟画板一致) + 4 workers 抵消 quality 开销
   // 体积敏感预设(微信/朋友圈)用全局调色板 → 更小 + 消除帧间调色板闪烁(纯色背景 shimmer); 大预设(X 480²)保留每帧调色板求极致画质
-  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.id === 'wechat' || preset.id === 'moments' };
+  const gifOpts = { workers: 4, quality: 5, dither: 'FloydSteinberg-serpentine', width: W, height: H, workerScript: (workerUrlMod as { default: string }).default, background: '#ffffff', repeat: 0, globalPalette: preset.width <= 320 };   // 小尺寸用全局调色板 (更小体积/消闪); 大尺寸每帧调色板求画质
   const gif = new GIF(gifOpts as ConstructorParameters<typeof GIF>[0]);
 
   const specs = buildExportFrameTimes(D, fps, { ...project.loop, mode });
