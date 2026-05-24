@@ -354,11 +354,27 @@ export function contentBboxFrac(media: MediaAsset): { x: number; y: number; w: n
 
 // 决定某 image clip 在时间 t 实际应用的 fx 名:
 // FX track 优先 — 找 active 的 FXClip, 若 targetClipId 匹配 / 为空 (全局) 都生效, 否则用 image.fx
+// 抖动类 FX (用绝对 enterT 振荡, 不会收敛到稳定末态) — 结束后回基准, 不"保持末态"
+//   (否则 hold 会冻结在某个随机抖动相位 = 歪一边的静态偏移, 不直觉). 其余 FX 末态都稳定 (位移/缩放/透明 settled).
+const NO_HOLD_FX = new Set<ImageFx>(['shake', 'flash', 'glitch']);
 export function effectiveFxFor(clip: ImageClip, t: number, allClips: Clip[]): { fx: ImageFx; fxStart: number; fxDur: number; fxClip: FXClip | null } {
   const fxClip = allClips.find(c =>
     c.trackId === 'fx' && t >= c.start && t < c.end && (!c.targetClipId || c.targetClipId === clip.id)
   ) as FXClip | undefined;
   if (fxClip) return { fx: fxClip.fx, fxStart: fxClip.start, fxDur: fxClip.end - fxClip.start, fxClip };
+  // 没有 active FX → 保持"最近一个已结束 FX"的末态 (computeFx/computeLiveTransform 的 progress 已 clamp 到 1 → 评估在末态),
+  //   直到本图层时间轴结束 / 下一个 FX 开始. 修用户反馈: 特效把图移到某处, 结束后应停在那, 不该弹回原位.
+  //   抖动类 (shake/flash/glitch) 除外 → 回基准.
+  let held: FXClip | null = null;
+  for (const c of allClips) {
+    if (c.trackId !== 'fx') continue;
+    const fk = c as FXClip;
+    if (fk.end > t) continue;                                       // 还没结束
+    if (fk.targetClipId && fk.targetClipId !== clip.id) continue;   // 作用于别的图层
+    if (NO_HOLD_FX.has(fk.fx)) continue;                            // 抖动类不保持
+    if (!held || fk.end > held.end) held = fk;                      // 取最近结束的
+  }
+  if (held) return { fx: held.fx, fxStart: held.start, fxDur: held.end - held.start, fxClip: held };
   return { fx: clip.fx, fxStart: clip.start, fxDur: clip.end - clip.start, fxClip: null };
 }
 

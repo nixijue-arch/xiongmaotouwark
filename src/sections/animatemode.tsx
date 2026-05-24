@@ -20,7 +20,7 @@ import {
   ChevronsUp, Zap, Heart, RefreshCw, Tv2, Camera, ZoomIn, ZoomOut,
   Film, DoorOpen, LogOut, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
   Vibrate, Type as TypeIcon, ArrowLeftRight, ArrowUpDown, Layers, FileText,
-  ImagePlus, AlertTriangle, Folder, Pencil, Check, Keyboard,
+  ImagePlus, AlertTriangle, Folder, Pencil, Check, Keyboard, Link2, Link2Off,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -43,7 +43,7 @@ import {
   clamp, loadMedia,
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
   computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
-  resolveBoundFaceBoxVideo, makeBoundFaceAtVideo, contentBboxFrac,
+  resolveBoundFaceBoxVideo, makeBoundFaceAtVideo, contentBboxFrac, computeImageBox,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
@@ -119,32 +119,38 @@ function youdaoTTSURL(text: string, lang: 'zh' | 'en' = 'zh'): string {
 
 // 测音频文件真实时长 (秒). HTMLAudioElement.loadedmetadata
 // 用于: audioSrc 写入 TTS clip 时自动 align clip.end = start + duration
+let _decodeAC: AudioContext | null = null;
 function getAudioDuration(src: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio();
-    audio.preload = 'metadata';
-    let settled = false;
-    const cleanup = () => { try { audio.src = ''; } catch {} };
-    audio.addEventListener('loadedmetadata', () => {
-      if (settled) return; settled = true;
-      const d = audio.duration;
-      cleanup();
-      if (Number.isFinite(d) && d > 0) resolve(d);
-      else reject(new Error('invalid duration'));
+  // 优先 AudioContext.decodeAudioData 拿时长 — 不占 HTMLMediaElement 解码槽:
+  //   播放时正在响的 TTS/BGM 会挤占媒体管线 → new Audio 的 loadedmetadata 拖到暂停才触发
+  //   (= "播放时配音不加载, 暂停才逐个出来" 的根因). decodeAudioData 是纯解码, 不受播放影响.
+  return (async () => {
+    try {
+      const ACCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (ACCtor) {
+        if (!_decodeAC) _decodeAC = new ACCtor();
+        const ab = await (await fetch(src)).arrayBuffer();
+        const buf = await _decodeAC.decodeAudioData(ab);   // dataURL 每次 fetch 独立 buffer, 不怕 detach
+        if (Number.isFinite(buf.duration) && buf.duration > 0) return buf.duration;
+      }
+    } catch { /* 落 HTMLAudio 兜底 */ }
+    // 兜底: HTMLAudio metadata (老路径, 8s 超时) — decode 失败 / 无 AudioContext 时
+    return await new Promise<number>((resolve, reject) => {
+      const audio = new Audio();
+      audio.preload = 'metadata';
+      let settled = false;
+      const cleanup = () => { try { audio.src = ''; } catch { /* ignore */ } };
+      audio.addEventListener('loadedmetadata', () => {
+        if (settled) return; settled = true;
+        const d = audio.duration;
+        cleanup();
+        if (Number.isFinite(d) && d > 0) resolve(d); else reject(new Error('invalid duration'));
+      });
+      audio.addEventListener('error', () => { if (settled) return; settled = true; cleanup(); reject(new Error('audio load failed')); });
+      audio.src = src;
+      setTimeout(() => { if (settled) return; settled = true; cleanup(); reject(new Error('duration probe timeout')); }, 8000);
     });
-    audio.addEventListener('error', () => {
-      if (settled) return; settled = true;
-      cleanup();
-      reject(new Error('audio load failed'));
-    });
-    audio.src = src;
-    // 超时兜底
-    setTimeout(() => {
-      if (settled) return; settled = true;
-      cleanup();
-      reject(new Error('duration probe timeout'));
-    }, 8000);
-  });
+  })();
 }
 
 // 通过 Netlify Function 中转 fetch TTS → dataURL (可写 audioSrc + 直接播)
@@ -1821,111 +1827,70 @@ export function AnimateMode() {
   // ========================================================
   const ttsGenSigRef = useRef<Map<string, string>>(new Map());
   const ttsAudioCacheRef = useRef<Map<string, { audioSrc: string; duration: number }>>(new Map());
-  const genRunningRef = useRef(false);   // 防并发: setProjectLive 改 clips 会再触发本 effect, 并发跑多循环→并发抓 youdao→限流→退 baidu (随机生成"声音不一样"根因)
+  // 配音 auto-gen — 并行 (2026-05-24 重做): edge-tts 直连各自浏览器 WS, 无共享 IP 限流 → 全部并发抓, ~1.5s 一起好,
+  //   不再一条条等 8-12s; getAudioDuration 改 decodeAudioData 不占媒体槽 → 播放时也能生成 (修"播放不加载/暂停才逐个出").
+  //   去掉 genRunningRef 串行守卫; 去重靠 ttsGenSigRef('pending:sig'): setProjectLive 写 audioSrc 会再触发本 effect,
+  //   但已 pending/done 的跳过, 不重复 fetch. 串台检测用 batch 内共享 Map (并行 IIFE 闭包共享).
   useEffect(() => {
-    if (view !== 'video') return;   // GIF 视图不跑视频 TTS 自动生成 (GIF 默认后省无谓云端请求)
-    const timer = setTimeout(async () => {
-      if (genRunningRef.current) return;   // 已有生成循环在跑 → 不并发 → 串行抓取 → 同一音色 (晓晓), 不被 baidu 串味
-      genRunningRef.current = true;
-      // 批量串台检测: 同一轮生成里, 若两条「不同文案」拿到字节完全相同的音频 →
-      //   = CDN/youdao 缓存或限流串台 (修「随机配音全是同一段、且不是当前文案」). 拒绝错误音频, 标记重生成.
-      const batchAudioSeen = new Map<string, string>();   // audioSrc(dataURL) → 首次出现的文案
-      let dupBadCount = 0;
-      try {
-      for (const c of project.clips) {
-        if (c.trackId !== 'tts') continue;
-        const ts = c as TTSClip;
-        if (ts.userAudio) continue;   // 用户上传的 mp3 配音: audioSrc 直接用, 不走 TTS auto-gen (否则会被云端重生成覆盖)
+    if (view !== 'video') return;   // GIF 视图不跑视频 TTS 自动生成
+    const timer = setTimeout(() => {
+      const batchSeen = new Map<string, string>();   // audioSrc(dataURL) → 文案, 本批并行 fetch 共享 (串台检测)
+      const ttsClips = project.clips.filter(c => c.trackId === 'tts') as TTSClip[];
+      for (const ts of ttsClips) {
+        if (ts.userAudio) continue;   // 用户上传 mp3: audioSrc 直接用, 不重生成
         const text = (ts.text || '').trim();
         if (!text) continue;
         const v = VOICE_BY_ID[resolveVoiceId(ts.voice)];
-        // 所有 voice 都 auto-gen (SS 不能 sync 也不能导 MP4, 必须云端 audio)
         const sig = `${text}|${ts.voice}`;
         const tried = ttsGenSigRef.current.get(ts.id);
         if (ts.audioSrc && tried === `done:${sig}`) continue;
-        if (tried === `fail:${sig}`) continue;
-        if (tried === `pending:${sig}`) continue;
-        // LRU 缓存: key=text|voice.id (按 voice 隔离, 不同 engine 的 audio 不混)
-        // 同 text 同 voice (如随机生成的 1/3 都 zh-youdao 同文) 共享 audio, 只 fetch 1 次
+        if (tried === `fail:${sig}` || tried === `pending:${sig}`) continue;   // 已失败/正在生成 → 跳过 (去重)
         const cacheKey = `${text}|${ts.voice}`;
         const cached = ttsAudioCacheRef.current.get(cacheKey);
-        // v23-e: clip.playbackRate (用户在 Inspector 调倍速) 优先, fallback voice 级
         const rate = ts.playbackRate ?? v.playbackRate ?? 1.0;
         if (cached) {
           const wallDuration = cached.duration / rate;
           ttsGenSigRef.current.set(ts.id, `done:${sig}`);
-          setProjectLive(p => ({
-            ...p,
-            clips: p.clips.map(cc => cc.id === ts.id
-              ? ({ ...cc, audioSrc: cached.audioSrc, audioDuration: cached.duration, end: cc.start + wallDuration, genFailed: false } as Clip)
-              : cc
-            ),
-          }));
-          // eslint-disable-next-line no-console
-          console.log(`[auto-gen TTS cache] ${ts.id} "${text.slice(0, 20)}" → ${wallDuration.toFixed(1)}s (rate ${rate.toFixed(2)})`);
-          void audioEngine.preloadTTSAudios([{ id: ts.id, audioSrc: cached.audioSrc }]);   // 预热预览播放器 → 首次播放不静音
+          setProjectLive(p => ({ ...p, clips: p.clips.map(cc => cc.id === ts.id ? ({ ...cc, audioSrc: cached.audioSrc, audioDuration: cached.duration, end: cc.start + wallDuration, genFailed: false } as Clip) : cc) }));
+          void audioEngine.preloadTTSAudios([{ id: ts.id, audioSrc: cached.audioSrc }]);
           continue;
         }
         ttsGenSigRef.current.set(ts.id, `pending:${sig}`);
-        try {
-          // 用 voice.preferredEngine, 失败 fallback 另一个 engine
-          const { dataUrl, engine: usedEngine } = await fetchTTSForVoice(text, v);
-          if (ttsGenSigRef.current.get(ts.id) !== `pending:${sig}`) continue;
-          const duration = await getAudioDuration(dataUrl);
-          if (ttsGenSigRef.current.get(ts.id) !== `pending:${sig}`) continue;
-          const wallDuration = duration / rate;
-          // 串台检测: 不同文案却拿到完全相同音频字节 = 服务端缓存/限流 bug → 拒绝, 标记重生成 (不污染本地缓存)
-          const dupText = batchAudioSeen.get(dataUrl);
-          if (dupText !== undefined && dupText !== text) {
-            dupBadCount++;
-            ttsGenSigRef.current.set(ts.id, `fail:${sig}`);
-            setProjectLive(p => ({
-              ...p,
-              clips: p.clips.map(cc => cc.id === ts.id
-                ? ({ ...cc, genFailed: true, audioSrc: undefined, audioEngine: undefined } as Clip)
-                : cc),
-            }));
+        const clipId = ts.id;
+        void (async () => {   // 并行 fire — 不 await, 各自独立
+          try {
+            const { dataUrl, engine: usedEngine } = await fetchTTSForVoice(text, v);
+            if (ttsGenSigRef.current.get(clipId) !== `pending:${sig}`) return;
+            const duration = await getAudioDuration(dataUrl);
+            if (ttsGenSigRef.current.get(clipId) !== `pending:${sig}`) return;
+            const wallDuration = duration / rate;
+            // 串台检测: 不同文案拿到完全相同音频字节 = 上游缓存/限流 bug → 拒绝重生成 (edge 直连基本不会发生)
+            const dupText = batchSeen.get(dataUrl);
+            if (dupText !== undefined && dupText !== text) {
+              ttsGenSigRef.current.set(clipId, `fail:${sig}`);
+              setProjectLive(p => ({ ...p, clips: p.clips.map(cc => cc.id === clipId ? ({ ...cc, genFailed: true, audioSrc: undefined, audioEngine: undefined } as Clip) : cc) }));
+              // eslint-disable-next-line no-console
+              console.warn(`[auto-gen TTS] ${clipId} 与 "${dupText.slice(0, 12)}" 音频相同 → 判串台, 标记重生成`);
+              return;
+            }
+            batchSeen.set(dataUrl, text);
+            const _ttsCache = ttsAudioCacheRef.current;
+            if (_ttsCache.size >= 80 && !_ttsCache.has(cacheKey)) { const _old = _ttsCache.keys().next().value; if (_old) _ttsCache.delete(_old); }
+            _ttsCache.set(cacheKey, { audioSrc: dataUrl, duration });
+            ttsGenSigRef.current.set(clipId, `done:${sig}`);
+            setProjectLive(p => ({ ...p, clips: p.clips.map(cc => cc.id === clipId ? ({ ...cc, audioSrc: dataUrl, audioDuration: duration, end: cc.start + wallDuration, genFailed: false, audioEngine: usedEngine } as Clip) : cc) }));
             // eslint-disable-next-line no-console
-            console.warn(`[auto-gen TTS] ${ts.id} "${text.slice(0, 16)}" 与 "${dupText.slice(0, 16)}" 音频字节相同 → 判串台错误, 标记重生成`);
-            await new Promise(r => setTimeout(r, 400));
-            continue;
+            console.log(`[auto-gen TTS ${usedEngine}] ${clipId} "${text.slice(0, 20)}" → ${wallDuration.toFixed(1)}s`);
+            void audioEngine.preloadTTSAudios([{ id: clipId, audioSrc: dataUrl }]);
+          } catch (e) {
+            if (ttsGenSigRef.current.get(clipId) === `pending:${sig}`) ttsGenSigRef.current.set(clipId, `fail:${sig}`);
+            setProjectLive(p => ({ ...p, clips: p.clips.map(cc => cc.id === clipId ? ({ ...cc, genFailed: true, audioSrc: undefined, audioEngine: undefined } as Clip) : cc) }));
+            // eslint-disable-next-line no-console
+            console.warn(`[auto-gen TTS] ${clipId} 生成失败:`, (e as Error).message);
           }
-          batchAudioSeen.set(dataUrl, text);
-          // FIFO 上限 80 (每条 mp3 dataURL ~30-80KB, 长 session 防无限涨; 源在 clip.audioSrc 上, 淘汰只多一次重生成)
-          const _ttsCache = ttsAudioCacheRef.current;
-          if (_ttsCache.size >= 80 && !_ttsCache.has(cacheKey)) { const _old = _ttsCache.keys().next().value; if (_old) _ttsCache.delete(_old); }
-          _ttsCache.set(cacheKey, { audioSrc: dataUrl, duration });
-          ttsGenSigRef.current.set(ts.id, `done:${sig}`);
-          setProjectLive(p => ({
-            ...p,
-            clips: p.clips.map(cc => cc.id === ts.id
-              ? ({ ...cc, audioSrc: dataUrl, audioDuration: duration, end: cc.start + wallDuration, genFailed: false, audioEngine: usedEngine } as Clip)
-              : cc
-            ),
-          }));
-          // eslint-disable-next-line no-console
-          console.log(`[auto-gen TTS ${usedEngine}] ${ts.id} "${text.slice(0, 20)}" → ${wallDuration.toFixed(1)}s (rate ${rate.toFixed(2)})`);
-          void audioEngine.preloadTTSAudios([{ id: ts.id, audioSrc: dataUrl }]);   // 预热预览播放器 → 首次播放不静音 (修"首播卡没声")
-        } catch (e) {
-          if (ttsGenSigRef.current.get(ts.id) === `pending:${sig}`) {
-            ttsGenSigRef.current.set(ts.id, `fail:${sig}`);
-          }
-          // mark genFailed=true + 清旧 audioSrc/audioEngine (防 user 改 text 后 dump 仍显旧 audio)
-          setProjectLive(p => ({
-            ...p,
-            clips: p.clips.map(cc => cc.id === ts.id
-              ? ({ ...cc, genFailed: true, audioSrc: undefined, audioEngine: undefined } as Clip)
-              : cc
-            ),
-          }));
-          // eslint-disable-next-line no-console
-          console.warn(`[auto-gen TTS] ${ts.id} 两个 engine 都失败:`, (e as Error).message);
-        }
-        // 限流退避: 每条网络抓取后隔一下再抓下一条 → 减少 youdao 突发限流, 多段都拿到统一好音色 (减少 baidu fallback)
-        await new Promise(r => setTimeout(r, 400));
+        })();
       }
-      } finally { genRunningRef.current = false; }
-    }, 800);
+    }, 500);
     return () => clearTimeout(timer);
   }, [project.clips, setProjectLive, view]);
 
@@ -2553,6 +2518,38 @@ export function AnimateMode() {
     const newStart = clamp(c.start + delta, 0, project.duration - dur);
     updateClipCommit(id, { start: newStart, end: newStart + dur });
   }, [project, updateClipCommit]);
+  // 配套双层布局计算 (壳 + 绑定脸) — addComboVideo (手动加) 跟 randomize (随机双层) 共用, 单一真相源.
+  //   声明必须在 randomize / addComboVideo 之前 (二者 deps 引用它, 否则 TDZ "before initialization" 崩).
+  // 返回壳裁切图 / 脸 transform / faceLocal(归一化跟随) / fillScale / 层序 (pandaOnTop) / blend — 调用方据此造 2 个 ImageClip.
+  const computeComboLayout = useCallback(async (panda: Material, face: Material) => {
+    const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
+    const fl = await calcEditorFaceLayout({
+      pandaSrc: panda.src, faceSrc: face.src, faceOffset350: panda.faceOffset,
+      panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h,
+    });
+    const W = 1000, H = 1000;                       // 归一化参考 (faceLocal 跟 W/H 无关, 故任意)
+    const baseSize = Math.min(W, H) * 0.6;
+    const K = baseSize / box.w;
+    const fillScale = 1.5 * Math.min(1, box.w / box.h);   // panda 长边占 ~90% 画板
+    const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
+    const faceTransform: Transform = {
+      ...DEFAULT_TRANSFORM,
+      x: ((fcx - 250) * K) / W * 100 * fillScale,
+      y: ((fcy - 250) * K) / H * 100 * fillScale,
+      scale: (fl.width / box.w) * fillScale,
+    };
+    let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
+    const faceLocal = captureFaceLocal(
+      { cx: W / 2, cy: H / 2, iw: _sIw }, 0,
+      { cx: W / 2 + (faceTransform.x / 100) * W, cy: H / 2 + (faceTransform.y / 100) * H, iw: baseSize * faceTransform.scale }, 0);
+    const lay = getShellLayering(panda.id);
+    return {
+      croppedSrc: box.croppedSrc, faceTransform, faceLocal, fillScale,
+      pandaOnTop: lay.pandaZ > lay.faceZ,
+      pandaBlend: (lay.pandaBlend === 'multiply' ? 'multiply' : undefined) as 'multiply' | undefined,
+      faceBlend: (lay.faceBlend === 'multiply' ? 'multiply' : undefined) as 'multiply' | undefined,
+    };
+  }, []);
   const randomize = useCallback(async () => {
     if (project.clips.length > 0) {
       const { confirmed } = await showDialog({ title: '随机生成', message: `会清空当前 ${project.clips.length} 个片段重新随机 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '随机', cancelText: '取消' });
@@ -2574,17 +2571,22 @@ export function AnimateMode() {
     const ts = Date.now();
     const tid = toast.loading(isGifMode ? '随机生成中 (GIF 模式 · 无声)' : '随机生成中 (panda+face 合成…)');
     try {
-      const composedImages = await Promise.all(
+      // 视频模式 → 双层 combo (壳 + 绑定脸, 各自可编辑 / 给壳加特效脸跟随); GIF 模式 → 单张合成图 (保留旧逻辑)
+      const combos = isGifMode ? [] : await Promise.all(
+        Array.from({ length: segs }, async () => {
+          const p = ALL_PANDAS[Math.floor(Math.random() * ALL_PANDAS.length)];
+          const f = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
+          const L = await computeComboLayout(p, f);
+          return { panda: p, face: f, L };
+        }),
+      );
+      const composedImages = !isGifMode ? [] : await Promise.all(
         Array.from({ length: segs }, async () => {
           const p = ALL_PANDAS[Math.floor(Math.random() * ALL_PANDAS.length)];
           const f = ALL_FACES[Math.floor(Math.random() * ALL_FACES.length)];
           const src = await composeMeme({
-            pandaSrc: p.src,
-            faceSrc: f.src,
-            faceOffset: getLivePandaFaceOffset(p),
-            size: 384,
-            outputFormat: 'dataurl',
-            fillInternalShell: true, // 沙雕动画: panda 内部填白 防场景透出
+            pandaSrc: p.src, faceSrc: f.src, faceOffset: getLivePandaFaceOffset(p),
+            size: 384, outputFormat: 'dataurl', fillInternalShell: true,
           });
           return { src, label: `${p.labelCn}+${f.labelCn}` };
         }),
@@ -2598,7 +2600,7 @@ export function AnimateMode() {
         // video 模式: 每段按 TTS 时长 + gap.
         let segDur: number;
         let captionEnd: number;
-        let voice = voices[Math.floor(Math.random() * voices.length)];
+        const voice = voices[Math.floor(Math.random() * voices.length)];
         if (isGifMode) {
           segDur = gifSegDur + ttsGap;
           captionEnd = cursor + gifSegDur;
@@ -2609,14 +2611,35 @@ export function AnimateMode() {
         }
         const segStart = cursor;
         const segEnd = segStart + segDur;
-        const imageId = `ri${i}-${ts}`;
-        next.push({
-          id: imageId, trackId: 'image', lane: 0,
-          start: segStart, end: segEnd,
-          src: composedImages[i].src, label: composedImages[i].label,
-          fx: 'none',  // FX 单独创建到 FX 轨, 时间轴可见可调
-          transform: { ...DEFAULT_TRANSFORM },
-        });
+        // 视频: 壳 + 绑定脸 双层 (FX 打在壳上脸跟随); GIF: 单张合成图
+        let fxTargetId: string;
+        if (isGifMode) {
+          fxTargetId = `ri${i}-${ts}`;
+          next.push({
+            id: fxTargetId, trackId: 'image', lane: 0,
+            start: segStart, end: segEnd,
+            src: composedImages[i].src, label: composedImages[i].label,
+            fx: 'none', transform: { ...DEFAULT_TRANSFORM },
+          });
+        } else {
+          const { panda, face, L } = combos[i];
+          const shellId = `rs${i}-${ts}`; const rFaceId = `rf${i}-${ts}`;
+          next.push({
+            id: shellId, trackId: 'image', lane: L.pandaOnTop ? 0 : 1,
+            start: segStart, end: segEnd,
+            src: L.croppedSrc, label: panda.labelCn, fx: 'none',
+            blend: L.pandaBlend, role: 'shell', shellPandaId: panda.id,
+            transform: { ...DEFAULT_TRANSFORM, scale: L.fillScale },
+          } as ImageClip);
+          next.push({
+            id: rFaceId, trackId: 'image', lane: L.pandaOnTop ? 1 : 0,
+            start: segStart, end: segEnd,
+            src: face.src, label: face.labelCn + '·脸', fx: 'none',
+            blend: L.faceBlend, transform: L.faceTransform,
+            boundTo: shellId, faceLocal: L.faceLocal, role: 'face',
+          } as ImageClip);
+          fxTargetId = shellId;   // FX 打壳 → 脸跟随
+        }
         next.push({
           id: `rc${i}-${ts}`, trackId: 'caption', lane: 0,
           start: segStart, end: captionEnd, text: line,
@@ -2636,7 +2659,7 @@ export function AnimateMode() {
         next.push({
           id: `rfx${i}-${ts}`, trackId: 'fx', lane: 0,
           start: segStart, end: segStart + Math.max(0.3, fxDur),
-          fx: fxPick, targetClipId: imageId,
+          fx: fxPick, targetClipId: fxTargetId,
         });
         cursor = segEnd;
       }
@@ -2648,7 +2671,7 @@ export function AnimateMode() {
       // 不随机 BGM — 音乐轨留空, 用户自己加 (防 BGM 跟配音/TTS 撞车; 配音是主轨, BGM 自己挑 + 调音量更可控)
       const newProject: ProjectState = {
         duration: totalDur,
-        lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
+        lanes: { image: isGifMode ? 1 : 2, caption: 1, fx: 1, tts: 1, bgm: 1 },   // 视频双层 → image 占 2 轨 (壳 + 脸)
         clips: next,
         mode: project.mode ?? 'video',
         gifPresetId: project.gifPresetId,
@@ -2664,13 +2687,13 @@ export function AnimateMode() {
       toast.success(
         isGifMode
           ? `已生成 4 段 GIF · 总时长 ${totalDur.toFixed(1)}s · 无声`
-          : `已生成 4 段配套熊猫头 · 总时长 ${totalDur.toFixed(1)}s · 段间 1s`,
+          : `已生成 4 段双层配套 (壳+脸可分别调) · 总时长 ${totalDur.toFixed(1)}s`,
       );
     } catch (e) {
       toast.dismiss(tid);
       toast.error('随机生成失败: ' + (e as Error).message);
     }
-  }, [commit, project]);
+  }, [commit, project, computeComboLayout]);
   const quickAdd = useCallback((payload: DragPayload) => {
     const dur = payload.defaultDuration ?? 2.5;
     const type = payload.type;
@@ -2777,45 +2800,24 @@ export function AnimateMode() {
   const addComboVideo = useCallback(async (panda: Material, face: Material) => {
     const tid = toast.loading('合成配套熊猫头 (双层)…');
     try {
-      const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
-      const fl = await calcEditorFaceLayout({
-        pandaSrc: panda.src, faceSrc: face.src, faceOffset350: panda.faceOffset,
-        panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h,
-      });
-      const W = 1000, H = 1000;                       // 归一化参考 (faceLocal 跟 W/H 无关, 故任意)
-      const baseSize = Math.min(W, H) * 0.6;
-      const K = baseSize / box.w;
-      const fillScale = 1.5 * Math.min(1, box.w / box.h);   // panda 长边占 ~90% 画板
-      const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
-      const faceTransform: Transform = {
-        ...DEFAULT_TRANSFORM,
-        x: ((fcx - 250) * K) / W * 100 * fillScale,
-        y: ((fcy - 250) * K) / H * 100 * fillScale,
-        scale: (fl.width / box.w) * fillScale,
-      };
-      let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
-      const faceLocal = captureFaceLocal(
-        { cx: W / 2, cy: H / 2, iw: _sIw }, 0,
-        { cx: W / 2 + (faceTransform.x / 100) * W, cy: H / 2 + (faceTransform.y / 100) * H, iw: baseSize * faceTransform.scale }, 0);
+      const L = await computeComboLayout(panda, face);
       const dur = 2.5;
       const start = Math.max(0, Math.min(playheadRef.current, Math.max(0, project.duration - dur)));
       const end = Math.min(project.duration, start + dur);
       const pandaId = uid('img'), faceId = uid('img');
-      const lay = getShellLayering(panda.id);
-      const pandaOnTop = lay.pandaZ > lay.faceZ;
       commit(p => {
         const bumped = p.clips.map(c => (c.trackId === 'image' ? ({ ...c, lane: c.lane + 2 } as Clip) : c));
         const pandaClip: ImageClip = {
-          id: pandaId, trackId: 'image', lane: pandaOnTop ? 0 : 1, start, end,
-          src: box.croppedSrc, label: panda.labelCn, fx: 'none',
-          blend: lay.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id,
-          transform: { ...DEFAULT_TRANSFORM, scale: fillScale },
+          id: pandaId, trackId: 'image', lane: L.pandaOnTop ? 0 : 1, start, end,
+          src: L.croppedSrc, label: panda.labelCn, fx: 'none',
+          blend: L.pandaBlend, role: 'shell', shellPandaId: panda.id,
+          transform: { ...DEFAULT_TRANSFORM, scale: L.fillScale },
         };
         const faceClip: ImageClip = {
-          id: faceId, trackId: 'image', lane: pandaOnTop ? 1 : 0, start, end,
+          id: faceId, trackId: 'image', lane: L.pandaOnTop ? 1 : 0, start, end,
           src: face.src, label: face.labelCn + '·脸', fx: 'none',
-          blend: lay.faceBlend === 'multiply' ? 'multiply' : undefined,
-          transform: faceTransform, boundTo: pandaId, faceLocal, role: 'face',
+          blend: L.faceBlend,
+          transform: L.faceTransform, boundTo: pandaId, faceLocal: L.faceLocal, role: 'face',
         };
         return { ...p, clips: [...bumped, pandaClip, faceClip], lanes: { ...p.lanes, image: p.lanes.image + 2 } };
       });
@@ -2824,7 +2826,50 @@ export function AnimateMode() {
     } catch (e) {
       toast.error('合成失败: ' + (e as Error).message, { id: tid });
     }
-  }, [commit, project.duration]);
+  }, [commit, project.duration, computeComboLayout]);
+
+  // 脸跟壳 绑定/解绑 (跟 GIF 同款; 用固定 1000² 参考算 — faceLocal 归一化跟分辨率无关).
+  //   绑定: 捕获脸相对壳的当前局部位姿 → 移动/旋转/缩放壳时脸自动跟随.
+  //   解绑: 把脸当前世界位姿烘焙回 transform (防解绑瞬间跳位), 清 boundTo/faceLocal/role.
+  const bindFaceVideo = useCallback(async (faceId: string) => {
+    const p = project;
+    const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
+    if (!face) return;
+    const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
+    if (others.length === 0) { toast('没有可绑定的熊猫头壳 — 先加个熊猫头图层'); return; }
+    // 壳候选 = role shell / blend multiply / 非·脸; 多壳时挑跟脸时段重叠最多的 → face_B 自动绑 shell_B
+    const shellCands = others.filter(o => o.role === 'shell' || o.blend === 'multiply' || !(o.label ?? '').endsWith('·脸'));
+    const cands = shellCands.length ? shellCands : others;
+    const ov = (s: ImageClip) => Math.max(0, Math.min(face.end, s.end) - Math.max(face.start, s.start));
+    const shell = cands.slice().sort((a, b) => ov(b) - ov(a) || b.lane - a.lane)[0];
+    const loadAspect = (src: string) => new Promise<number>(res => { const im = new Image(); im.onload = () => res(im.naturalWidth > 0 ? im.naturalHeight / im.naturalWidth : 1); im.onerror = () => res(1); im.src = src; });
+    const [sAsp, fAsp] = await Promise.all([loadAspect(shell.src), loadAspect(face.src)]);
+    const W = 1000, H = 1000;
+    const sBox = computeImageBox(shell, 0, p.clips, W, H, 1, sAsp, true);
+    const fBox = computeImageBox(face, 0, p.clips, W, H, 1, fAsp, true);
+    const faceLocal = captureFaceLocal({ cx: sBox.cx, cy: sBox.cy, iw: sBox.iw }, sBox.rotation, { cx: fBox.cx, cy: fBox.cy, iw: fBox.iw }, fBox.rotation);
+    commit(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, boundTo: shell.id, faceLocal, role: 'face' } as Clip) : c) }));
+    toast.success('已绑定 — 表情跟随熊猫头壳');
+  }, [project, commit]);
+  const unbindFaceVideo = useCallback(async (faceId: string) => {
+    const p = project;
+    const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
+    if (!face?.boundTo) return;
+    const shell = p.clips.find(c => c.id === face.boundTo && c.trackId === 'image') as ImageClip | undefined;
+    let baked = face.transform ?? DEFAULT_TRANSFORM;
+    if (shell) {
+      const loadAspect = (src: string) => new Promise<number>(res => { const im = new Image(); im.onload = () => res(im.naturalWidth > 0 ? im.naturalHeight / im.naturalWidth : 1); im.onerror = () => res(1); im.src = src; });
+      const [sAsp, fAsp] = await Promise.all([loadAspect(shell.src), loadAspect(face.src)]);
+      const W = 1000, H = 1000;
+      const fb = resolveBoundFaceBoxVideo(face, shell, 0, p.clips, W, H, 1, sAsp, 1, fAsp, true);
+      if (Number.isFinite(fb.cx) && fb.iw > 0) {
+        const baseSize = Math.min(W, H) * 0.6;
+        baked = { x: (fb.cx - W / 2) / W * 100, y: (fb.cy - H / 2) / H * 100, scale: fb.iw / baseSize, rotation: fb.rotation, flipX: fb.flipX };
+      }
+    }
+    commit(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, transform: baked, boundTo: undefined, faceLocal: undefined, role: undefined } as Clip) : c) }));
+    toast('已解绑 — 表情现在独立');
+  }, [project, commit]);
 
   // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
@@ -3471,6 +3516,7 @@ export function AnimateMode() {
           onUnlinkCaptionTTS={unlinkCaptionTTS}
           onReorderLayer={reorderLayer}
           onClipContextMenu={onClipContextMenu}
+          onBindToggle={(id) => { const f = project.clips.find(c => c.id === id && c.trackId === 'image') as ImageClip | undefined; if (f?.boundTo) void unbindFaceVideo(id); else void bindFaceVideo(id); }}
         />
       </div>
       <Timeline
@@ -5672,7 +5718,7 @@ function RightPane({
   clip, project, playhead, selectedId,
   onSelect, onUpdate, onTransform, onDelete, onDeleteClip, onSplit, onDuplicate, onMoveLane, onSetClipLane, onReorderLayer,
   onLinkCaptionTTS, onUnlinkCaptionTTS,
-  onClipContextMenu,
+  onClipContextMenu, onBindToggle,
 }: {
   clip: Clip | null;
   project: ProjectState;
@@ -5691,6 +5737,7 @@ function RightPane({
   onLinkCaptionTTS: (capId: string, ttsId: string) => void;
   onUnlinkCaptionTTS: (id: string) => void;
   onClipContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
+  onBindToggle: (faceId: string) => void;
 }) {
   return (
     <aside className="desktop-sidebar-right am-pane-right">
@@ -5783,7 +5830,7 @@ function RightPane({
               <div className="am-field-sublabel">高 lane 盖低 lane · 越界下移自动建新轨</div>
             </Field>
 
-            {clip.trackId === 'image'   && <ImageProps   clip={clip} onUpdate={onUpdate} onTransform={onTransform} />}
+            {clip.trackId === 'image'   && <ImageProps   clip={clip} onUpdate={onUpdate} onTransform={onTransform} onBindToggle={onBindToggle} />}
             {clip.trackId === 'caption' && <CaptionProps clip={clip} onUpdate={onUpdate} onTransform={onTransform} project={project} onLinkCaptionTTS={onLinkCaptionTTS} onUnlinkCaptionTTS={onUnlinkCaptionTTS} />}
             {clip.trackId === 'fx'      && <FXProps      clip={clip} project={project} onUpdate={onUpdate} />}
             {clip.trackId === 'tts'     && <TTSProps     clip={clip} onUpdate={onUpdate} project={project} onLinkCaptionTTS={onLinkCaptionTTS} onUnlinkCaptionTTS={onUnlinkCaptionTTS} />}
@@ -5906,7 +5953,14 @@ function LayerPanel({
                         )}
                         <div className="am-layer-meta">
                           <div className="am-layer-name">{clipDisplayName(c)}</div>
-                          <div className="am-layer-sub">{c.start.toFixed(1)}→{c.end.toFixed(1)}s · L{c.lane + 1}</div>
+                          <div className="am-layer-sub">
+                            {c.trackId === 'image' && (() => {
+                              const ic = c as ImageClip;
+                              const role = ic.role ?? (ic.boundTo ? 'face' : ic.blend === 'multiply' ? 'shell' : ic.kind === 'scene' ? 'scene' : '');
+                              return role === 'shell' ? '熊猫头壳 · ' : role === 'face' ? '🔗 跟随壳 · ' : role === 'scene' ? '背景 · ' : '';
+                            })()}
+                            {c.start.toFixed(1)}→{c.end.toFixed(1)}s · L{c.lane + 1}
+                          </div>
                         </div>
                         <button
                           className="am-layer-del"
@@ -6158,13 +6212,16 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
   );
 }
 
-function ImageProps({ clip, onUpdate, onTransform }: {
+function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
   clip: ImageClip;
   onUpdate: (p: Record<string, unknown>) => void;
   onTransform: (t: Partial<Transform>) => void;
+  onBindToggle: (faceId: string) => void;
 }) {
   const t = clip.transform ?? DEFAULT_TRANSFORM;
   const isScene = clip.kind === 'scene';
+  const bound = !!clip.boundTo;
+  const isShell = clip.role === 'shell';
   return (
     <>
       {isScene && (
@@ -6206,6 +6263,17 @@ function ImageProps({ clip, onUpdate, onTransform }: {
           <FlipHorizontal size={12} /> 水平翻转
         </button>
       </Field>
+      {/* 脸跟壳 绑定/解绑 — 跟 GIF 同款 (scene / 熊猫头壳本身不显) */}
+      {!isScene && !isShell && (
+        <Field label="跟随熊猫头">
+          <button type="button" className={'am-chip' + (bound ? ' is-active' : '')}
+            title={bound ? '已绑定 — 移动/旋转/缩放熊猫头壳时表情自动跟随. 点击解绑' : '绑定到熊猫头壳 — 表情自动跟随壳的移动/旋转/缩放, 不用手动对齐'}
+            onClick={() => onBindToggle(clip.id)}>
+            {bound ? <Link2 size={12} /> : <Link2Off size={12} />} {bound ? '已跟随 · 点击解绑' : '跟随熊猫头'}
+          </button>
+          <div className="am-field-sublabel">{bound ? '表情已绑壳 · 调壳脸跟着动 (给壳加特效脸也跟随)' : '绑到熊猫头壳后, 移动/旋转/缩放壳, 脸自动跟随'}</div>
+        </Field>
+      )}
       {/* v23-f: 删除 "自带特效" Field (chips 入场/强调/出场/运镜) — 改用独立 FX 时间轴, 防混淆 */}
       {/* 想给 image 加 fade-in / shake / pan / zoom 等? 拖 LeftPane "动画特效" 到 FX 时间轴, 然后在 FXProps Inspector 选 "作用对象" 绑定到这个 image */}
       <Field label="标签">

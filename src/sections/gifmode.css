@@ -138,9 +138,11 @@
 .gm-tl-seam.gm-seam-boomerang { color: #c2700e; }
 .gm-tl-seam.gm-seam-crossfade { color: #7a3bbf; }
 /* 时长手柄 (fit-all: 常驻 ruler 右缘内侧防溢出; bar 复用全局 am-tl-duration-handle-bar) */
-.gm-tl-durhandle { position: absolute; top: -1px; margin-left: -5px; height: 22px; width: 10px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; z-index: 5; touch-action: none; }
-/* 隐形扩大命中区 → 改循环时长的手柄更好抓 (不用非常精确才能拖) */
-.gm-tl-durhandle::before { content: ''; position: absolute; top: -8px; bottom: -8px; left: -9px; right: -9px; }
+/* 循环时长手柄 — 命中区做大 (用户反馈 10px 太难抓): 本体 24px 宽 + ::before 再 ±16px → 总 ~56px 宽命中区,
+   高 z-index 压过 clip/seam/playhead/ticks, 竖向也覆盖整 ruler + 略入轨道顶, 拖哪都能抓到. */
+.gm-tl-durhandle { position: absolute; top: -3px; margin-left: -12px; height: 28px; width: 24px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; z-index: 40; touch-action: none; }
+.gm-tl-durhandle::before { content: ''; position: absolute; top: -7px; bottom: -7px; left: -16px; right: -16px; }
+.gm-tl-durhandle:hover .am-tl-duration-handle-bar, .gm-tl-durhandle:active .am-tl-duration-handle-bar { transform: scaleX(1.6); }
 
 .gm-sec-title { font-size: 11px; font-weight: 800; color: #0a356d; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
 .gm-sec-title:first-child { margin-top: 0; }

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import './index.css'
 import App from './app.tsx'
+import { ErrorBoundary } from './components/errorboundary.tsx'
 
 // visualViewport-based 真实可见 viewport 高度同步 — 标准解法适配 iOS Safari / iOS Chrome / Android
 // 100dvh 在 iOS Chrome 不正确反映底部 native tab bar 占据的空间 → content overflow
@@ -46,15 +47,17 @@ if (typeof window !== 'undefined' && import.meta.env.DEV) {
     showErr('Error', e.message || 'unknown error', e.error?.stack);
   });
   window.addEventListener('unhandledrejection', (e) => {
-    const reason: any = e.reason;
-    showErr('Promise rejection', String(reason?.message || reason), reason?.stack);
+    const reason = e.reason as { message?: string; stack?: string } | undefined;
+    showErr('Promise rejection', String(reason?.message ?? e.reason), reason?.stack);
   });
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 )
