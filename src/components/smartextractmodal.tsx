@@ -195,7 +195,7 @@ function tracePolygonPath(ctx: CanvasRenderingContext2D, points: Point[], scale 
 }
 
 // crypto.randomUUID 在 iOS Safari + HTTP (非 secure context) 不可用
-// 局域网 dev (http://192.168.50.2:8766/) 上 iPhone 会爆 "crypto.randomUUID is not a function"
+// 局域网 dev (http://<LAN-IP>:<port>/ 非 https) 上 iPhone 会爆 "crypto.randomUUID is not a function"
 // fallback: Math.random RFC4122 v4 (足够生成 client-side item id, 非密码用途)
 function safeRandomUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
