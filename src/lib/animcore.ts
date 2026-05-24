@@ -460,6 +460,71 @@ export function computeFx(fx: ImageFx, fxStart: number, fxDur: number, t: number
   return out;
 }
 
+// ============================================================
+// 图层实时框 (base transform + move-fx lerp + FX 动画 offset/scale/rotate) — renderExportFrame 画图与
+//   视频绑定脸共用同一算法, 保证脸跟壳像素级对齐. ⚠️不含 motionAt(GIF loopMotion) — 那个 renderExportFrame 在外叠.
+// ============================================================
+export interface ImageLiveBox { cx: number; cy: number; iw: number; ih: number; rotation: number; flipX: boolean; alpha: number; filter: string; }
+export function computeImageBox(c: ImageClip, t: number, clips: Clip[], W: number, H: number, nW: number, nH: number, freezeFx = false): ImageLiveBox {
+  // freezeFx (编辑选中暂停时): 跳过 FX 动画用静态 transform → 绑定脸编辑时跟手不被运镜位移干扰
+  const eff = freezeFx ? { fx: 'none' as ImageFx, fxClip: null, fxStart: c.start, fxDur: Math.max(0.001, c.end - c.start) } : effectiveFxFor(c, t, clips);
+  const tr = computeLiveTransform(c, t, eff);
+  let iw: number, ih: number;
+  if (c.kind === 'scene') {
+    const coverR = Math.max(W / Math.max(1, nW), H / Math.max(1, nH));
+    iw = nW * coverR * tr.scale; ih = nH * coverR * tr.scale;
+  } else {
+    const baseSize = Math.min(W, H) * 0.6;
+    const r = baseSize / Math.max(1, nW);
+    iw = nW * r * tr.scale; ih = nH * r * tr.scale;
+    const maxRenderH = H * 0.85;
+    if (ih > maxRenderH) { const shrink = maxRenderH / ih; iw *= shrink; ih *= shrink; }
+  }
+  const fxA = computeFx(eff.fx, eff.fxStart, eff.fxDur, t, W, eff.fxClip);
+  iw *= fxA.scaleMul; ih *= fxA.scaleMul;
+  return {
+    cx: W / 2 + (tr.x / 100) * W + fxA.offsetX,
+    cy: H / 2 + (tr.y / 100) * H + fxA.offsetY,
+    iw, ih, rotation: tr.rotation + fxA.rotateAdd, flipX: tr.flipX, alpha: fxA.alpha, filter: fxA.filter,
+  };
+}
+
+// 视频版绑定脸: 壳的实时框(含 FX 动画) ∘ faceLocal → 脸跟着壳的 pan/zoom/shake/ken-burns/move/旋转 全程粘住.
+//   (GIF 版 resolveBoundFaceBox 在 gifloop.ts 用 loopMotion; 视频靠 FX 轨, 故单独一份, 共用 computeImageBox 保证跟壳画法一致.)
+export function resolveBoundFaceBoxVideo(
+  face: ImageClip, shell: ImageClip, t: number, clips: Clip[],
+  W: number, H: number, sNW: number, sNH: number, fNW: number, fNH: number,
+  freezeFx = false,
+): BoundFaceBox {
+  const loc = face.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+  const sBox = computeImageBox(shell, t, clips, W, H, sNW, sNH, freezeFx);   // 壳实时框 (含 FX; 编辑时 freeze)
+  const shellFlip = sBox.flipX ? -1 : 1;
+  const half = sBox.iw / 2;
+  const rad = sBox.rotation * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const mdxN = loc.dxN * shellFlip;                          // 壳翻转 → 脸到镜像侧
+  let fCx = sBox.cx + (mdxN * cos - loc.dyN * sin) * half;
+  let fCy = sBox.cy + (mdxN * sin + loc.dyN * cos) * half;
+  let fIw = sBox.iw * loc.scaleRatio;
+  let fIh = fIw * (fNH / Math.max(1, fNW));
+  if (fIh > H * 0.85) { const fk = (H * 0.85) / fIh; fIw *= fk; fIh *= fk; }
+  let fRot = sBox.rotation + loc.rotation;
+  // 脸自身若另挂 FX → 在跟随壳的基础上再叠脸自己的动效 (offset/scale/rotate delta); 编辑 freeze 时跳过
+  if (!freezeFx) {
+    const fEff = effectiveFxFor(face, t, clips);
+    if (fEff.fx !== 'none' && fEff.fx !== 'move') {
+      const fFx = computeFx(fEff.fx, fEff.fxStart, fEff.fxDur, t, W, fEff.fxClip);
+      fIw *= fFx.scaleMul; fIh *= fFx.scaleMul;
+      fCx += fFx.offsetX; fCy += fFx.offsetY;
+      fRot += fFx.rotateAdd;
+    }
+  }
+  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: face.transform?.flipX ?? false, scaleX: shellFlip };
+}
+export function makeBoundFaceAtVideo(project: { clips: Clip[] }, W: number, H: number) {
+  return (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number): BoundFaceBox =>
+    resolveBoundFaceBoxVideo(face, shell, t, project.clips, W, H, sNW, sNH, fNW, fNH);
+}
+
 export function renderExportFrame(
   ctx: CanvasRenderingContext2D,
   t: number,
@@ -518,44 +583,20 @@ export function renderExportFrame(
         continue;
       }
     }
-    const eff = effectiveFxFor(c, t, project.clips);
-    const tr = computeLiveTransform(c, t, eff);
-    const isScene = c.kind === 'scene';
-    let iw: number, ih: number;
-    if (isScene) {
-      const coverR = Math.max(W / naturalW, H / naturalH);
-      iw = naturalW * coverR * tr.scale;
-      ih = naturalH * coverR * tr.scale;
-    } else {
-      // 删"副图自动缩"baseScale 机制 — 永远 1.0. 多 image 叠加时用户自己 transform.scale 调
-      const baseSize = Math.min(W, H) * 0.6;
-      const r = baseSize / naturalW;
-      const maxRenderH = H * 0.85;
-      iw = naturalW * r * tr.scale;
-      ih = naturalH * r * tr.scale;
-      if (ih > maxRenderH) {
-        const shrink = maxRenderH / ih;
-        iw *= shrink;
-        ih *= shrink;
-      }
-    }
-    const cx = W / 2 + (tr.x / 100) * W;
-    const cy = H / 2 + (tr.y / 100) * H;
-
-    const fxA = computeFx(eff.fx, eff.fxStart, eff.fxDur, t, W, eff.fxClip);
-    iw *= fxA.scaleMul;
-    ih *= fxA.scaleMul;
+    // 实时框(base transform + move-fx + FX 动画) — 抽到 computeImageBox 跟视频绑定脸共用, 保证脸跟壳对齐
+    const box = computeImageBox(c, t, project.clips, W, H, naturalW, naturalH);
+    let iw = box.iw, ih = box.ih;
     // P0: 循环安全动作 (motionAt 注入). video 编辑器不传 → md=null → 完全不影响.
     const md = motionAt ? motionAt(c, t) : null;
     if (md) { iw *= md.dScale; ih *= md.dScale; }
 
     ctx.save();
-    ctx.globalAlpha = fxA.alpha;
+    ctx.globalAlpha = box.alpha;
     if (c.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';  // 配套壳叠在脸上 (白内部×脸=脸透出, 黑特征如墨镜×脸=黑盖住), 跟编辑器一致
-    if (fxA.filter) ctx.filter = fxA.filter;
-    ctx.translate(cx + fxA.offsetX + (md ? md.dx : 0), cy + fxA.offsetY + (md ? md.dy : 0));
-    ctx.rotate((tr.rotation + fxA.rotateAdd + (md ? md.dRot : 0)) * Math.PI / 180);
-    ctx.scale((tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1), 1);   // 静态 flipX × 动态翻转动作 (flip motion)
+    if (box.filter) ctx.filter = box.filter;
+    ctx.translate(box.cx + (md ? md.dx : 0), box.cy + (md ? md.dy : 0));
+    ctx.rotate((box.rotation + (md ? md.dRot : 0)) * Math.PI / 180);
+    ctx.scale((box.flipX ? -1 : 1) * (md?.dScaleX ?? 1), 1);   // 静态 flipX × 动态翻转动作 (flip motion)
     // GIF: 按 (t-clipStart) % gifDur 取当前帧 (+gifEdit 帧级微调); 静图: HTMLImageElement 自身
     ctx.drawImage(drawableAt(media, t, c.start, c.gifEdit), -iw / 2, -ih / 2, iw, ih);
     ctx.restore();

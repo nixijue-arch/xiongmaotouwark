@@ -25,12 +25,12 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
-import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, type Material } from '@/data/materials';
+import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering, type Material } from '@/data/materials';
 // v23-d: 内置 SVG scene preset 删除 — 用户嫌 cheesy, 改成纯用户上传 (任意位图/jpg/png/gif)
 // import { ANIMATE_SCENES } from '@/data/animateScenes';  // 保留 file 备查, 不再 import
-import { composeMeme } from '@/lib/composeMeme';
+import { composeMeme, getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { encodeGIFBlobFromProject, downloadBlob } from '@/lib/gifloop';
+import { encodeGIFBlobFromProject, downloadBlob, captureFaceLocal } from '@/lib/gifloop';
 import { useMeme, type DraftSlot, type ImageElement, type TextElement, type MemeElement } from '@/context/memecontext';
 import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_LABELS } from '@/data/quickModeTexts';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -43,6 +43,7 @@ import {
   clamp, loadMedia,
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
   computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
+  resolveBoundFaceBoxVideo, makeBoundFaceAtVideo, contentBboxFrac,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
@@ -1416,7 +1417,7 @@ async function exportVideo(
   }));
 
   // 第 0 帧先画 — 白底 (#fff), 跟视频预览画板一致 (默认黑 → 画面背景丑/穿透)
-  renderExportFrame(ctx, 0, project, W, H, imgCache, undefined, '#ffffff');
+  renderExportFrame(ctx, 0, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
 
   // Web Audio MediaStream — BGM + 用户录音 TTS 都路由进 audioStream
   // FIX MP4 配音越来越大: 导出前彻底销毁所有旧 TTS player + BGM
@@ -1484,7 +1485,7 @@ async function exportVideo(
     function step() {
       const elapsed = performance.now() - startTime;
       const t = Math.min(project.duration, elapsed / 1000);
-      renderExportFrame(ctx, t, project, W, H, imgCache, undefined, '#ffffff');
+      renderExportFrame(ctx, t, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
       onProgress(Math.min(1, elapsed / totalMs));
 
       // TTS + BGM 都录入 MP4 (gain 都接 exportDest). 走 sync 让 audio 跟 video 时钟严格对齐
@@ -1519,7 +1520,7 @@ async function exportVideo(
   });
 
   // 最后一帧 + 等 audio 收尾
-  renderExportFrame(ctx, project.duration, project, W, H, imgCache, undefined, '#ffffff');
+  renderExportFrame(ctx, project.duration, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
   await new Promise(r => setTimeout(r, hasAudio ? 400 : 100));
   recorder.stop();
   // FIX MP4 配音越来越大: 导出后 destroyAll (cancelAll + destroyAllTTSPlayers)
@@ -2332,7 +2333,11 @@ export function AnimateMode() {
   }, [setProjectLive]);
   const deleteClip = useCallback((id: string) => {
     commit(p => {
-      const clips = p.clips.filter(c => c.id !== id);
+      // 删壳时, 把绑定它的脸解绑 (boundTo 清掉 → 脸落回自己的 transform, 不渲染坏)
+      const clips = p.clips.filter(c => c.id !== id).map(c =>
+        (c.trackId === 'image' && (c as ImageClip).boundTo === id)
+          ? ({ ...c, boundTo: undefined, faceLocal: undefined, role: (c as ImageClip).role === 'face' ? 'image' : (c as ImageClip).role } as Clip)
+          : c);
       // 删 clip 后, 收掉每 type 末尾的空 lane (保留 >= 1) — 不让用户看到无用空轨
       const lanes = { ...p.lanes };
       (Object.keys(lanes) as TrackType[]).forEach(t => {
@@ -2434,7 +2439,7 @@ export function AnimateMode() {
       const newClips = p.clips.map(x => x.id === aId ? ({ ...x, end: time }) as Clip : x);
       const bBase: BaseClip = { id: bId, trackId: c.trackId, lane: c.lane, start: time, end: c.end };
       let bClip: Clip;
-      if (c.trackId === 'image') bClip = { ...bBase, trackId: 'image', src: c.src, label: c.label, fx: c.fx, transform: c.transform ? { ...c.transform } : { ...DEFAULT_TRANSFORM } };
+      if (c.trackId === 'image') bClip = { ...bBase, trackId: 'image', src: c.src, label: c.label, fx: c.fx, transform: c.transform ? { ...c.transform } : { ...DEFAULT_TRANSFORM }, kind: c.kind, blend: c.blend, role: c.role, shellPandaId: c.shellPandaId, boundTo: c.boundTo, faceLocal: c.faceLocal ? { ...c.faceLocal } : undefined, loopMotion: c.loopMotion, gifEdit: c.gifEdit, endTransform: c.endTransform };
       else if (c.trackId === 'caption') bClip = { ...bBase, trackId: 'caption', text: c.text, fontSize: c.fontSize, color: c.color, style: c.style, transform: c.transform };
       else if (c.trackId === 'fx') bClip = { ...bBase, trackId: 'fx', fx: c.fx, targetClipId: c.targetClipId };
       else if (c.trackId === 'tts') bClip = { ...bBase, trackId: 'tts', text: c.text, voice: c.voice, audioSrc: c.audioSrc };
@@ -2455,7 +2460,7 @@ export function AnimateMode() {
     commit(p => {
       const baseDup: BaseClip = { id: newId, trackId: c.trackId, lane: c.lane, start: newStart, end: newEnd };
       let dup: Clip;
-      if (c.trackId === 'image') dup = { ...baseDup, trackId: 'image', src: c.src, label: c.label, caption: c.caption, fx: c.fx, transform: c.transform ? { ...c.transform } : { ...DEFAULT_TRANSFORM } };
+      if (c.trackId === 'image') dup = { ...baseDup, trackId: 'image', src: c.src, label: c.label, caption: c.caption, fx: c.fx, transform: c.transform ? { ...c.transform } : { ...DEFAULT_TRANSFORM }, kind: c.kind, blend: c.blend, role: c.role, shellPandaId: c.shellPandaId, boundTo: c.boundTo, faceLocal: c.faceLocal ? { ...c.faceLocal } : undefined, loopMotion: c.loopMotion, gifEdit: c.gifEdit };
       else if (c.trackId === 'caption') dup = { ...baseDup, trackId: 'caption', text: c.text, fontSize: c.fontSize, color: c.color, style: c.style, transform: c.transform };
       else if (c.trackId === 'fx') dup = { ...baseDup, trackId: 'fx', fx: c.fx, targetClipId: c.targetClipId };
       else if (c.trackId === 'tts') dup = { ...baseDup, trackId: 'tts', text: c.text, voice: c.voice, audioSrc: c.audioSrc };
@@ -2766,6 +2771,60 @@ export function AnimateMode() {
     commit(p => ({ ...p, clips: [...p.clips, clip] }));
     setSelectedId(id);
   }, [commit, project, selectedId]);
+
+  // 配套双层 combo (跟 GIF 同款): panda 壳 + 绑定脸 两个图层 (而非合成一张). 脸 boundTo 壳 + faceLocal 跟随.
+  //   faceLocal 归一化(跟分辨率无关), 用固定 1000² 参考算; 渲染时按实际画板/导出尺寸 resolveBoundFaceBoxVideo 还原.
+  const addComboVideo = useCallback(async (panda: Material, face: Material) => {
+    const tid = toast.loading('合成配套熊猫头 (双层)…');
+    try {
+      const box = await getEditorPandaBox(panda.src, { fillShell: false, maxPx: 350 });
+      const fl = await calcEditorFaceLayout({
+        pandaSrc: panda.src, faceSrc: face.src, faceOffset350: panda.faceOffset,
+        panda350OffsetX: box.x, panda350OffsetY: box.y, panda350W: box.w, panda350H: box.h,
+      });
+      const W = 1000, H = 1000;                       // 归一化参考 (faceLocal 跟 W/H 无关, 故任意)
+      const baseSize = Math.min(W, H) * 0.6;
+      const K = baseSize / box.w;
+      const fillScale = 1.5 * Math.min(1, box.w / box.h);   // panda 长边占 ~90% 画板
+      const fcx = fl.x + fl.width / 2, fcy = fl.y + fl.height / 2;
+      const faceTransform: Transform = {
+        ...DEFAULT_TRANSFORM,
+        x: ((fcx - 250) * K) / W * 100 * fillScale,
+        y: ((fcy - 250) * K) / H * 100 * fillScale,
+        scale: (fl.width / box.w) * fillScale,
+      };
+      let _sIw = baseSize * fillScale; const _sIh = (box.h / box.w) * _sIw; if (_sIh > H * 0.85) _sIw *= (H * 0.85) / _sIh;
+      const faceLocal = captureFaceLocal(
+        { cx: W / 2, cy: H / 2, iw: _sIw }, 0,
+        { cx: W / 2 + (faceTransform.x / 100) * W, cy: H / 2 + (faceTransform.y / 100) * H, iw: baseSize * faceTransform.scale }, 0);
+      const dur = 2.5;
+      const start = Math.max(0, Math.min(playheadRef.current, Math.max(0, project.duration - dur)));
+      const end = Math.min(project.duration, start + dur);
+      const pandaId = uid('img'), faceId = uid('img');
+      const lay = getShellLayering(panda.id);
+      const pandaOnTop = lay.pandaZ > lay.faceZ;
+      commit(p => {
+        const bumped = p.clips.map(c => (c.trackId === 'image' ? ({ ...c, lane: c.lane + 2 } as Clip) : c));
+        const pandaClip: ImageClip = {
+          id: pandaId, trackId: 'image', lane: pandaOnTop ? 0 : 1, start, end,
+          src: box.croppedSrc, label: panda.labelCn, fx: 'none',
+          blend: lay.pandaBlend === 'multiply' ? 'multiply' : undefined, role: 'shell', shellPandaId: panda.id,
+          transform: { ...DEFAULT_TRANSFORM, scale: fillScale },
+        };
+        const faceClip: ImageClip = {
+          id: faceId, trackId: 'image', lane: pandaOnTop ? 1 : 0, start, end,
+          src: face.src, label: face.labelCn + '·脸', fx: 'none',
+          blend: lay.faceBlend === 'multiply' ? 'multiply' : undefined,
+          transform: faceTransform, boundTo: pandaId, faceLocal, role: 'face',
+        };
+        return { ...p, clips: [...bumped, pandaClip, faceClip], lanes: { ...p.lanes, image: p.lanes.image + 2 } };
+      });
+      setSelectedId(faceId);
+      toast.success('已加双层配套 — 拖脸微调 / 给壳加特效脸会跟着动', { id: tid });
+    } catch (e) {
+      toast.error('合成失败: ' + (e as Error).message, { id: tid });
+    }
+  }, [commit, project.duration]);
 
   // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
@@ -3363,6 +3422,7 @@ export function AnimateMode() {
           userBGMs={userBGMs}
           setUserBGMs={setUserBGMs}
           onQuickAdd={quickAdd}
+          onAddCombo={addComboVideo}
           onAddDraftAsClips={addDraftAsClips}
           onAddClipsBatch={addClipsBatch}
           playhead={playhead}
@@ -3566,6 +3626,7 @@ export function AnimateMode() {
                   userBGMs={userBGMs}
                   setUserBGMs={setUserBGMs}
                   onQuickAdd={(p) => { quickAdd(p); setMobileSheet(null); /* 加完关 sheet, 立即看效果 */ }}
+                  onAddCombo={(pa, fa) => { void addComboVideo(pa, fa); setMobileSheet(null); }}
                   onAddDraftAsClips={async (s) => { await addDraftAsClips(s); setMobileSheet(null); /* await 避免 toast 没出 sheet 已关 */ }}
                   onAddClipsBatch={(cs) => { addClipsBatch(cs); setMobileSheet(null); }}
                   playhead={playhead}
@@ -3965,7 +4026,7 @@ type LibSub = 'combo' | 'panda' | 'face' | 'netsearch' | 'scene' | 'draft' | 'up
 function LeftPane({
   mode = 'video',
   initialSeg,
-  uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddDraftAsClips,
+  uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddCombo, onAddDraftAsClips,
   onAddClipsBatch, playhead, projectDuration,
 }: {
   mode?: ProjectMode;
@@ -3975,6 +4036,7 @@ function LeftPane({
   userBGMs: BGMPreset[];
   setUserBGMs: React.Dispatch<React.SetStateAction<BGMPreset[]>>;
   onQuickAdd: (payload: DragPayload) => void;
+  onAddCombo: (panda: Material, face: Material) => void;
   onAddDraftAsClips: (slot: DraftSlot) => void;
   // v23-k: 批量加成对 clip (caption + 链 TTS) — 走 commit 一次, 不走 quickAdd 多次
   onAddClipsBatch: (clips: Clip[]) => void;
@@ -4239,7 +4301,7 @@ function LeftPane({
 
         <div className="sidebar-scroll">
           {seg === 'asset' && sub === 'combo' && (
-            <ComboTab onAdd={onQuickAdd} />
+            <ComboTab onAdd={onQuickAdd} onAddCombo={onAddCombo} />
           )}
           {seg === 'asset' && sub === 'panda' && (
             <>
@@ -5026,6 +5088,7 @@ function PreviewPane({
   // image natural aspect (img onLoad 后填) — px-based render 用它算 height
   // v23-l audit-fix: 单 useState<Map> 替代 ref + tick (lint react-hooks/refs — refs 不该在 render 读)
   const [naturalAspects, setNaturalAspects] = useState<Map<string, number>>(() => new Map());
+  const imgElsRef = useRef<Map<string, HTMLImageElement>>(new Map());   // 绑定脸椭圆裁切用 (contentBboxFrac 需 img 元素)
 
   // caption: 所有 active caption clips (按 lane 顺序), 渲染时按 transform 位置叠加
   const activeCaptionClips = useMemo(() => {
@@ -5165,35 +5228,50 @@ function PreviewPane({
     const _r = (_box ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
     const _ecx = _r.left + _r.width / 2, _ecy = _r.top + _r.height / 2;
     const _startAngle = Math.atan2(startY - _ecy, startX - _ecx) * 180 / Math.PI;
+    // 绑定脸: 拖/缩/转改 faceLocal (相对壳静态框, 仍跟随壳), 而非死改被 resolveBoundFaceBoxVideo 忽略的 transform
+    const boundShell = target.boundTo ? (clips.find(s => s.id === target.boundTo && s.trackId === 'image') as ImageClip | undefined) : undefined;
+    const startLoc = target.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+    const _bBase = Math.min(canvasSize.w, canvasSize.h) * 0.6;
+    let _bHalf = 1, _bCos = 1, _bSin = 0;
+    if (boundShell) {
+      const sAspect = naturalAspects.get(boundShell.id) ?? 1;
+      let sIw = _bBase * (boundShell.transform?.scale ?? 1);
+      const sIh = sAspect * sIw;
+      if (sIh > canvasSize.h * 0.85) sIw *= (canvasSize.h * 0.85) / sIh;   // 同 resolveBoundFaceBoxVideo 0.85H 钳
+      _bHalf = Math.max(1, sIw / 2);
+      const sr = (boundShell.transform?.rotation ?? 0) * Math.PI / 180;
+      _bCos = Math.cos(sr); _bSin = Math.sin(sr);
+    }
     let moved = false;
     const onMove = (ev: PointerEvent) => {
       if (!moved && (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4)) moved = true;
       if (kind === 'move') {
         const dxPct = (ev.clientX - startX) / canvasSize.w * 100;
         const dyPct = (ev.clientY - startY) / canvasSize.h * 100;
-        // 自由度优先 — 不再 clamp image bbox 在 canvas 内, user 想拖出框就拖出 (overflow:hidden 自然裁掉超出部分)
-        // 上限 ±200% 防极端值 (user 不可能想拖到 canvas 外 2x). px-based positioning 让 image 出框也合理
-        onTransformLive(target.id, {
-          x: clamp(startT.x + dxPct, -200, 200),
-          y: clamp(startT.y + dyPct, -200, 200),
-        });
+        if (boundShell) {
+          const dFx = (dxPct / 100) * canvasSize.w, dFy = (dyPct / 100) * canvasSize.h;   // 世界位移 px → 转入壳未旋帧 + 归一化
+          onUpdateClipLive(target.id, { faceLocal: { ...startLoc,
+            dxN: startLoc.dxN + (dFx * _bCos + dFy * _bSin) / _bHalf,
+            dyN: startLoc.dyN + (-dFx * _bSin + dFy * _bCos) / _bHalf } } as Partial<Clip>);
+        } else {
+          // 自由度优先 — 不 clamp 在 canvas 内 (overflow:hidden 裁), 上限 ±200% 防极端
+          onTransformLive(target.id, { x: clamp(startT.x + dxPct, -200, 200), y: clamp(startT.y + dyPct, -200, 200) });
+        }
       } else if (kind === 'scale') {
-        // 跟手缩放 — image 边框跟随 pointer
-        // image 半径 ≈ baseSize/2 * scale. 拖动 dx (右下角 handle), dx 应直接等于半径变化:
-        //   newScale = startScale + (dx + dy) / baseSize (右下方向 dx+dy 同号)
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
-        const baseSize = Math.min(canvasSize.w, canvasSize.h) * 0.6;
-        // 用 max(dx, dy) 让单轴拖动也跟手 (取主导方向)
-        const drag = Math.max(dx, dy);
-        const newScale = clamp(startT.scale + (drag * 2) / Math.max(1, baseSize), 0.2, 4);
-        onTransformLive(target.id, { scale: newScale });
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        const drag = Math.max(dx, dy);   // max → 单轴拖也跟手
+        if (boundShell) {
+          onUpdateClipLive(target.id, { faceLocal: { ...startLoc, scaleRatio: clamp(startLoc.scaleRatio + (drag * 1.5) / _bBase, 0.1, 4) } } as Partial<Clip>);
+        } else {
+          onTransformLive(target.id, { scale: clamp(startT.scale + (drag * 2) / Math.max(1, _bBase), 0.2, 4) });
+        }
       } else {
         // 拖拽旋转 (Shift 锁 15°)
         const a = Math.atan2(ev.clientY - _ecy, ev.clientX - _ecx) * 180 / Math.PI;
-        let rot = startT.rotation + (a - _startAngle);
+        let rot = (boundShell ? startLoc.rotation : startT.rotation) + (a - _startAngle);
         if (ev.shiftKey) rot = Math.round(rot / 15) * 15;
-        onTransformLive(target.id, { rotation: clamp(rot, -180, 180) });
+        if (boundShell) onUpdateClipLive(target.id, { faceLocal: { ...startLoc, rotation: rot } } as Partial<Clip>);
+        else onTransformLive(target.id, { rotation: clamp(rot, -180, 180) });
       }
     };
     const onUp = () => {
@@ -5290,8 +5368,66 @@ function PreviewPane({
             </div>
           )}
           {activeImageClips.map((c, idx) => {
-            const isScene = c.kind === 'scene';
             void idx;
+            // 绑定脸: 位置由 shell 实时框(含 FX) ∘ faceLocal 推导, 跟着壳一起动 (pan/zoom/shake/旋转/move);
+            //   选中+暂停时 freeze 壳 FX → 拖脸跟手不被运镜位移干扰. 椭圆裁切跟导出一致 (contentBboxFrac).
+            if (c.boundTo) {
+              const shellC = clips.find(s => s.id === c.boundTo && s.trackId === 'image') as ImageClip | undefined;
+              if (shellC) {
+                const isSelF = c.id === selectedId;
+                const freezeF = isSelF && !isPlaying;
+                const shellAspect = naturalAspects.get(shellC.id) ?? 1;
+                const faceAspect = naturalAspects.get(c.id) ?? 1;
+                const bf = resolveBoundFaceBoxVideo(c, shellC, time, clips, canvasSize.w, canvasSize.h, 1, shellAspect, 1, faceAspect, freezeF);
+                if (Number.isFinite(bf.cx) && Number.isFinite(bf.iw) && bf.iw > 0) {
+                  const faceEl = imgElsRef.current.get(c.id);
+                  const bb = faceEl ? contentBboxFrac(faceEl) : { x: 0, y: 0, w: 1, h: 1 };
+                  const fClip = `ellipse(${(bb.w * 52).toFixed(1)}% ${(bb.h * 52).toFixed(1)}% at ${((bb.x + bb.w / 2) * 100).toFixed(1)}% ${((bb.y + bb.h / 2) * 100).toFixed(1)}%)`;
+                  const netFlip = (bf.flipX ? -1 : 1) * (bf.scaleX ?? 1);
+                  return (
+                    <div
+                      key={c.id}
+                      data-clip-id={c.id}
+                      className={`am-stage-img${isSelF ? ' is-selected' : ''}${c.id === fxTargetImageId ? ' am-stage-fx-target' : ''}`}
+                      style={{
+                        left: bf.cx - bf.iw / 2, top: bf.cy - bf.ih / 2, width: bf.iw, height: bf.ih,
+                        transform: bf.rotation !== 0 ? `rotate(${bf.rotation}deg)` : undefined,
+                        zIndex: 10 - c.lane, cursor: isSelF ? 'move' : 'pointer',
+                      }}
+                      onPointerDown={(e) => startStageDrag(e, c, 'move')}
+                      onDragStart={(e) => e.preventDefault()}
+                      onContextMenu={(e) => onClipContextMenu?.(e, c)}
+                    >
+                      <img
+                        src={c.src} alt={c.label} draggable={false}
+                        ref={(el) => { if (el) imgElsRef.current.set(c.id, el); else imgElsRef.current.delete(c.id); }}
+                        onLoad={(e) => {
+                          const tt = e.currentTarget;
+                          if (tt.naturalWidth > 0) {
+                            const a = tt.naturalHeight / tt.naturalWidth;
+                            setNaturalAspects(prev => prev.get(c.id) === a ? prev : new Map(prev).set(c.id, a));
+                          }
+                        }}
+                        style={{
+                          width: '100%', height: '100%', objectFit: 'contain', display: 'block',
+                          transform: netFlip < 0 ? 'scaleX(-1)' : undefined,
+                          mixBlendMode: c.blend === 'multiply' ? 'multiply' : undefined, clipPath: fClip,
+                        }}
+                      />
+                      {isSelF && (
+                        <>
+                          <div className="am-stage-frame" />
+                          <div className="am-stage-rotstem" />
+                          <div className="am-stage-handle am-stage-handle-rot" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title="拖动旋转 (Shift 锁 15°)"><RotateCw size={9} strokeWidth={2.6} /></div>
+                          <div className="am-stage-handle am-stage-handle-se" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }} title="拖动缩放" />
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+              }
+            }
+            const isScene = c.kind === 'scene';
             const fxInfo = effectiveFxFor(c, time, clips);
             const tr = computeLiveTransform(c, time, fxInfo);
             const rawFxA = computeFx(fxInfo.fx, fxInfo.fxStart, fxInfo.fxDur, time, canvasSize.w, fxInfo.fxClip);
