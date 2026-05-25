@@ -12,7 +12,9 @@ export type ImageFx =
   // 场景运镜 (持续整 clip, 大幅 pan/zoom)
   | 'pan-l' | 'pan-r' | 'pan-u' | 'pan-d' | 'zoom-in' | 'zoom-out' | 'ken-burns'
   // 移动 (lerp clip.transform → clip.endTransform; 首尾帧 tween)
-  | 'move';
+  | 'move'
+  // 律动系 (从 GIF 循环动作融入 FX 库; computeFx 复用 loopMotionDelta, 在 FX clip 时段内振动, 结束回基准; id 跟 LoopMotionKind 同名)
+  | 'bob' | 'sway' | 'swing' | 'wobble' | 'hop' | 'float' | 'orbit';
 export type AspectId = '16:9' | '9:16' | '1:1';
 
 export interface Transform { x: number; y: number; scale: number; rotation: number; flipX: boolean; }
@@ -144,9 +146,6 @@ export const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string 
 export const motionMeta = (kind?: LoopMotionKind): { kind: LoopMotionKind; label: string; emoji: string } =>
   kind === 'customMove' ? { kind: 'customMove', label: '自定义', emoji: '🎯' }
     : (LOOP_MOTIONS.find(m => m.kind === kind) ?? LOOP_MOTIONS[0]);
-// 视频模式循环动作的固定周期 (秒) — 视频非循环, 但用固定周期让鬼畜动作可见/手感跟 GIF 一致 (不随片长稀释).
-export const LOOP_MOTION_PERIOD_VIDEO = 2.5;
-
 const TWO_PI = Math.PI * 2;
 const ZERO_DELTA: MotionDelta = { dx: 0, dy: 0, dScale: 1, dRot: 0 };
 // 循环安全动作 — 相位锁 u=(t/D)mod1 + 整数周期 n → f(0)==f(1) 必然闭环. amp 归一化 (0~1.5 常用), 内部按动作种类换算 px/度/比例.
@@ -486,6 +485,8 @@ export function initFXDefaults(fxClip: FXClip, targetTr: Transform): void {
   }
 }
 
+// 律动系 FX (从 GIF 循环动作融入): 走 loopMotionDelta, 跟普通 FX 一样在 FX clip 时段内生效.
+const MOTION_FX = new Set<ImageFx>(['bob', 'sway', 'swing', 'wobble', 'hop', 'float', 'orbit']);
 // v23-j (phase 2): computeFx 接 FXClip object — 用户调的 strength/zoomFrom/zoomTo/spinTurns 真生效
 export function computeFx(fx: ImageFx, fxStart: number, fxDur: number, t: number, W: number, fxClip?: FXClip | null): FxApply {
   const out: FxApply = { offsetX: 0, offsetY: 0, scaleMul: 1, rotateAdd: 0, alpha: 1, filter: '' };
@@ -498,6 +499,13 @@ export function computeFx(fx: ImageFx, fxStart: number, fxDur: number, t: number
   const zoomFrom = fxClip?.zoomFrom ?? 1.0;
   const zoomTo = fxClip?.zoomTo ?? 1.25;
   const spinTurns = fxClip?.spinTurns ?? 1;
+  // 律动系 FX — 复用 loopMotionDelta (GIF 循环动作): FX clip 时段当周期 + strength 当幅度 + 内置 cycles=2 (clip 内振 2 次);
+  //   时间钳到 [0,dur] → progress 到 1 (及 FX-hold 之后) u 回 0 = 基准, 跟其它 FX 一样无跳变.
+  if (MOTION_FX.has(fx)) {
+    const md = loopMotionDelta({ kind: fx as LoopMotionKind, amp: k, cycles: 2 }, Math.min(enterT, dur), dur, W, W);
+    out.offsetX = md.dx; out.offsetY = md.dy; out.scaleMul = md.dScale; out.rotateAdd = md.dRot;
+    return out;
+  }
   if (fx === 'shake') {
     out.offsetX = Math.sin(enterT * 60) * 6 * k;
     out.offsetY = Math.cos(enterT * 60) * 4 * k;
@@ -587,21 +595,18 @@ export function resolveBoundFaceBoxVideo(
   freezeFx = false,
 ): BoundFaceBox {
   const loc = face.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
-  const sBox = computeImageBox(shell, t, clips, W, H, sNW, sNH, freezeFx);   // 壳实时框 (含 FX; 编辑时 freeze)
-  // 壳的鬼畜 loopMotion (FX 轨之外的连续动作, 跟 GIF 同款) — 视频用固定周期; 编辑 freeze 时不动 → 脸跟壳的鬼畜动作一起动, 不脱节
-  const sMd = freezeFx ? ZERO_DELTA : loopMotionDelta(shell.loopMotion, t, LOOP_MOTION_PERIOD_VIDEO, W, H, shell.transform);
-  const sCx = sBox.cx + sMd.dx, sCy = sBox.cy + sMd.dy, sIw = sBox.iw * sMd.dScale, sRot = sBox.rotation + sMd.dRot;
-  const shellFlip = (sBox.flipX ? -1 : 1) * (sMd.dScaleX ?? 1);   // 壳翻转 (transform flipX × flip 动效) → 脸到镜像侧
-  const half = sIw / 2;
-  const rad = sRot * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
-  const mdxN = loc.dxN * shellFlip;
-  let fCx = sCx + (mdxN * cos - loc.dyN * sin) * half;
-  let fCy = sCy + (mdxN * sin + loc.dyN * cos) * half;
-  let fIw = sIw * loc.scaleRatio;
+  const sBox = computeImageBox(shell, t, clips, W, H, sNW, sNH, freezeFx);   // 壳实时框 (含 FX, 含律动系 FX; 编辑时 freeze)
+  const shellFlip = sBox.flipX ? -1 : 1;
+  const half = sBox.iw / 2;
+  const rad = sBox.rotation * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const mdxN = loc.dxN * shellFlip;                          // 壳翻转 → 脸到镜像侧
+  let fCx = sBox.cx + (mdxN * cos - loc.dyN * sin) * half;
+  let fCy = sBox.cy + (mdxN * sin + loc.dyN * cos) * half;
+  let fIw = sBox.iw * loc.scaleRatio;
   let fIh = fIw * (fNH / Math.max(1, fNW));
   if (fIh > H * 0.85) { const fk = (H * 0.85) / fIh; fIw *= fk; fIh *= fk; }
-  let fRot = sRot + loc.rotation;
-  // 脸自身若另挂 FX → 在跟随壳的基础上再叠脸自己的动效 (offset/scale/rotate delta); 编辑 freeze 时跳过
+  let fRot = sBox.rotation + loc.rotation;
+  // 脸自身若另挂 FX (含律动系) → 在跟随壳的基础上再叠脸自己的动效; 壳的 FX 已含在 sBox (computeImageBox), 脸自动跟随
   if (!freezeFx) {
     const fEff = effectiveFxFor(face, t, clips);
     if (fEff.fx !== 'none' && fEff.fx !== 'move') {
@@ -611,13 +616,7 @@ export function resolveBoundFaceBoxVideo(
       fRot += fFx.rotateAdd;
     }
   }
-  // 脸自身的鬼畜 loopMotion (局部加, dx/dy 旋到壳的世界角)
-  const fMd = freezeFx ? ZERO_DELTA : loopMotionDelta(face.loopMotion, t, LOOP_MOTION_PERIOD_VIDEO, W, H, face.transform);
-  fIw *= fMd.dScale; fIh *= fMd.dScale;
-  fCx += fMd.dx * cos - fMd.dy * sin;
-  fCy += fMd.dx * sin + fMd.dy * cos;
-  fRot += fMd.dRot;
-  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: face.transform?.flipX ?? false, scaleX: shellFlip * (fMd.dScaleX ?? 1) };
+  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: face.transform?.flipX ?? false, scaleX: shellFlip };
 }
 export function makeBoundFaceAtVideo(project: { clips: Clip[] }, W: number, H: number) {
   return (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number): BoundFaceBox =>

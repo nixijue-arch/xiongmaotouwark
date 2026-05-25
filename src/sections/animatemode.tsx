@@ -21,6 +21,7 @@ import {
   Film, DoorOpen, LogOut, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
   Vibrate, Type as TypeIcon, ArrowLeftRight, ArrowUpDown, Layers, FileText,
   ImagePlus, AlertTriangle, Folder, Pencil, Check, Keyboard, Link2, Link2Off,
+  Waves, Rabbit, Wind, Orbit,   // 律动系 FX 图标
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,7 +31,7 @@ import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering, type M
 // import { ANIMATE_SCENES } from '@/data/animateScenes';  // 保留 file 备查, 不再 import
 import { composeMeme, getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { encodeGIFBlobFromProject, downloadBlob, captureFaceLocal, makeLoopMotionAt, loopMotionDelta } from '@/lib/gifloop';
+import { encodeGIFBlobFromProject, downloadBlob, captureFaceLocal } from '@/lib/gifloop';
 import { useMeme, type DraftSlot, type ImageElement, type TextElement, type MemeElement } from '@/context/memecontext';
 import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_LABELS } from '@/data/quickModeTexts';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -44,14 +45,13 @@ import {
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
   computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
   resolveBoundFaceBoxVideo, makeBoundFaceAtVideo, contentBboxFrac, computeImageBox,
-  LOOP_MOTIONS, LOOP_MOTION_PERIOD_VIDEO,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
   type ImageClip, type CaptionStyle,
   type CaptionClip, type TTSClip, type BGMClip, type FXClip, type Clip, type LaneCount,
   type ProjectMode, type GifPresetId, type ProjectState,
-  type MediaAsset, type FxApply, type LoopMotionKind,
+  type MediaAsset, type FxApply,
 } from '@/lib/animcore';
 import { GifMode } from '@/sections/gifmode';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
@@ -409,7 +409,7 @@ function playBGM(b: BGMPreset, volume: number, durationSec: number) {
 //   exit      — 出场动画, fade-out
 //   camera    — 场景运镜, 持续整 clip duration
 //   move      — 首尾帧 tween, 用 clip.endTransform 决定终点
-type FxGroup = 'enter' | 'emphasis' | 'exit' | 'camera' | 'move';
+type FxGroup = 'enter' | 'emphasis' | 'exit' | 'camera' | 'move' | 'rhythm';
 const FX_LIB: { id: ImageFx; name: string; icon: LucideIcon; desc: string; defaultDuration: number; group: FxGroup }[] = [
   // 入场
   { id: 'zoom',      name: '弹大',     icon: Maximize2,           desc: '从小弹到大入场',     defaultDuration: 0.8, group: 'enter' },
@@ -435,6 +435,14 @@ const FX_LIB: { id: ImageFx; name: string; icon: LucideIcon; desc: string; defau
   { id: 'ken-burns', name: 'Ken Burns', icon: Film,               desc: '推近 + 缓慢平移 (经典纪录片感)', defaultDuration: 4.0, group: 'camera' },
   // 移动 (首尾帧 tween)
   { id: 'move',      name: '移动',     icon: Move,                desc: '首尾帧 tween (右键素材可记录首尾帧)', defaultDuration: 2.0, group: 'move' },
+  // 律动 (从 GIF 循环动作融入 — 在 FX clip 时段内持续律动, 拖到时间轴特效行即生效; 时长越短律动越快, 强度可在属性面板调)
+  { id: 'bob',       name: '上下浮',   icon: ArrowUpDown,         desc: '上下轻轻浮动',        defaultDuration: 1.5, group: 'rhythm' },
+  { id: 'sway',      name: '摇摆',     icon: Waves,               desc: '左右摇头晃脑',        defaultDuration: 1.5, group: 'rhythm' },
+  { id: 'swing',     name: '钟摆',     icon: RotateCw,            desc: '钟摆式来回荡 (位移+转)', defaultDuration: 1.5, group: 'rhythm' },
+  { id: 'wobble',    name: '果冻晃',   icon: Vibrate,             desc: '果冻 Q 弹 (缩放+转)',  defaultDuration: 1.2, group: 'rhythm' },
+  { id: 'hop',       name: '横跳',     icon: Rabbit,              desc: '左右横跳带小跳',      defaultDuration: 1.5, group: 'rhythm' },
+  { id: 'float',     name: '8字漂',    icon: Wind,                desc: '8 字形漂移',          defaultDuration: 2.0, group: 'rhythm' },
+  { id: 'orbit',     name: '绕圈',     icon: Orbit,               desc: '原地绕小圈飘',        defaultDuration: 2.0, group: 'rhythm' },
 ];
 const FX_BY_ID = Object.fromEntries(FX_LIB.map(f => [f.id, f])) as Record<ImageFx, typeof FX_LIB[number]>;
 const FX_GROUP_META: Record<FxGroup, { label: string; icon: LucideIcon }> = {
@@ -443,6 +451,7 @@ const FX_GROUP_META: Record<FxGroup, { label: string; icon: LucideIcon }> = {
   exit:     { label: '出场',    icon: LogOut },
   camera:   { label: '运镜',    icon: Camera },
   move:     { label: '移动',    icon: Move },
+  rhythm:   { label: '律动',    icon: Waves },
 };
 const FX_LABEL: Record<ImageFx, string> = {
   none: '无', shake: '抖动', zoom: '弹大', flash: '闪光',
@@ -451,6 +460,7 @@ const FX_LABEL: Record<ImageFx, string> = {
   'pan-l': '镜头·向左', 'pan-r': '镜头·向右', 'pan-u': '镜头·向上', 'pan-d': '镜头·向下',
   'zoom-in': '镜头·推近', 'zoom-out': '镜头·拉远', 'ken-burns': 'Ken Burns',
   move: '移动',
+  bob: '上下浮', sway: '摇摆', swing: '钟摆', wobble: '果冻晃', hop: '横跳', float: '8字漂', orbit: '绕圈',
 };
 
 // PICSUM / SCENE_LIB → '@/lib/sharededitor' (E1 抽出, 12 scene)
@@ -1432,7 +1442,7 @@ async function exportVideo(
   }));
 
   // 第 0 帧先画 — 白底 (#fff), 跟视频预览画板一致 (默认黑 → 画面背景丑/穿透)
-  renderExportFrame(ctx, 0, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+  renderExportFrame(ctx, 0, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
 
   // Web Audio MediaStream — BGM + 用户录音 TTS 都路由进 audioStream
   // FIX MP4 配音越来越大: 导出前彻底销毁所有旧 TTS player + BGM
@@ -1500,7 +1510,7 @@ async function exportVideo(
     function step() {
       const elapsed = performance.now() - startTime;
       const t = Math.min(project.duration, elapsed / 1000);
-      renderExportFrame(ctx, t, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+      renderExportFrame(ctx, t, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
       onProgress(Math.min(1, elapsed / totalMs));
 
       // TTS + BGM 都录入 MP4 (gain 都接 exportDest). 走 sync 让 audio 跟 video 时钟严格对齐
@@ -1535,7 +1545,7 @@ async function exportVideo(
   });
 
   // 最后一帧 + 等 audio 收尾
-  renderExportFrame(ctx, project.duration, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+  renderExportFrame(ctx, project.duration, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
   await new Promise(r => setTimeout(r, hasAudio ? 400 : 100));
   recorder.stop();
   // FIX MP4 配音越来越大: 导出后 destroyAll (cancelAll + destroyAllTTSPlayers)
@@ -2271,18 +2281,6 @@ export function AnimateMode() {
     if (!selectedId) return;
     updateClipCommit(selectedId, patch);
   }, [selectedId, updateClipCommit]);
-  // 鬼畜动效 (loopMotion) 的目标层 = 选中的图层, 没选中就取首个图层 → 左栏「动效」面板能直接挑动作(不用先选层), 修可发现性
-  const videoMotionTarget = useMemo<ImageClip | null>(() => {
-    const isMotionable = (c: Clip) => c.trackId === 'image' && (c as ImageClip).kind !== 'scene';
-    if (selectedId) { const s = project.clips.find(c => c.id === selectedId && isMotionable(c)); if (s) return s as ImageClip; }
-    return (project.clips.find(isMotionable) as ImageClip | undefined) ?? null;
-  }, [selectedId, project.clips]);
-  const pickMotionVideo = useCallback((kind: LoopMotionKind) => {
-    const t = videoMotionTarget;
-    if (!t) { toast('先加个图层再加动效'); return; }
-    updateClipCommit(t.id, { loopMotion: kind === 'none' ? undefined : { kind, amp: t.loopMotion?.amp ?? 1, cycles: t.loopMotion?.cycles ?? 1 } });
-    if (!selectedId) setSelectedId(t.id);   // 自动选中 → 右侧属性面板也显该层(可调幅度/速度)
-  }, [videoMotionTarget, selectedId, updateClipCommit]);
   const patchSelectedTransform = useCallback((tPatch: Partial<Transform>) => {
     if (!selectedId) return;
     commit(p => ({
@@ -3496,8 +3494,6 @@ export function AnimateMode() {
           onAddClipsBatch={addClipsBatch}
           playhead={playhead}
           projectDuration={project.duration}
-          motionTarget={videoMotionTarget}
-          onPickMotion={pickMotionVideo}
         />
         <PreviewPane
           clips={project.clips}
@@ -4099,7 +4095,7 @@ function LeftPane({
   mode = 'video',
   initialSeg,
   uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddCombo, onAddDraftAsClips,
-  onAddClipsBatch, playhead, projectDuration, motionTarget, onPickMotion,
+  onAddClipsBatch, playhead, projectDuration,
 }: {
   mode?: ProjectMode;
   initialSeg?: LibSeg;
@@ -4114,8 +4110,6 @@ function LeftPane({
   onAddClipsBatch: (clips: Clip[]) => void;
   playhead: number;
   projectDuration: number;
-  motionTarget?: ImageClip | null;                 // 鬼畜动效目标层 (选中或首个图层), 视频「动效」tab 直接挑动作
-  onPickMotion?: (kind: LoopMotionKind) => void;
 }) {
   const { draftSlots } = useMeme();
   const isGif = mode === 'gif';
@@ -4574,37 +4568,13 @@ function LeftPane({
 
           {seg === 'fx' && (
             <div className="am-row-list">
-              {/* 鬼畜动效 (持续循环动作 loopMotion, 给图层) — 跟 GIF 同款; 点动作即套到选中/首个图层 → 修"在动效 tab 找不到鬼畜动效" */}
-              {onPickMotion && (
-                <>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#0a356d', margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>🫨 鬼畜动效 <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.7 }}>{motionTarget ? '· 持续循环 · 点即套图层' : '· 先加图层'}</span></div>
-                  {motionTarget ? (
-                    <>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                        {LOOP_MOTIONS.map(m => (
-                          <button key={m.kind} type="button" title={m.label}
-                            className={'am-chip' + ((motionTarget.loopMotion?.kind ?? 'none') === m.kind ? ' is-active' : '')}
-                            style={{ flex: '0 0 auto', fontSize: 11, padding: '4px 7px' }}
-                            onClick={() => onPickMotion(m.kind)}>
-                            {m.emoji} {m.label}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="am-empty-line am-empty-hint" style={{ marginTop: 0 }}>点动作 → 套到图层 · 幅度/速度在右侧属性面板调 · ▶ 播放看效果</p>
-                    </>
-                  ) : (
-                    <p className="am-empty-line am-empty-hint">先在「素材」加个图层, 再来挑持续动效 (上下浮/摇摆/弹跳/鬼畜…)</p>
-                  )}
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#0a356d', margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>✨ 动画特效 <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.7 }}>· 入场/强调/运镜 · 拖到时间轴</span></div>
-                </>
-              )}
               <div className="am-fx-group-tabs">
                 <button
                   type="button"
                   className={'am-fx-group-tab' + (fxGroup === 'all' ? ' is-active' : '')}
                   onClick={() => setFxGroup('all')}
                 >全部</button>
-                {(['enter', 'emphasis', 'exit', 'camera', 'move'] as FxGroup[]).map(g => {
+                {(['enter', 'emphasis', 'rhythm', 'exit', 'camera', 'move'] as FxGroup[]).map(g => {
                   const GIcon = FX_GROUP_META[g].icon;
                   return (
                     <button
@@ -5535,29 +5505,25 @@ function PreviewPane({
             const fxA: FxApply = editingFrozen
               ? { offsetX: 0, offsetY: 0, scaleMul: 1, rotateAdd: 0, alpha: 1, filter: '' }
               : rawFxA;
-            // 鬼畜循环动作 (跟 GIF 同款 loopMotion 字段) — 视频用固定周期 LOOP_MOTION_PERIOD_VIDEO 让动作可见 (不随片长稀释); 编辑选中(冻结)时不动跟手
-            const md = (!editingFrozen && c.loopMotion && c.loopMotion.kind !== 'none')
-              ? loopMotionDelta(c.loopMotion, time, LOOP_MOTION_PERIOD_VIDEO, canvasSize.w, canvasSize.h, tr)
-              : null;
             // 顽固 bug 终极修法 (v3) — 推翻 transform: scale + % 定位的 architecture
             //   旧: left:50%+tr.x%, transform: translate(-50%) scale(sx,sy) — 多层 % + scale 叠加, 易被 CSS edge cases 干扰
             //   新: 直接算 image bbox 在 canvas 内的绝对 px (left/top/width/height), transform 只 rotate
             //        跟 react-draggable (编辑器用的) 同理念 — 单一 source of truth, 不依赖任何 CSS scale 复合
             const naturalAspect = naturalAspects.get(c.id) ?? 1; // h/w
-            const totalRot = tr.rotation + fxA.rotateAdd + (md?.dRot ?? 0);
+            const totalRot = tr.rotation + fxA.rotateAdd;
             // v23-i: 删 scene 强制 z=0 — 按 lane 排 (lane 0 顶, 大 lane 底)
             const z = 10 - c.lane;
-            // image bbox px (含 tr.scale + fxA.scaleMul + loopMotion dScale):
-            const effectiveScale = tr.scale * fxA.scaleMul * (md?.dScale ?? 1);
+            // image bbox px (含 tr.scale + fxA.scaleMul):
+            const effectiveScale = tr.scale * fxA.scaleMul;
             // v23-i: scene 也乘 effectiveScale (用户痛点 "场景图片无法缩小或放大")
             // scene 默认 cover 整 canvas (scale=1), 放大 → 超出露出部分被 overflow:hidden 裁掉, 缩小 → 露出底层
             const eW = isScene
               ? canvasSize.w * effectiveScale
               : Math.min(canvasSize.w, canvasSize.h) * 0.6 * effectiveScale;
             const eH = isScene ? canvasSize.h * effectiveScale : eW * naturalAspect;
-            // image 中心 in canvas px (canvas 内部坐标; + loopMotion dx/dy)
-            const cx = canvasSize.w * (0.5 + tr.x / 100) + fxA.offsetX + (md?.dx ?? 0);
-            const cy = canvasSize.h * (0.5 + tr.y / 100) + fxA.offsetY + (md?.dy ?? 0);
+            // image 中心 in canvas px (canvas 内部坐标)
+            const cx = canvasSize.w * (0.5 + tr.x / 100) + fxA.offsetX;
+            const cy = canvasSize.h * (0.5 + tr.y / 100) + fxA.offsetY;
             // image 左上角 px
             const left = cx - eW / 2;
             const top = cy - eH / 2;
@@ -5606,7 +5572,7 @@ function PreviewPane({
                     height: '100%',
                     objectFit: isScene ? 'cover' : 'contain',
                     display: 'block',
-                    transform: (tr.flipX || (md?.dScaleX ?? 1) !== 1) ? `scaleX(${((tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1)).toFixed(4)})` : undefined,
+                    transform: tr.flipX ? 'scaleX(-1)' : undefined,
                   }}
                 />
                 {isSel && (
@@ -6330,42 +6296,7 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
           <div className="am-field-sublabel">{bound ? '表情已绑壳 · 调壳脸跟着动 (给壳加特效脸也跟随)' : '绑到熊猫头壳后, 移动/旋转/缩放壳, 脸自动跟随'}</div>
         </Field>
       )}
-      {/* 鬼畜动效 — 跟 GIF 同款的 16 个持续循环动作 (loopMotion). 视频用固定周期 → 动作可见; 跟 FX 轨叠加. */}
-      {!isScene && (() => {
-        const lm = clip.loopMotion;
-        const cur = lm?.kind ?? 'none';
-        return (
-          <Field label="鬼畜动效">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {LOOP_MOTIONS.map(m => (
-                <button key={m.kind} type="button" title={m.label}
-                  className={'am-chip' + (cur === m.kind ? ' is-active' : '')}
-                  style={{ flex: '0 0 auto', fontSize: 11, padding: '4px 7px' }}
-                  onClick={() => onUpdate({ loopMotion: m.kind === 'none' ? undefined : { kind: m.kind, amp: lm?.amp ?? 1, cycles: lm?.cycles ?? 1 } })}>
-                  {m.emoji} {m.label}
-                </button>
-              ))}
-            </div>
-            {lm && lm.kind !== 'none' && (
-              <>
-                <div className="am-row am-row-tight" style={{ marginTop: 6 }}>
-                  <span style={{ fontSize: 11, minWidth: 30 }}>幅度</span>
-                  <input type="range" min={0.2} max={2} step={0.05} value={lm.amp} className="am-range"
-                    onChange={e => onUpdate({ loopMotion: { ...lm, amp: parseFloat(e.target.value) } })} />
-                  <b style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}>{lm.amp.toFixed(2)}</b>
-                </div>
-                <div className="am-row am-row-tight">
-                  <span style={{ fontSize: 11, minWidth: 30 }}>速度</span>
-                  <input type="range" min={1} max={8} step={1} value={lm.cycles} className="am-range"
-                    onChange={e => onUpdate({ loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} />
-                  <b style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}>{lm.cycles}x</b>
-                </div>
-              </>
-            )}
-            <div className="am-field-sublabel">持续循环动作 (上下浮 / 摇摆 / 抖…) · 跟 FX 特效叠加 · 给壳加, 绑定脸会一起动</div>
-          </Field>
-        );
-      })()}
+      {/* 律动/鬼畜动效不在这里 — 已融入左栏「动效」库 (拖到时间轴特效行, 跟其它 FX 一样作用到图层) */}
       {/* v23-f: 删除 "自带特效" Field (chips 入场/强调/出场/运镜) — 改用独立 FX 时间轴, 防混淆 */}
       {/* 想给 image 加 fade-in / shake / pan / zoom 等? 拖 LeftPane "动画特效" 到 FX 时间轴, 然后在 FXProps Inspector 选 "作用对象" 绑定到这个 image */}
       <Field label="标签">
@@ -7410,11 +7341,9 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
               const tr = getTransform(c);
               const fxInfo = effectiveFxFor(c, playhead, project.clips);
               const fxA = computeFx(fxInfo.fx, fxInfo.fxStart, fxInfo.fxDur, playhead, canvasSize.w, fxInfo.fxClip);
-              // 鬼畜循环动作 — 跟主预览/导出一致, 全屏预览也动
-              const md = (c.loopMotion && c.loopMotion.kind !== 'none') ? loopMotionDelta(c.loopMotion, playhead, LOOP_MOTION_PERIOD_VIDEO, canvasSize.w, canvasSize.h, tr) : null;
-              const sx = baseScale * tr.scale * fxA.scaleMul * (md?.dScale ?? 1) * (tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1);
-              const sy = baseScale * tr.scale * fxA.scaleMul * (md?.dScale ?? 1);
-              const totalRot = tr.rotation + fxA.rotateAdd + (md?.dRot ?? 0);
+              const sx = baseScale * tr.scale * fxA.scaleMul * (tr.flipX ? -1 : 1);
+              const sy = baseScale * tr.scale * fxA.scaleMul;
+              const totalRot = tr.rotation + fxA.rotateAdd;
               return (
                 <div
                   key={c.id}
@@ -7422,7 +7351,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
                   style={{
                     left: `${50 + tr.x}%`,
                     top: `${50 + tr.y}%`,
-                    transform: `translate(calc(-50% + ${fxA.offsetX + (md?.dx ?? 0)}px), calc(-50% + ${fxA.offsetY + (md?.dy ?? 0)}px)) scale(${sx}, ${sy}) rotate(${totalRot}deg)`,
+                    transform: `translate(calc(-50% + ${fxA.offsetX}px), calc(-50% + ${fxA.offsetY}px)) scale(${sx}, ${sy}) rotate(${totalRot}deg)`,
                     opacity: fxA.alpha,
                     filter: fxA.filter || undefined,
                     zIndex: 10 - c.lane,
