@@ -51,7 +51,7 @@ import {
   type ImageClip, type CaptionStyle,
   type CaptionClip, type TTSClip, type BGMClip, type FXClip, type Clip, type LaneCount,
   type ProjectMode, type GifPresetId, type ProjectState,
-  type MediaAsset, type FxApply,
+  type MediaAsset, type FxApply, type LoopMotionKind,
 } from '@/lib/animcore';
 import { GifMode } from '@/sections/gifmode';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
@@ -2271,6 +2271,18 @@ export function AnimateMode() {
     if (!selectedId) return;
     updateClipCommit(selectedId, patch);
   }, [selectedId, updateClipCommit]);
+  // 鬼畜动效 (loopMotion) 的目标层 = 选中的图层, 没选中就取首个图层 → 左栏「动效」面板能直接挑动作(不用先选层), 修可发现性
+  const videoMotionTarget = useMemo<ImageClip | null>(() => {
+    const isMotionable = (c: Clip) => c.trackId === 'image' && (c as ImageClip).kind !== 'scene';
+    if (selectedId) { const s = project.clips.find(c => c.id === selectedId && isMotionable(c)); if (s) return s as ImageClip; }
+    return (project.clips.find(isMotionable) as ImageClip | undefined) ?? null;
+  }, [selectedId, project.clips]);
+  const pickMotionVideo = useCallback((kind: LoopMotionKind) => {
+    const t = videoMotionTarget;
+    if (!t) { toast('先加个图层再加动效'); return; }
+    updateClipCommit(t.id, { loopMotion: kind === 'none' ? undefined : { kind, amp: t.loopMotion?.amp ?? 1, cycles: t.loopMotion?.cycles ?? 1 } });
+    if (!selectedId) setSelectedId(t.id);   // 自动选中 → 右侧属性面板也显该层(可调幅度/速度)
+  }, [videoMotionTarget, selectedId, updateClipCommit]);
   const patchSelectedTransform = useCallback((tPatch: Partial<Transform>) => {
     if (!selectedId) return;
     commit(p => ({
@@ -3484,6 +3496,8 @@ export function AnimateMode() {
           onAddClipsBatch={addClipsBatch}
           playhead={playhead}
           projectDuration={project.duration}
+          motionTarget={videoMotionTarget}
+          onPickMotion={pickMotionVideo}
         />
         <PreviewPane
           clips={project.clips}
@@ -4085,7 +4099,7 @@ function LeftPane({
   mode = 'video',
   initialSeg,
   uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddCombo, onAddDraftAsClips,
-  onAddClipsBatch, playhead, projectDuration,
+  onAddClipsBatch, playhead, projectDuration, motionTarget, onPickMotion,
 }: {
   mode?: ProjectMode;
   initialSeg?: LibSeg;
@@ -4100,6 +4114,8 @@ function LeftPane({
   onAddClipsBatch: (clips: Clip[]) => void;
   playhead: number;
   projectDuration: number;
+  motionTarget?: ImageClip | null;                 // 鬼畜动效目标层 (选中或首个图层), 视频「动效」tab 直接挑动作
+  onPickMotion?: (kind: LoopMotionKind) => void;
 }) {
   const { draftSlots } = useMeme();
   const isGif = mode === 'gif';
@@ -4558,6 +4574,30 @@ function LeftPane({
 
           {seg === 'fx' && (
             <div className="am-row-list">
+              {/* 鬼畜动效 (持续循环动作 loopMotion, 给图层) — 跟 GIF 同款; 点动作即套到选中/首个图层 → 修"在动效 tab 找不到鬼畜动效" */}
+              {onPickMotion && (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#0a356d', margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>🫨 鬼畜动效 <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.7 }}>{motionTarget ? '· 持续循环 · 点即套图层' : '· 先加图层'}</span></div>
+                  {motionTarget ? (
+                    <>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                        {LOOP_MOTIONS.map(m => (
+                          <button key={m.kind} type="button" title={m.label}
+                            className={'am-chip' + ((motionTarget.loopMotion?.kind ?? 'none') === m.kind ? ' is-active' : '')}
+                            style={{ flex: '0 0 auto', fontSize: 11, padding: '4px 7px' }}
+                            onClick={() => onPickMotion(m.kind)}>
+                            {m.emoji} {m.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="am-empty-line am-empty-hint" style={{ marginTop: 0 }}>点动作 → 套到图层 · 幅度/速度在右侧属性面板调 · ▶ 播放看效果</p>
+                    </>
+                  ) : (
+                    <p className="am-empty-line am-empty-hint">先在「素材」加个图层, 再来挑持续动效 (上下浮/摇摆/弹跳/鬼畜…)</p>
+                  )}
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#0a356d', margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>✨ 动画特效 <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.7 }}>· 入场/强调/运镜 · 拖到时间轴</span></div>
+                </>
+              )}
               <div className="am-fx-group-tabs">
                 <button
                   type="button"

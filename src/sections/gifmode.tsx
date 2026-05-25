@@ -1850,45 +1850,51 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 onClick={() => setProject(p => ({ ...p, loop: { ...p.loop, onionSkin: !p.loop.onionSkin } }))}>
                 <span className="gm-motion-emoji"><Eye size={13} /></span>洋葱皮 · 看首尾对齐
               </button>
-              <div className="gm-sec-title" style={{ marginTop: 12 }}>每层动作 <span className="gm-hint">{selImg ? '(给选中图层加)' : '(先选图层)'}</span></div>
-              {selImg ? (() => { const s: ImageClip = selImg; const lm = s.loopMotion; return (
-                <>
-                  <div className="gm-motionpop-grid">
-                    {LOOP_MOTIONS.map(m => (
-                      <button key={m.kind} type="button" title={m.label}
-                        className={'gm-motionpop-btn' + (lm?.kind === m.kind ? ' active' : '')}
-                        onClick={() => setLayerMotion(s.id, m.kind)}>
-                        <span className="gm-motionpop-emoji">{m.emoji}</span>{m.label}
+              <div className="gm-sec-title" style={{ marginTop: 12 }}>每层动作 <span className="gm-hint">{selImg ? '(给选中图层)' : imageClips.length ? '(给首个图层 · 点时间轴选其他)' : '(先加图层)'}</span></div>
+              {(() => {
+                const s = (selImg ?? imageClips[0]) as ImageClip | undefined;   // 没选中就默认首个图层 → 动效面板始终可见可用 (修"看不到区别")
+                if (!s) return (
+                  <div className="gm-fx-tlhint">
+                    <span className="gm-fx-tlhint-ico">👆</span>
+                    <div>先在<b>素材</b>加一个图层, 再来挑动作 (上下浮 / 摇摆 / 弹跳 / 鬼畜…)。</div>
+                  </div>
+                );
+                const lm = s.loopMotion;
+                const pick = (kind: LoopMotionKind) => { setLayerMotion(s.id, kind); if (!selectedId) setSelectedId(s.id); };
+                return (
+                  <>
+                    <div className="gm-motionpop-grid">
+                      {LOOP_MOTIONS.map(m => (
+                        <button key={m.kind} type="button" title={m.label}
+                          className={'gm-motionpop-btn' + (lm?.kind === m.kind ? ' active' : '')}
+                          onClick={() => pick(m.kind)}>
+                          <span className="gm-motionpop-emoji">{m.emoji}</span>{m.label}
+                        </button>
+                      ))}
+                      <button type="button" title="自定义移动 A→B (画板拖两点)"
+                        className={'gm-motionpop-btn gm-motionpop-custom' + (lm?.kind === 'customMove' ? ' active' : '')}
+                        onClick={() => { setLayerMotion(s.id, 'customMove'); setSelectedId(s.id); setCustomEdit(true); }}>
+                        <span className="gm-motionpop-emoji">🎯</span>自定义
                       </button>
-                    ))}
-                    <button type="button" title="自定义移动 A→B (画板拖两点)"
-                      className={'gm-motionpop-btn gm-motionpop-custom' + (lm?.kind === 'customMove' ? ' active' : '')}
-                      onClick={() => { setLayerMotion(s.id, 'customMove'); setCustomEdit(true); }}>
-                      <span className="gm-motionpop-emoji">🎯</span>自定义
-                    </button>
-                  </div>
-                  {lm && lm.kind !== 'none' && (
-                    <div className="gm-motionpop-sliders">
-                      <label className="gm-fx-num">幅度<input type="range" min={0.2} max={2} step={0.05} value={lm.amp}
-                        onChange={e => patchClip(s.id, { loopMotion: { ...lm, amp: parseFloat(e.target.value) } })} /><b>{lm.amp.toFixed(2)}</b></label>
-                      <label className="gm-fx-num">速度<input type="range" min={1} max={8} step={1} value={lm.cycles}
-                        onChange={e => patchClip(s.id, { loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} /><b>{lm.cycles}x</b></label>
                     </div>
-                  )}
-                  {lm && lm.kind !== 'none' && (
-                    <button type="button" className="am-tb-btn" style={{ width: '100%', marginTop: 6, justifyContent: 'center' }} onClick={applyMotionToAll}>动作 → 全部图层</button>
-                  )}
-                  <div className="gm-fx-tlhint" style={{ marginTop: 8 }}>
-                    <span className="gm-fx-tlhint-ico">🫨</span>
-                    <div>每层<b>时间轴</b>也带<b>动效子轨</b>, 可单独给某层某时段设不同动作 (切两段)。</div>
-                  </div>
-                </>
-              ); })() : (
-                <div className="gm-fx-tlhint">
-                  <span className="gm-fx-tlhint-ico">👆</span>
-                  <div>先在<b>素材</b>加图层, 或点下方<b>时间轴</b>选中一层, 再来挑动作 (上下浮 / 摇摆 / 弹跳 / 鬼畜…)。</div>
-                </div>
-              )}
+                    {lm && lm.kind !== 'none' && (
+                      <div className="gm-motionpop-sliders">
+                        <label className="gm-fx-num">幅度<input type="range" min={0.2} max={2} step={0.05} value={lm.amp}
+                          onChange={e => patchClip(s.id, { loopMotion: { ...lm, amp: parseFloat(e.target.value) } })} /><b>{lm.amp.toFixed(2)}</b></label>
+                        <label className="gm-fx-num">速度<input type="range" min={1} max={8} step={1} value={lm.cycles}
+                          onChange={e => patchClip(s.id, { loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} /><b>{lm.cycles}x</b></label>
+                      </div>
+                    )}
+                    {lm && lm.kind !== 'none' && (
+                      <button type="button" className="am-tb-btn" style={{ width: '100%', marginTop: 6, justifyContent: 'center' }} onClick={applyMotionToAll}>动作 → 全部图层</button>
+                    )}
+                    <div className="gm-fx-tlhint" style={{ marginTop: 8 }}>
+                      <span className="gm-fx-tlhint-ico">🫨</span>
+                      <div>选好动作点 <b>▶ 播放</b> 看效果。每层<b>时间轴</b>也带<b>动效子轨</b>, 可单独给某层某时段设不同动作。</div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
         </aside>
