@@ -2735,11 +2735,18 @@ export function AnimateMode() {
       }
     } else {
       const slot = findNextSlotOnLane0(type, project.clips, playheadRef.current, dur, project.duration);
-      if (!slot) {
+      if (slot) { start = slot.start; end = slot.end; lane = 0; }
+      else if (type === 'fx') {
+        // FX 轨 0 在游标处放不下 → 开新 FX 轨叠加 (FX 可多轨, effectiveFxFor 跨轨找 active) → 点特效不再"放不下"卡死 (随机后 FX 轨已被 4 段填满)
+        const newLane = project.lanes.fx;
+        start = Math.max(0, Math.min(playheadRef.current, Math.max(0, project.duration - dur)));
+        end = Math.min(project.duration, start + dur);
+        lane = newLane;
+        commit(p => ({ ...p, lanes: { ...p.lanes, fx: newLane + 1 } }));
+      } else {
         toast.error(`时长 ${project.duration.toFixed(1)}s 内放不下, 请用 ⏱ 加长时长 / 或拖到指定轨叠加`);
         return;
       }
-      start = slot.start; end = slot.end; lane = 0;
     }
     const id = uid(type[0]);
     let clip: Clip;
@@ -2766,8 +2773,8 @@ export function AnimateMode() {
       // v23-k: 修默认 target — 优先非 scene (= panda/face) + lane 最低 (= 视觉最顶层)
       let targetImage: ImageClip | undefined = sel?.trackId === 'image' ? (sel as ImageClip) : undefined;
       if (!targetImage) {
-        const ph = playheadRef.current;
-        const candidates = project.clips.filter(c => c.trackId === 'image' && ph >= c.start && ph < c.end) as ImageClip[];
+        // 用 FX clip 落点时段 [start,end] 找重叠图层 (不只看 playhead) → target 跟 FX 实际生效时段匹配, 不会"作用在看不到的层"
+        const candidates = project.clips.filter(c => c.trackId === 'image' && c.start < end && c.end > start) as ImageClip[];
         targetImage = candidates.length > 0
           ? candidates.sort((a, b) => {
               const aScene = a.kind === 'scene' ? 1 : 0;
@@ -2776,6 +2783,16 @@ export function AnimateMode() {
               return a.lane - b.lane;                          // lane 低 (顶层) 先
             })[0]
           : undefined;
+      }
+      // 仍无 target (没选中 + 游标不在任何图层上) → 回退第一个非 scene 图层, 并把 FX 时段挪进它范围
+      //   修"点特效/动效像没反应": 随机后游标在 0、段从 0.3 起最常见 → 否则 FX 作用于 undefined, 既不动也无 toast
+      if (!targetImage) {
+        const imgs = project.clips.filter(c => c.trackId === 'image' && (c as ImageClip).kind !== 'scene') as ImageClip[];
+        const first = imgs.sort((a, b) => a.start - b.start)[0] ?? (project.clips.find(c => c.trackId === 'image') as ImageClip | undefined);
+        if (!first) { toast.warning('先在「素材」加个图层, 再加特效/动效'); return; }
+        targetImage = first;
+        start = first.start;
+        end = Math.min(first.end, first.start + dur);
       }
       const targetTr = targetImage?.transform ?? DEFAULT_TRANSFORM;
       const fxBase: FXClip = { id, trackId: 'fx', lane, start, end, fx: fxKind, targetClipId: targetImage?.id };
@@ -6497,8 +6514,8 @@ function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<st
   const zoomFrom = clip.zoomFrom ?? (fx === 'zoom' ? 0.3 : 1.0);
   const zoomTo = clip.zoomTo ?? 1.25;
   const spinTurns = clip.spinTurns ?? 1;
-  // 强度类 (shake/flash/pulse/glitch 共用)
-  const strengthGroup: ImageFx[] = ['shake', 'flash', 'pulse', 'glitch'];
+  // 强度类 (shake/flash/pulse/glitch + 律动系 共用单 strength = 幅度滑块) — 律动 FX 也要能调幅度
+  const strengthGroup: ImageFx[] = ['shake', 'flash', 'pulse', 'glitch', 'bob', 'sway', 'swing', 'wobble', 'hop', 'float', 'orbit'];
   const panGroup: ImageFx[] = ['pan-l', 'pan-r', 'pan-u', 'pan-d'];
   const enterStrengthGroup: ImageFx[] = ['slide-l', 'slide-r', 'bounce'];
   return (

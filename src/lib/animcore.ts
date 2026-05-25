@@ -502,7 +502,9 @@ export function computeFx(fx: ImageFx, fxStart: number, fxDur: number, t: number
   // 律动系 FX — 复用 loopMotionDelta (GIF 循环动作): FX clip 时段当周期 + strength 当幅度 + 内置 cycles=2 (clip 内振 2 次);
   //   时间钳到 [0,dur] → progress 到 1 (及 FX-hold 之后) u 回 0 = 基准, 跟其它 FX 一样无跳变.
   if (MOTION_FX.has(fx)) {
-    const md = loopMotionDelta({ kind: fx as LoopMotionKind, amp: k, cycles: 2 }, Math.min(enterT, dur), dur, W, W);
+    // cycles 跟 clip 时长成正比 (≈1.4 次/秒) → 律动速度恒定, 不会"拖长 FX 就变慢/稀疏"; 整数保证 u=1 回基准无跳
+    const cyc = Math.max(1, Math.round(dur / 0.7));
+    const md = loopMotionDelta({ kind: fx as LoopMotionKind, amp: k, cycles: cyc }, Math.min(enterT, dur), dur, W, W);
     out.offsetX = md.dx; out.offsetY = md.dy; out.scaleMul = md.dScale; out.rotateAdd = md.dRot;
     return out;
   }
