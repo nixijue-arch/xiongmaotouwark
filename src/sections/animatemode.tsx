@@ -30,7 +30,7 @@ import { ALL_PANDAS, ALL_FACES, getLivePandaFaceOffset, getShellLayering, type M
 // import { ANIMATE_SCENES } from '@/data/animateScenes';  // 保留 file 备查, 不再 import
 import { composeMeme, getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { makeDraftThumb } from '@/lib/thumbutil';
-import { encodeGIFBlobFromProject, downloadBlob, captureFaceLocal } from '@/lib/gifloop';
+import { encodeGIFBlobFromProject, downloadBlob, captureFaceLocal, makeLoopMotionAt, loopMotionDelta } from '@/lib/gifloop';
 import { useMeme, type DraftSlot, type ImageElement, type TextElement, type MemeElement } from '@/context/memecontext';
 import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_LABELS } from '@/data/quickModeTexts';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
@@ -44,6 +44,7 @@ import {
   effectiveFxFor, initFXDefaults, computeFx, computeLiveTransform,
   computeCaptionEntrance, renderExportFrame, fitCaptionFontPx, captionAvailH,
   resolveBoundFaceBoxVideo, makeBoundFaceAtVideo, contentBboxFrac, computeImageBox,
+  LOOP_MOTIONS, LOOP_MOTION_PERIOD_VIDEO,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM, DEFAULT_CAPTION_STYLE,
   GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION,
   type TrackType, type ImageFx, type AspectId, type Transform, type BaseClip,
@@ -206,6 +207,7 @@ async function playYoudao(text: string, lang: 'zh' | 'en' = 'zh'): Promise<void>
 //   失败 (某些网络拦 bing wss) → 回退代理/youdao/baidu. 连续失败 2 次本会话停用直连 (免每条等超时).
 // ============================================================
 let _edgeTTSFails = 0;
+let _edgeTTSLastFail = 0;   // 冷却用: 连续失败暂停直连, 但 60s 后重试 (网络恢复就回到真 Azure) — 审计 B5
 function _escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
@@ -264,13 +266,16 @@ async function fetchEdgeTTSDirect(text: string, voiceName: string): Promise<stri
 // 所有 fetch (auto-gen / VoiceRow 试听 / Inspector 试听+生成) 都用这个, 保证一致性
 async function fetchTTSForVoice(text: string, voice: VoicePreset): Promise<{ dataUrl: string; engine: 'youdao' | 'baidu' | 'proxy' | 'edge' }> {
   // 1. 浏览器直连 edge-tts (真 Azure 语音, 各用户自己 IP, 零 VPS, 可录进 MP4) — 首选.
-  if (_edgeTTSFails < 2) {
+  //    连续失败 2 次本会话暂停直连 (免每条等超时), 但 60s 冷却后重试 → 网络抖动恢复仍回到真 Azure, 不永久降级 (审计 B5).
+  if (_edgeTTSFails < 2 || Date.now() - _edgeTTSLastFail > 60_000) {
+    if (_edgeTTSFails >= 2) _edgeTTSFails = 0;   // 冷却到期 → 重置计数, 给 edge 新机会
     try {
       const dataUrl = await fetchEdgeTTSDirect(text, voice.azureName);
       _edgeTTSFails = 0;
       return { dataUrl, engine: 'edge' };
     } catch (e) {
       _edgeTTSFails++;
+      _edgeTTSLastFail = Date.now();
       // eslint-disable-next-line no-console
       console.warn(`[TTS] edge-tts 直连失败 (${_edgeTTSFails}/2), 试代理/云端 (${voice.id}):`, (e as Error)?.message);
     }
@@ -1307,6 +1312,10 @@ function pickBestMime(preferMp4 = false): { mime: string; ext: 'mp4' | 'webm' } 
     { mime: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4' as const },
     { mime: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4' as const },
     { mime: 'video/mp4;codecs=h264,aac', ext: 'mp4' as const },
+    // iOS Safari (14.3+) 实测: 带精确 codec 串的 isTypeSupported 常返 false, 但泛型 'video/mp4' / video-only 'avc1' 返 true
+    //   (Apple 对 codec 串保守). 补这两个 → iPhone 也能录出 mp4 (修"手机视频导出失败只能 GIF"); 泛型 mp4 iOS 会带 H.264+AAC.
+    { mime: 'video/mp4;codecs=avc1', ext: 'mp4' as const },
+    { mime: 'video/mp4', ext: 'mp4' as const },
   ];
   const order = preferMp4
     ? [...mp4Candidates, ...webmCandidates]
@@ -1423,7 +1432,7 @@ async function exportVideo(
   }));
 
   // 第 0 帧先画 — 白底 (#fff), 跟视频预览画板一致 (默认黑 → 画面背景丑/穿透)
-  renderExportFrame(ctx, 0, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+  renderExportFrame(ctx, 0, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
 
   // Web Audio MediaStream — BGM + 用户录音 TTS 都路由进 audioStream
   // FIX MP4 配音越来越大: 导出前彻底销毁所有旧 TTS player + BGM
@@ -1491,7 +1500,7 @@ async function exportVideo(
     function step() {
       const elapsed = performance.now() - startTime;
       const t = Math.min(project.duration, elapsed / 1000);
-      renderExportFrame(ctx, t, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+      renderExportFrame(ctx, t, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
       onProgress(Math.min(1, elapsed / totalMs));
 
       // TTS + BGM 都录入 MP4 (gain 都接 exportDest). 走 sync 让 audio 跟 video 时钟严格对齐
@@ -1526,7 +1535,7 @@ async function exportVideo(
   });
 
   // 最后一帧 + 等 audio 收尾
-  renderExportFrame(ctx, project.duration, project, W, H, imgCache, undefined, '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
+  renderExportFrame(ctx, project.duration, project, W, H, imgCache, makeLoopMotionAt(LOOP_MOTION_PERIOD_VIDEO, W, H), '#ffffff', 'all', makeBoundFaceAtVideo(project, W, H));
   await new Promise(r => setTimeout(r, hasAudio ? 400 : 100));
   recorder.stop();
   // FIX MP4 配音越来越大: 导出后 destroyAll (cancelAll + destroyAllTTSPlayers)
@@ -1559,7 +1568,7 @@ export async function exportGIF(
   project: ProjectState,
   name: string,
   onProgress: (p: number) => void,
-  presetId: GifPresetId = 'wechat',
+  presetId: GifPresetId = 'x',   // 默认高清 (跟 GIF_PRESETS 默认一致); 实际调用都显式传 gifPresetId
 ): Promise<{ ext: string; size: number; width: number; height: number; fps: number; frameCount: number; durationSec: number }> {
   // 委托 gifloop 统一编码器 — 跟 GIF 板块同 quality5 + FloydSteinberg 抖动 + 超采样 + 白底,
   // 且自带 releaseImgCache (帧画布用完即放). 视频 GIF 导出 = normal 循环, 无 loopMotion → 线性渲染 (等价旧逻辑).
@@ -1804,6 +1813,8 @@ export function AnimateMode() {
         });
         if (!importRes.confirmed) return;
         setProject(hydrated.project);
+        // 视图对齐导入项目的 mode (防 import 视频项目到 GIF 视图 / 反之 → view 跟 project.mode 错位, sanitize/playback 半态) — 审计 B2
+        { const m = hydrated.project.mode ?? 'video'; setView(m); try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ } }
         setPlayhead(0);
         setSelectedId(null);
         historyRef.current = { past: [], future: [] };
@@ -3454,8 +3465,9 @@ export function AnimateMode() {
         mode={view}
         onModeChange={(m) => {
           // 融入: 视频/GIF 只切视图 (GIF 视图渲 GifMode 循环编辑器), 无确认弹窗.
-          setView(m);
           setIsPlaying(false);
+          audioEngine.destroyAll();   // 切到 GIF 视图必须显式停所有 TTS/BGM 播放器 (playback guard 只拦"新起", 不停"已在响的") — 审计 B1
+          setView(m);
           try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ }
         }}
       />
@@ -5483,25 +5495,29 @@ function PreviewPane({
             const fxA: FxApply = editingFrozen
               ? { offsetX: 0, offsetY: 0, scaleMul: 1, rotateAdd: 0, alpha: 1, filter: '' }
               : rawFxA;
+            // 鬼畜循环动作 (跟 GIF 同款 loopMotion 字段) — 视频用固定周期 LOOP_MOTION_PERIOD_VIDEO 让动作可见 (不随片长稀释); 编辑选中(冻结)时不动跟手
+            const md = (!editingFrozen && c.loopMotion && c.loopMotion.kind !== 'none')
+              ? loopMotionDelta(c.loopMotion, time, LOOP_MOTION_PERIOD_VIDEO, canvasSize.w, canvasSize.h, tr)
+              : null;
             // 顽固 bug 终极修法 (v3) — 推翻 transform: scale + % 定位的 architecture
             //   旧: left:50%+tr.x%, transform: translate(-50%) scale(sx,sy) — 多层 % + scale 叠加, 易被 CSS edge cases 干扰
             //   新: 直接算 image bbox 在 canvas 内的绝对 px (left/top/width/height), transform 只 rotate
             //        跟 react-draggable (编辑器用的) 同理念 — 单一 source of truth, 不依赖任何 CSS scale 复合
             const naturalAspect = naturalAspects.get(c.id) ?? 1; // h/w
-            const totalRot = tr.rotation + fxA.rotateAdd;
+            const totalRot = tr.rotation + fxA.rotateAdd + (md?.dRot ?? 0);
             // v23-i: 删 scene 强制 z=0 — 按 lane 排 (lane 0 顶, 大 lane 底)
             const z = 10 - c.lane;
-            // image bbox px (含 tr.scale + fxA.scaleMul):
-            const effectiveScale = tr.scale * fxA.scaleMul;
+            // image bbox px (含 tr.scale + fxA.scaleMul + loopMotion dScale):
+            const effectiveScale = tr.scale * fxA.scaleMul * (md?.dScale ?? 1);
             // v23-i: scene 也乘 effectiveScale (用户痛点 "场景图片无法缩小或放大")
             // scene 默认 cover 整 canvas (scale=1), 放大 → 超出露出部分被 overflow:hidden 裁掉, 缩小 → 露出底层
             const eW = isScene
               ? canvasSize.w * effectiveScale
               : Math.min(canvasSize.w, canvasSize.h) * 0.6 * effectiveScale;
             const eH = isScene ? canvasSize.h * effectiveScale : eW * naturalAspect;
-            // image 中心 in canvas px (canvas 内部坐标)
-            const cx = canvasSize.w * (0.5 + tr.x / 100) + fxA.offsetX;
-            const cy = canvasSize.h * (0.5 + tr.y / 100) + fxA.offsetY;
+            // image 中心 in canvas px (canvas 内部坐标; + loopMotion dx/dy)
+            const cx = canvasSize.w * (0.5 + tr.x / 100) + fxA.offsetX + (md?.dx ?? 0);
+            const cy = canvasSize.h * (0.5 + tr.y / 100) + fxA.offsetY + (md?.dy ?? 0);
             // image 左上角 px
             const left = cx - eW / 2;
             const top = cy - eH / 2;
@@ -5550,7 +5566,7 @@ function PreviewPane({
                     height: '100%',
                     objectFit: isScene ? 'cover' : 'contain',
                     display: 'block',
-                    transform: tr.flipX ? 'scaleX(-1)' : undefined,
+                    transform: (tr.flipX || (md?.dScaleX ?? 1) !== 1) ? `scaleX(${((tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1)).toFixed(4)})` : undefined,
                   }}
                 />
                 {isSel && (
@@ -6274,6 +6290,42 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
           <div className="am-field-sublabel">{bound ? '表情已绑壳 · 调壳脸跟着动 (给壳加特效脸也跟随)' : '绑到熊猫头壳后, 移动/旋转/缩放壳, 脸自动跟随'}</div>
         </Field>
       )}
+      {/* 鬼畜动效 — 跟 GIF 同款的 16 个持续循环动作 (loopMotion). 视频用固定周期 → 动作可见; 跟 FX 轨叠加. */}
+      {!isScene && (() => {
+        const lm = clip.loopMotion;
+        const cur = lm?.kind ?? 'none';
+        return (
+          <Field label="鬼畜动效">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {LOOP_MOTIONS.map(m => (
+                <button key={m.kind} type="button" title={m.label}
+                  className={'am-chip' + (cur === m.kind ? ' is-active' : '')}
+                  style={{ flex: '0 0 auto', fontSize: 11, padding: '4px 7px' }}
+                  onClick={() => onUpdate({ loopMotion: m.kind === 'none' ? undefined : { kind: m.kind, amp: lm?.amp ?? 1, cycles: lm?.cycles ?? 1 } })}>
+                  {m.emoji} {m.label}
+                </button>
+              ))}
+            </div>
+            {lm && lm.kind !== 'none' && (
+              <>
+                <div className="am-row am-row-tight" style={{ marginTop: 6 }}>
+                  <span style={{ fontSize: 11, minWidth: 30 }}>幅度</span>
+                  <input type="range" min={0.2} max={2} step={0.05} value={lm.amp} className="am-range"
+                    onChange={e => onUpdate({ loopMotion: { ...lm, amp: parseFloat(e.target.value) } })} />
+                  <b style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}>{lm.amp.toFixed(2)}</b>
+                </div>
+                <div className="am-row am-row-tight">
+                  <span style={{ fontSize: 11, minWidth: 30 }}>速度</span>
+                  <input type="range" min={1} max={8} step={1} value={lm.cycles} className="am-range"
+                    onChange={e => onUpdate({ loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} />
+                  <b style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}>{lm.cycles}x</b>
+                </div>
+              </>
+            )}
+            <div className="am-field-sublabel">持续循环动作 (上下浮 / 摇摆 / 抖…) · 跟 FX 特效叠加 · 给壳加, 绑定脸会一起动</div>
+          </Field>
+        );
+      })()}
       {/* v23-f: 删除 "自带特效" Field (chips 入场/强调/出场/运镜) — 改用独立 FX 时间轴, 防混淆 */}
       {/* 想给 image 加 fade-in / shake / pan / zoom 等? 拖 LeftPane "动画特效" 到 FX 时间轴, 然后在 FXProps Inspector 选 "作用对象" 绑定到这个 image */}
       <Field label="标签">
@@ -7318,9 +7370,11 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
               const tr = getTransform(c);
               const fxInfo = effectiveFxFor(c, playhead, project.clips);
               const fxA = computeFx(fxInfo.fx, fxInfo.fxStart, fxInfo.fxDur, playhead, canvasSize.w, fxInfo.fxClip);
-              const sx = baseScale * tr.scale * fxA.scaleMul * (tr.flipX ? -1 : 1);
-              const sy = baseScale * tr.scale * fxA.scaleMul;
-              const totalRot = tr.rotation + fxA.rotateAdd;
+              // 鬼畜循环动作 — 跟主预览/导出一致, 全屏预览也动
+              const md = (c.loopMotion && c.loopMotion.kind !== 'none') ? loopMotionDelta(c.loopMotion, playhead, LOOP_MOTION_PERIOD_VIDEO, canvasSize.w, canvasSize.h, tr) : null;
+              const sx = baseScale * tr.scale * fxA.scaleMul * (md?.dScale ?? 1) * (tr.flipX ? -1 : 1) * (md?.dScaleX ?? 1);
+              const sy = baseScale * tr.scale * fxA.scaleMul * (md?.dScale ?? 1);
+              const totalRot = tr.rotation + fxA.rotateAdd + (md?.dRot ?? 0);
               return (
                 <div
                   key={c.id}
@@ -7328,7 +7382,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
                   style={{
                     left: `${50 + tr.x}%`,
                     top: `${50 + tr.y}%`,
-                    transform: `translate(calc(-50% + ${fxA.offsetX}px), calc(-50% + ${fxA.offsetY}px)) scale(${sx}, ${sy}) rotate(${totalRot}deg)`,
+                    transform: `translate(calc(-50% + ${fxA.offsetX + (md?.dx ?? 0)}px), calc(-50% + ${fxA.offsetY + (md?.dy ?? 0)}px)) scale(${sx}, ${sy}) rotate(${totalRot}deg)`,
                     opacity: fxA.alpha,
                     filter: fxA.filter || undefined,
                     zIndex: 10 - c.lane,
@@ -7414,7 +7468,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
   const [fps, setFps] = useState<ExportFps>(isMobile ? 24 : 30);
   // v23-l: GIF preset (仅 mode=gif 用)
   const isGif = (project.mode ?? 'video') === 'gif';
-  const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'quick-share');   // 默认标准档 (跟 gif 视图一致, 不再默认小巧 240²)
+  const [gifPresetId, setGifPresetId] = useState<GifPresetId>(project.gifPresetId ?? 'x');   // 默认高清档 (跟 gif 视图一致)
   const gifPreset = resolveGifPreset(gifPresetId);
 
   const supportedMime = useMemo(() => pickBestMime(format === 'mp4'), [format]);

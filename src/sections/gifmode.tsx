@@ -12,7 +12,7 @@ import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { pickRandomText } from '@/data/quickModeTexts';
 import {
   loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION, GIF_MIN_DURATION,
-  fitCaptionFontPx, captionAvailH, contentBboxFrac,
+  fitCaptionFontPx, captionAvailH, contentBboxFrac, LOOP_MOTIONS, motionMeta,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
   type GifPresetId, type LoopMotionKind, type ProjectMode, type GifFrameEdit,
@@ -50,28 +50,7 @@ const uid = (p = 'g') => `${p}-${Date.now()}-${Math.random().toString(36).slice(
 
 interface GifDraftSlot { id: string; name: string; updatedAt: number; project: GifProject; thumbSrc?: string; }
 
-const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string }[] = [
-  { kind: 'none', label: '静止', emoji: '⏸️' },
-  { kind: 'bob', label: '上下浮', emoji: '↕️' },
-  { kind: 'shimmy', label: '左右抖', emoji: '↔️' },
-  { kind: 'sway', label: '摇摆', emoji: '🙃' },
-  { kind: 'breathe', label: '呼吸', emoji: '🫁' },
-  { kind: 'pulseLoop', label: '脉冲', emoji: '💓' },
-  { kind: 'spin360', label: '整圈转', emoji: '🔄' },
-  { kind: 'float', label: '8字漂', emoji: '🎈' },
-  { kind: 'bounce', label: '弹跳', emoji: '🏀' },
-  { kind: 'orbit', label: '绕圈', emoji: '🛸' },
-  { kind: 'hop', label: '横跳', emoji: '🦘' },
-  { kind: 'wobble', label: '果冻晃', emoji: '🍮' },
-  { kind: 'jitter', label: '疯狂抖', emoji: '⚡' },
-  { kind: 'punch', label: '怼脸', emoji: '🥊' },
-  { kind: 'swing', label: '钟摆', emoji: '🎐' },
-  { kind: 'flip', label: '翻转', emoji: '🪞' },
-];
-// 动作 kind → 图标/名 (含 customMove); 时间轴 chip + clip 角标 + 弹层网格共用
-const motionMeta = (kind?: LoopMotionKind): { kind: LoopMotionKind; label: string; emoji: string } =>
-  kind === 'customMove' ? { kind: 'customMove', label: '自定义', emoji: '🎯' }
-    : (LOOP_MOTIONS.find(m => m.kind === kind) ?? LOOP_MOTIONS[0]);
+// LOOP_MOTIONS + motionMeta 已移到 animcore.ts (视频视图共用), 从那 import.
 
 // 精简到 3 个最常用 + 导出与预览严格一致的: 直接/乒乓/溶解 (去掉 倒放/急退 — 较少用且观感复杂).
 // 注: GifLoopMode 类型仍保留 reverse/rewind, loopTimeMap/buildExportFrameTimes 仍能处理 → 老 GIF 草稿不破坏, 只是不再新建.
@@ -522,6 +501,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         renderLoopFrame(x0, { t: 0 }, project, w, h, cacheRef.current, motionAt, undefined, '#ffffff', bfa);
         renderLoopFrame(x1, { t: Math.max(0, D - 1 / preset.fps) }, project, w, h, cacheRef.current, motionAt, undefined, '#ffffff', bfa);
         setSeam(loopSeamScore(c0, c1));
+        c0.width = c0.height = c1.width = c1.height = 0;   // 释放两块全尺寸 backing store (每次编辑都建一对, 否则 GC 压力, 审计 C2)
       } catch { /* ignore */ }
     }, 200);
     return () => window.clearTimeout(tid);
@@ -1870,11 +1850,45 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 onClick={() => setProject(p => ({ ...p, loop: { ...p.loop, onionSkin: !p.loop.onionSkin } }))}>
                 <span className="gm-motion-emoji"><Eye size={13} /></span>洋葱皮 · 看首尾对齐
               </button>
-              <div className="gm-sec-title" style={{ marginTop: 12 }}>每层动作 <span className="gm-hint">(已搬到时间轴)</span></div>
-              <div className="gm-fx-tlhint">
-                <span className="gm-fx-tlhint-ico">🫨</span>
-                <div>下方<b>时间轴</b>每层带一条<b>动效子轨</b>, 点上面的动作块 <span className="gm-fx-tlhint-chip">🫨 抖动 ▾</span> 就地选<b>动作 + 幅度 + 速度 + 自定义移动</b>。</div>
-              </div>
+              <div className="gm-sec-title" style={{ marginTop: 12 }}>每层动作 <span className="gm-hint">{selImg ? '(给选中图层加)' : '(先选图层)'}</span></div>
+              {selImg ? (() => { const s: ImageClip = selImg; const lm = s.loopMotion; return (
+                <>
+                  <div className="gm-motionpop-grid">
+                    {LOOP_MOTIONS.map(m => (
+                      <button key={m.kind} type="button" title={m.label}
+                        className={'gm-motionpop-btn' + (lm?.kind === m.kind ? ' active' : '')}
+                        onClick={() => setLayerMotion(s.id, m.kind)}>
+                        <span className="gm-motionpop-emoji">{m.emoji}</span>{m.label}
+                      </button>
+                    ))}
+                    <button type="button" title="自定义移动 A→B (画板拖两点)"
+                      className={'gm-motionpop-btn gm-motionpop-custom' + (lm?.kind === 'customMove' ? ' active' : '')}
+                      onClick={() => { setLayerMotion(s.id, 'customMove'); setCustomEdit(true); }}>
+                      <span className="gm-motionpop-emoji">🎯</span>自定义
+                    </button>
+                  </div>
+                  {lm && lm.kind !== 'none' && (
+                    <div className="gm-motionpop-sliders">
+                      <label className="gm-fx-num">幅度<input type="range" min={0.2} max={2} step={0.05} value={lm.amp}
+                        onChange={e => patchClip(s.id, { loopMotion: { ...lm, amp: parseFloat(e.target.value) } })} /><b>{lm.amp.toFixed(2)}</b></label>
+                      <label className="gm-fx-num">速度<input type="range" min={1} max={8} step={1} value={lm.cycles}
+                        onChange={e => patchClip(s.id, { loopMotion: { ...lm, cycles: parseInt(e.target.value) } })} /><b>{lm.cycles}x</b></label>
+                    </div>
+                  )}
+                  {lm && lm.kind !== 'none' && (
+                    <button type="button" className="am-tb-btn" style={{ width: '100%', marginTop: 6, justifyContent: 'center' }} onClick={applyMotionToAll}>动作 → 全部图层</button>
+                  )}
+                  <div className="gm-fx-tlhint" style={{ marginTop: 8 }}>
+                    <span className="gm-fx-tlhint-ico">🫨</span>
+                    <div>每层<b>时间轴</b>也带<b>动效子轨</b>, 可单独给某层某时段设不同动作 (切两段)。</div>
+                  </div>
+                </>
+              ); })() : (
+                <div className="gm-fx-tlhint">
+                  <span className="gm-fx-tlhint-ico">👆</span>
+                  <div>先在<b>素材</b>加图层, 或点下方<b>时间轴</b>选中一层, 再来挑动作 (上下浮 / 摇摆 / 弹跳 / 鬼畜…)。</div>
+                </div>
+              )}
             </div>
           )}
         </aside>

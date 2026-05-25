@@ -1,8 +1,8 @@
 // gifloop.ts — GIF 循环引擎 (P1: normal + boomerang). 纯逻辑, 在 animcore 合成器之上加
 // "时间重映射 + 帧序列 + 循环安全动作". crossfade / 多变体 / onion-skin 见 P2.
 import {
-  renderExportFrame, loadMedia, clamp, resolveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM,
-  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type LoopMotion, type MotionDelta, type Transform, type FaceLocal, type BoundFaceBox,
+  renderExportFrame, loadMedia, clamp, resolveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM, loopMotionDelta, makeLoopMotionAt,
+  type Clip, type ImageClip, type GifPresetId, type MediaAsset, type MotionDelta, type FaceLocal, type BoundFaceBox,
 } from '@/lib/animcore';
 // gif.js worker 源码内联 (?raw) → 运行时包成 Blob URL 当 workerScript.
 // 修生产/手机导出 GIF 失败 "'text/html' is not a valid JavaScript MIME type": 原用 ?url 资源 URL
@@ -31,9 +31,6 @@ export interface GifProject {
   preset: GifPresetId;
   loop: GifLoopConfig;
 }
-
-const TWO_PI = Math.PI * 2;
-const ZERO_DELTA: MotionDelta = { dx: 0, dy: 0, dScale: 1, dRot: 0 };
 
 // 连续播放位置 → 显示时间. boomerang 乒乓 0→D→0 (数学无缝).
 export function loopTimeMap(playPos: number, D: number, mode: GifLoopMode): number {
@@ -105,55 +102,9 @@ export function loopSpecAt(t: number, D: number, config: GifLoopConfig, fps = 30
   return { t };
 }
 
-// 循环安全动作 — 相位锁 u=(t/D)mod1 + 整数周期 n → f(0)==f(1) 必然闭环.
-// amp 归一化 (0~1.5 常用), 内部按动作种类换算成 px / 度 / 比例.
-export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number, W: number, H: number = W, base?: Transform): MotionDelta {
-  if (!m || m.kind === 'none' || D <= 0) return ZERO_DELTA;
-  const u = (((t / D) % 1) + 1) % 1;
-  const n = Math.max(1, Math.round(m.cycles));
-  const A = m.amp;
-  const ph = TWO_PI * n * u;
-  switch (m.kind) {
-    case 'bob':       return { dx: 0, dy: A * W * 0.06 * Math.sin(ph), dScale: 1, dRot: 0 };
-    case 'shimmy':    return { dx: A * W * 0.06 * Math.sin(ph), dy: 0, dScale: 1, dRot: 0 };
-    case 'sway':      return { dx: 0, dy: 0, dScale: 1, dRot: A * 12 * Math.sin(ph) };
-    case 'breathe':   return { dx: 0, dy: 0, dScale: 1 + A * 0.12 * Math.sin(ph), dRot: 0 };
-    case 'pulseLoop': return { dx: 0, dy: 0, dScale: 1 + A * 0.20 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };
-    case 'spin360':   return { dx: 0, dy: 0, dScale: 1, dRot: 360 * n * u };
-    case 'float':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.03 * Math.sin(2 * ph), dScale: 1, dRot: 0 };
-    // 弹跳 — |sin| 触地反弹 (u=0 与 u末 都=0, 无缝)
-    case 'bounce':    return { dx: 0, dy: -A * W * 0.09 * Math.abs(Math.sin(ph)), dScale: 1, dRot: 0 };
-    // 圆周漂移 — (sin, cos-1) 绕一点转圈 (u=0/末 都回原点, 无缝)
-    case 'orbit':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.05 * (Math.cos(ph) - 1), dScale: 1, dRot: 0 };
-    // v25 鬼畜系 — 都是 sin/cos/|sin| of 整数×ph, u=0/1 必闭环. 内部已 bake 较高频率, cycles=1 也"很动"
-    case 'hop':       return { dx: A * W * 0.10 * Math.sin(ph), dy: -A * W * 0.05 * Math.abs(Math.sin(2 * ph)), dScale: 1, dRot: 0 };          // 来回横跳 + 小跳
-    case 'wobble':    return { dx: 0, dy: 0, dScale: 1 + A * 0.05 * Math.sin(3 * ph), dRot: A * 10 * Math.sin(2 * ph) };                       // 果冻晃 (转+缩)
-    case 'jitter':    return { dx: A * W * 0.028 * Math.sin(3 * ph), dy: A * W * 0.026 * Math.sin(4 * ph), dScale: 1, dRot: A * 3 * Math.sin(5 * ph) }; // 疯狂抖 intensify
-    case 'punch':     return { dx: 0, dy: 0, dScale: 1 + A * 0.32 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };                                     // 怼脸放大 (zoom in→out)
-    case 'swing':     return { dx: A * W * 0.03 * Math.sin(ph), dy: 0, dScale: 1, dRot: A * 16 * Math.sin(ph) };                              // 钟摆荡
-    case 'flip':      return { dx: 0, dy: 0, dScale: 1, dRot: 0, dScaleX: 1 - Math.min(1, A) * (1 - Math.cos(ph)) };                          // 水平镜像翻转 (绕竖轴翻牌; A=1 整翻 1→-1→1, A<1 半翻; u=0/1 都=1 闭环)
-    // 自定义移动 A→B 乒乓 — w 三角波 0→1→0, 首尾 w=0 必无缝. A=base(clip.transform), B=m.to
-    case 'customMove': {
-      if (!m.to || !base) return ZERO_DELTA;
-      // cycles(速度): 每循环往返 n 次 (三角波频率 n, u=0/1 必 w=0 闭环); amp(幅度): 缩放 A→B 位移 (1=到B, 1.5=过冲, 0.5=半程)
-      const cu = (n * u) % 1;
-      const w = (cu < 0.5 ? cu * 2 : (1 - cu) * 2) * A;
-      return {
-        dx: ((m.to.x - base.x) / 100) * W * w,
-        dy: ((m.to.y - base.y) / 100) * H * w,
-        dScale: 1 + ((m.to.scale / Math.max(0.01, base.scale)) - 1) * w,
-        dRot: (m.to.rotation - base.rotation) * w,
-      };
-    }
-    default:          return ZERO_DELTA;
-  }
-}
-
-// 给 renderExportFrame 的 motionAt resolver — 从每个 image clip 的 loopMotion 算 delta.
-// H 用于非方形画板的垂直换算; customMove 取 clip.transform 作 A.
-export function makeLoopMotionAt(D: number, W: number, H: number = W): (clip: ImageClip, t: number) => MotionDelta {
-  return (clip, t) => loopMotionDelta(clip.loopMotion, t, D, W, H, clip.transform);
-}
+// loopMotionDelta + makeLoopMotionAt 已上移到 animcore (视频绑定脸 resolveBoundFaceBoxVideo 也要用它;
+//   animcore 不依赖 gifloop, 无循环依赖). 这里 re-export, 保持 gifmode/animatemode/本文件内部既有 import 不变.
+export { loopMotionDelta, makeLoopMotionAt };
 
 // 脸跟壳绑定 — 捕获 face 相对 shell 静态渲染框的局部位姿 (绑定瞬间, 不含 motion). 在 shell 未旋转坐标系下存偏移 → 之后施加 shell.rot 即可重旋.
 export function captureFaceLocal(

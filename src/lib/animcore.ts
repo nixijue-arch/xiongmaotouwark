@@ -73,19 +73,19 @@ export interface GifPreset {
   maxDuration: number;
   note: string;
 }
-// 按"质量/体积"直接命名 (旧的微信/朋友圈/TG/X 平台名其实只是尺寸不同, 精简成 3 档 + 自定义).
+// 按"质量/体积"直接命名, 精简成 3 档 (小巧/标准/高清). 默认高清.
+//   ('自定义' 旧档其实没有任何可调 UI = 无功能占位, 已移除; 老草稿的 'custom' 经 remap 落到高清.)
 // fps: 小巧 20 控体积; 标准/高清 25 = 整数 cs 延时无漂移, 接近预览流畅度. 编码加抖动+超采样, 见 gifloop.
 export const GIF_PRESETS: GifPreset[] = [
   { id: 'wechat',      label: '小巧 · 省流', width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '体积最小 · 240² · 表情包/省流量' },
-  { id: 'quick-share', label: '标准 · 推荐', width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享 (推荐)' },
-  { id: 'x',           label: '高清',        width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰, 体积较大 · 480²' },
-  { id: 'custom',      label: '自定义',      width: 480, height: 360, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '自由尺寸 · 上限 10s' },
+  { id: 'quick-share', label: '标准',        width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享' },
+  { id: 'x',           label: '高清 · 推荐',  width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰 · 480² · 默认' },
 ];
-// 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)→高清(480²) — 老草稿无质量崩塌, 不落回 240².
-const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x' };
+// 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)/自定义→高清(480²) — 老草稿无质量崩塌, 不落回 240².
+const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x', custom: 'x' };
 export function resolveGifPreset(id?: GifPresetId): GifPreset {
-  const rid = id ? (GIF_PRESET_REMAP[id] ?? id) : 'quick-share';
-  return GIF_PRESETS.find(p => p.id === rid) ?? GIF_PRESETS[0];
+  const rid = id ? (GIF_PRESET_REMAP[id] ?? id) : 'x';   // 默认高清
+  return GIF_PRESETS.find(p => p.id === rid) ?? GIF_PRESETS[2];   // 兜底也用高清
 }
 export const GIF_MAX_DURATION = 10; // s, GIF 总上限 (用户定 10s; 时间轴满宽=0..10s, 10s 在最右)
 export const GIF_MIN_DURATION = 1;
@@ -119,6 +119,78 @@ export type LoopMotionKind = 'none' | 'bob' | 'shimmy' | 'sway' | 'breathe' | 'p
 export interface LoopMotion { kind: LoopMotionKind; amp: number; cycles: number; to?: Transform; }
 // renderExportFrame 的 motionAt 回调返回值 — 叠加在 clip transform 之上. dScaleX 可选 (默认 1; <0 = 水平镜像翻转)
 export interface MotionDelta { dx: number; dy: number; dScale: number; dRot: number; dScaleX?: number; }
+
+// 16 个鬼畜循环动作的展示数据 (kind/label/emoji) — GIF 视图 + 视频视图共用 (时间轴 chip / 动效面板网格 / 弹层网格).
+// customMove 不在此列表 (单独按钮); motionMeta() 补它. 动作的实际位移在 gifloop.ts loopMotionDelta.
+export const LOOP_MOTIONS: { kind: LoopMotionKind; label: string; emoji: string }[] = [
+  { kind: 'none', label: '静止', emoji: '⏸️' },
+  { kind: 'bob', label: '上下浮', emoji: '↕️' },
+  { kind: 'shimmy', label: '左右抖', emoji: '↔️' },
+  { kind: 'sway', label: '摇摆', emoji: '🙃' },
+  { kind: 'breathe', label: '呼吸', emoji: '🫁' },
+  { kind: 'pulseLoop', label: '脉冲', emoji: '💓' },
+  { kind: 'spin360', label: '整圈转', emoji: '🔄' },
+  { kind: 'float', label: '8字漂', emoji: '🎈' },
+  { kind: 'bounce', label: '弹跳', emoji: '🏀' },
+  { kind: 'orbit', label: '绕圈', emoji: '🛸' },
+  { kind: 'hop', label: '横跳', emoji: '🦘' },
+  { kind: 'wobble', label: '果冻晃', emoji: '🍮' },
+  { kind: 'jitter', label: '疯狂抖', emoji: '⚡' },
+  { kind: 'punch', label: '怼脸', emoji: '🥊' },
+  { kind: 'swing', label: '钟摆', emoji: '🎐' },
+  { kind: 'flip', label: '翻转', emoji: '🪞' },
+];
+// 动作 kind → 图标/名 (含 customMove); 时间轴 chip + clip 角标 + 弹层/面板网格共用
+export const motionMeta = (kind?: LoopMotionKind): { kind: LoopMotionKind; label: string; emoji: string } =>
+  kind === 'customMove' ? { kind: 'customMove', label: '自定义', emoji: '🎯' }
+    : (LOOP_MOTIONS.find(m => m.kind === kind) ?? LOOP_MOTIONS[0]);
+// 视频模式循环动作的固定周期 (秒) — 视频非循环, 但用固定周期让鬼畜动作可见/手感跟 GIF 一致 (不随片长稀释).
+export const LOOP_MOTION_PERIOD_VIDEO = 2.5;
+
+const TWO_PI = Math.PI * 2;
+const ZERO_DELTA: MotionDelta = { dx: 0, dy: 0, dScale: 1, dRot: 0 };
+// 循环安全动作 — 相位锁 u=(t/D)mod1 + 整数周期 n → f(0)==f(1) 必然闭环. amp 归一化 (0~1.5 常用), 内部按动作种类换算 px/度/比例.
+// (从 gifloop 上移到 animcore: 视频 resolveBoundFaceBoxVideo 也要用它给绑定脸跟壳的鬼畜动作; animcore 不依赖 gifloop, 无环.)
+export function loopMotionDelta(m: LoopMotion | undefined, t: number, D: number, W: number, H: number = W, base?: Transform): MotionDelta {
+  if (!m || m.kind === 'none' || D <= 0) return ZERO_DELTA;
+  const u = (((t / D) % 1) + 1) % 1;
+  const n = Math.max(1, Math.round(m.cycles));
+  const A = m.amp;
+  const ph = TWO_PI * n * u;
+  switch (m.kind) {
+    case 'bob':       return { dx: 0, dy: A * W * 0.06 * Math.sin(ph), dScale: 1, dRot: 0 };
+    case 'shimmy':    return { dx: A * W * 0.06 * Math.sin(ph), dy: 0, dScale: 1, dRot: 0 };
+    case 'sway':      return { dx: 0, dy: 0, dScale: 1, dRot: A * 12 * Math.sin(ph) };
+    case 'breathe':   return { dx: 0, dy: 0, dScale: 1 + A * 0.12 * Math.sin(ph), dRot: 0 };
+    case 'pulseLoop': return { dx: 0, dy: 0, dScale: 1 + A * 0.20 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };
+    case 'spin360':   return { dx: 0, dy: 0, dScale: 1, dRot: 360 * n * u };
+    case 'float':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.03 * Math.sin(2 * ph), dScale: 1, dRot: 0 };
+    case 'bounce':    return { dx: 0, dy: -A * W * 0.09 * Math.abs(Math.sin(ph)), dScale: 1, dRot: 0 };
+    case 'orbit':     return { dx: A * W * 0.05 * Math.sin(ph), dy: A * W * 0.05 * (Math.cos(ph) - 1), dScale: 1, dRot: 0 };
+    case 'hop':       return { dx: A * W * 0.10 * Math.sin(ph), dy: -A * W * 0.05 * Math.abs(Math.sin(2 * ph)), dScale: 1, dRot: 0 };
+    case 'wobble':    return { dx: 0, dy: 0, dScale: 1 + A * 0.05 * Math.sin(3 * ph), dRot: A * 10 * Math.sin(2 * ph) };
+    case 'jitter':    return { dx: A * W * 0.028 * Math.sin(3 * ph), dy: A * W * 0.026 * Math.sin(4 * ph), dScale: 1, dRot: A * 3 * Math.sin(5 * ph) };
+    case 'punch':     return { dx: 0, dy: 0, dScale: 1 + A * 0.32 * (0.5 - 0.5 * Math.cos(ph)), dRot: 0 };
+    case 'swing':     return { dx: A * W * 0.03 * Math.sin(ph), dy: 0, dScale: 1, dRot: A * 16 * Math.sin(ph) };
+    case 'flip':      return { dx: 0, dy: 0, dScale: 1, dRot: 0, dScaleX: 1 - Math.min(1, A) * (1 - Math.cos(ph)) };
+    case 'customMove': {
+      if (!m.to || !base) return ZERO_DELTA;
+      const cu = (n * u) % 1;
+      const w = (cu < 0.5 ? cu * 2 : (1 - cu) * 2) * A;
+      return {
+        dx: ((m.to.x - base.x) / 100) * W * w,
+        dy: ((m.to.y - base.y) / 100) * H * w,
+        dScale: 1 + ((m.to.scale / Math.max(0.01, base.scale)) - 1) * w,
+        dRot: (m.to.rotation - base.rotation) * w,
+      };
+    }
+    default:          return ZERO_DELTA;
+  }
+}
+// 给 renderExportFrame 的 motionAt resolver — 从每个 image clip 的 loopMotion 算 delta.
+export function makeLoopMotionAt(D: number, W: number, H: number = W): (clip: ImageClip, t: number) => MotionDelta {
+  return (clip, t) => loopMotionDelta(clip.loopMotion, t, D, W, H, clip.transform);
+}
 
 export function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
 
@@ -356,7 +428,9 @@ export function contentBboxFrac(media: MediaAsset): { x: number; y: number; w: n
 // FX track 优先 — 找 active 的 FXClip, 若 targetClipId 匹配 / 为空 (全局) 都生效, 否则用 image.fx
 // 抖动类 FX (用绝对 enterT 振荡, 不会收敛到稳定末态) — 结束后回基准, 不"保持末态"
 //   (否则 hold 会冻结在某个随机抖动相位 = 歪一边的静态偏移, 不直觉). 其余 FX 末态都稳定 (位移/缩放/透明 settled).
-const NO_HOLD_FX = new Set<ImageFx>(['shake', 'flash', 'glitch']);
+// 抖动类(shake/flash/glitch 用绝对 enterT 振荡不收敛) + 出场淡出(fade-out 末态 alpha=0) → 结束后不"保持末态", 回基准.
+//   fade-out 尤其重要: 否则一个(尤其无 target 的全局)淡出 FX 结束后会把图层永久变透明 (审计 B3/B9).
+const NO_HOLD_FX = new Set<ImageFx>(['shake', 'flash', 'glitch', 'fade-out']);
 export function effectiveFxFor(clip: ImageClip, t: number, allClips: Clip[]): { fx: ImageFx; fxStart: number; fxDur: number; fxClip: FXClip | null } {
   const fxClip = allClips.find(c =>
     c.trackId === 'fx' && t >= c.start && t < c.end && (!c.targetClipId || c.targetClipId === clip.id)
@@ -514,16 +588,19 @@ export function resolveBoundFaceBoxVideo(
 ): BoundFaceBox {
   const loc = face.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
   const sBox = computeImageBox(shell, t, clips, W, H, sNW, sNH, freezeFx);   // 壳实时框 (含 FX; 编辑时 freeze)
-  const shellFlip = sBox.flipX ? -1 : 1;
-  const half = sBox.iw / 2;
-  const rad = sBox.rotation * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
-  const mdxN = loc.dxN * shellFlip;                          // 壳翻转 → 脸到镜像侧
-  let fCx = sBox.cx + (mdxN * cos - loc.dyN * sin) * half;
-  let fCy = sBox.cy + (mdxN * sin + loc.dyN * cos) * half;
-  let fIw = sBox.iw * loc.scaleRatio;
+  // 壳的鬼畜 loopMotion (FX 轨之外的连续动作, 跟 GIF 同款) — 视频用固定周期; 编辑 freeze 时不动 → 脸跟壳的鬼畜动作一起动, 不脱节
+  const sMd = freezeFx ? ZERO_DELTA : loopMotionDelta(shell.loopMotion, t, LOOP_MOTION_PERIOD_VIDEO, W, H, shell.transform);
+  const sCx = sBox.cx + sMd.dx, sCy = sBox.cy + sMd.dy, sIw = sBox.iw * sMd.dScale, sRot = sBox.rotation + sMd.dRot;
+  const shellFlip = (sBox.flipX ? -1 : 1) * (sMd.dScaleX ?? 1);   // 壳翻转 (transform flipX × flip 动效) → 脸到镜像侧
+  const half = sIw / 2;
+  const rad = sRot * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const mdxN = loc.dxN * shellFlip;
+  let fCx = sCx + (mdxN * cos - loc.dyN * sin) * half;
+  let fCy = sCy + (mdxN * sin + loc.dyN * cos) * half;
+  let fIw = sIw * loc.scaleRatio;
   let fIh = fIw * (fNH / Math.max(1, fNW));
   if (fIh > H * 0.85) { const fk = (H * 0.85) / fIh; fIw *= fk; fIh *= fk; }
-  let fRot = sBox.rotation + loc.rotation;
+  let fRot = sRot + loc.rotation;
   // 脸自身若另挂 FX → 在跟随壳的基础上再叠脸自己的动效 (offset/scale/rotate delta); 编辑 freeze 时跳过
   if (!freezeFx) {
     const fEff = effectiveFxFor(face, t, clips);
@@ -534,7 +611,13 @@ export function resolveBoundFaceBoxVideo(
       fRot += fFx.rotateAdd;
     }
   }
-  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: face.transform?.flipX ?? false, scaleX: shellFlip };
+  // 脸自身的鬼畜 loopMotion (局部加, dx/dy 旋到壳的世界角)
+  const fMd = freezeFx ? ZERO_DELTA : loopMotionDelta(face.loopMotion, t, LOOP_MOTION_PERIOD_VIDEO, W, H, face.transform);
+  fIw *= fMd.dScale; fIh *= fMd.dScale;
+  fCx += fMd.dx * cos - fMd.dy * sin;
+  fCy += fMd.dx * sin + fMd.dy * cos;
+  fRot += fMd.dRot;
+  return { cx: fCx, cy: fCy, iw: fIw, ih: fIh, rotation: fRot, flipX: face.transform?.flipX ?? false, scaleX: shellFlip * (fMd.dScaleX ?? 1) };
 }
 export function makeBoundFaceAtVideo(project: { clips: Clip[] }, W: number, H: number) {
   return (face: ImageClip, shell: ImageClip, t: number, sNW: number, sNH: number, fNW: number, fNH: number): BoundFaceBox =>
