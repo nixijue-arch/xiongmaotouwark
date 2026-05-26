@@ -8,6 +8,7 @@
   position: fixed;
   inset: 0;
   z-index: 2000;
+  pointer-events: none;   /* 关键: 全屏容器不拦事件 → 镂空区 + 暗区都能点到底层真实 UI (真·交互, 不糊弄). 仅 .ob-card 重开 auto. */
   font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -19,6 +20,7 @@
 .ob-backdrop {
   position: fixed;
   background: rgba(8, 16, 30, 0.62);
+  pointer-events: none;   /* 纯视觉变暗, 不拦点击 → 用户可直接操作底层真实 UI (选素材 / 加入 / 拖动) */
   animation: ob-fade 180ms ease;
 }
 .ob-backdrop-full { inset: 0; }
@@ -44,6 +46,7 @@
   padding: 18px 18px 14px;
   border-radius: 16px;
   outline: none;
+  pointer-events: auto;   /* .ob-root 是 none, 卡要重开 auto 才能点按钮 */
   animation: ob-card-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ob-card:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.4); outline-offset: 2px; }

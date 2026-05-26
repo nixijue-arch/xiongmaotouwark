@@ -300,7 +300,7 @@ export function ComboTab({ onAdd, onAddCombo }: {
           <button type="button" className={'am-combo-layer-btn' + (comboLayers === 'one' ? ' is-active' : '')} onClick={() => setComboLayers('one')} title={t('layerOneTip')}>{t('layerOne')}</button>
         </div>
       )}
-      <button className="am-combo-add" onClick={handleAdd} disabled={loading || !preview} type="button">
+      <button className="am-combo-add" data-tour="btn-add-combo" onClick={handleAdd} disabled={loading || !preview} type="button">
         {loading ? t('adding') : (onAddCombo ? (comboLayers === 'two' ? t('addTwo') : t('addOne')) : t('addTimeline'))}
       </button>
 

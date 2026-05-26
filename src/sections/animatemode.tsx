@@ -1846,12 +1846,19 @@ export function AnimateMode() {
   const [showGuide, setShowGuide] = useState<boolean>(() => { try { return !localStorage.getItem(ONBOARDING_SEEN_KEY); } catch { return false; } });
   const finishGuide = useCallback(() => { setShowGuide(false); try { localStorage.setItem(ONBOARDING_SEEN_KEY, '1'); } catch { /* ignore */ } }, []);
   const openGuide = useCallback(() => setShowGuide(true), []);
+  const guideLangRef = useRef<'zh' | 'en'>('zh');   // 最新语言, 给下面稳定 useCallback 内用 (避免 stale)
+  guideLangRef.current = memeState.language === 'en' ? 'en' : 'zh';
   // 引导「动手 demo」推进器 — 必须稳定引用 (useCallback []). 否则 AnimateMode 每次 re-render 都让
   // onboarding 的 demo effect cleanup 清掉刚 setTimeout 的推进定时器 (加配套/拖图层会触发 re-render →
-  // 永远推进不了, 审计实测). 监听 signalOnboardingDemo 发的事件, 类型匹配则 0.85s 后推进 (留时间看效果).
+  // 永远推进不了, 审计实测). 监听 signalOnboardingDemo 发的事件, 类型匹配则推进 + 反馈.
   const onboardDemoMount = useCallback((demo: 'add-combo' | 'drag-layer' | 'click-motion', advance: () => void) => {
     let timer = 0;
-    const h = (e: Event) => { if ((e as CustomEvent).detail?.type === demo) { window.clearTimeout(timer); timer = window.setTimeout(advance, 850); } };
+    const h = (e: Event) => {
+      if ((e as CustomEvent).detail?.type !== demo) return;
+      // 拖动本身没 toast → 补完成反馈 (加配套/加动效已各有 toast). 用户要求"拖动完成后有个小提示".
+      if (demo === 'drag-layer') toast.success(guideLangRef.current === 'en' ? '✓ Nice — dragged!' : '✓ 拖好了！');
+      window.clearTimeout(timer); timer = window.setTimeout(advance, 850);
+    };
     window.addEventListener('xmw-onboard-demo', h);
     return () => { window.clearTimeout(timer); window.removeEventListener('xmw-onboard-demo', h); };
   }, []);

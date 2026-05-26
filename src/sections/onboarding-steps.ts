@@ -77,7 +77,7 @@ export const DEFAULT_VIDEO_STEPS: OnboardingStep[] = [
   },
   {
     id: 'add-combo',
-    anchor: '[data-tour="panel-combo"]',
+    anchor: '[data-tour="btn-add-combo"]',
     placement: 'right',
     title: { zh: '加第一个「配套」', en: 'Add your first combo' },
     body: {
@@ -194,7 +194,7 @@ export const DEFAULT_GIF_STEPS: OnboardingStep[] = [
   },
   {
     id: 'add-combo',
-    anchor: '[data-tour="panel-combo"]',
+    anchor: '[data-tour="btn-add-combo"]',
     placement: 'right',
     title: { zh: '加「配套」当主角', en: 'Add a combo as your star' },
     body: {
