@@ -1917,6 +1917,13 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                   </>
                 );
               })()}
+              {/* 变脸 — 给熊猫头配多张表情依次轮播 (融入动效面板; 之前埋在 Inspector 里不好找) */}
+              <div className="gm-sec-title" style={{ marginTop: 12 }}>变脸 <span className="gm-hint">(多表情依次轮播)</span></div>
+              <button type="button" className="am-facecycle-btn" title="选 2-6 张表情, 在循环里依次轮播 (溶解 / 快切) — 壳照常可做动作"
+                onClick={() => { const t = (selImg ?? imageClips.find(c => (c as ImageClip).boundTo) ?? imageClips[0]) as ImageClip | undefined; if (t) openFaceCycle(t); else toast.error('先做个配套 (熊猫头 + 表情) 再变脸'); }}>
+                <span className="am-facecycle-emoji">🎭</span>
+                <span className="am-facecycle-txt"><b>做变脸 · 多表情轮播</b><small>给熊猫头配 2-6 张脸, 在循环里自动依次切换</small></span>
+              </button>
             </div>
           )}
         </aside>

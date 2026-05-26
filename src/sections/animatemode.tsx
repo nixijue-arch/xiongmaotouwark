@@ -2910,6 +2910,58 @@ export function AnimateMode() {
     toast('已解绑 — 表情现在独立');
   }, [project, commit]);
 
+  // ===== 变脸 (face-cycle) 视频版 — 跟 GIF 同款, 但脸的时段落在「熊猫头壳」自己的 [start,end] 内轮播 =====
+  // 渲染核心 (renderExportFrame / resolveBoundFaceBoxVideo) 已支持"多张绑定脸 + 时段窗口 + xfade 溶解", 这里只造 clip.
+  const [cyclePop, setCyclePop] = useState<{ shellId: string; faceId: string } | null>(null);
+  const [cycleSel, setCycleSel] = useState<string[]>([]);
+  const [cycleDissolve, setCycleDissolve] = useState(true);
+  const [cycleQ, setCycleQ] = useState('');
+  // 从选中的脸/壳解析出 shell + 基础脸, 打开多选弹窗
+  const openFaceCycleVideo = useCallback((clip: ImageClip) => {
+    let face: ImageClip | undefined, shellId: string | undefined;
+    if (clip.boundTo) { face = clip; shellId = clip.boundTo; }
+    else { face = project.clips.find(c => c.trackId === 'image' && (c as ImageClip).boundTo === clip.id) as ImageClip | undefined; shellId = clip.id; }
+    if (!face || !shellId) { toast.error('先做一个「配套」(熊猫头 + 表情) 才能变脸'); return; }
+    setCyclePop({ shellId, faceId: face.id });
+    const curMat = ALL_FACES.find(m => m.src === face!.src);
+    setCycleSel(curMat ? [curMat.id] : []);
+    setCycleDissolve(true); setCycleQ('');
+  }, [project.clips]);
+  // 「动效」面板 / 入口按钮调用: 选中图层优先, 否则首个绑定脸/壳; 都没有就提示先加配套
+  const triggerFaceCycleVideo = useCallback(() => {
+    const sel = selectedId ? project.clips.find(c => c.id === selectedId) : undefined;
+    let target = (sel && sel.trackId === 'image') ? (sel as ImageClip) : undefined;
+    if (!target) {
+      const faces = project.clips.filter(c => c.trackId === 'image' && (c as ImageClip).boundTo) as ImageClip[];
+      target = faces[0] ?? (project.clips.find(c => c.trackId === 'image' && (c as ImageClip).role === 'shell') as ImageClip | undefined);
+    }
+    if (!target) { toast.error('先在「素材 → 配套」加个熊猫头+表情, 再来变脸'); return; }
+    openFaceCycleVideo(target);
+  }, [selectedId, project.clips, openFaceCycleVideo]);
+  // 生成 N 个绑定脸: 在「壳自己的时段」内平分轮播 (区别于 GIF 的 [0,D] 整段循环). 溶解则相邻重叠 + xfade.
+  const applyFaceCycleVideo = useCallback((shellId: string, baseFaceId: string, faceMats: Material[], dissolve: boolean) => {
+    const base = project.clips.find(c => c.id === baseFaceId && c.trackId === 'image') as ImageClip | undefined;
+    const shell = project.clips.find(c => c.id === shellId && c.trackId === 'image') as ImageClip | undefined;
+    if (!base || !shell || faceMats.length < 2) return;
+    const winStart = shell.start, win = Math.max(0.3, shell.end - shell.start);
+    const N = faceMats.length, seg = win / N;
+    const xf = dissolve ? Math.min(0.35, seg * 0.45) : 0;
+    const baseFL = base.faceLocal ?? { dxN: 0, dyN: 0, scaleRatio: 1, rotation: 0 };
+    const baseTr = base.transform ?? { ...DEFAULT_TRANSFORM };
+    const cycleFaces: ImageClip[] = faceMats.map((m, i) => ({
+      id: uid('fc'), trackId: 'image', lane: base.lane,
+      start: winStart + i * seg, end: winStart + ((i < N - 1) ? (i + 1) * seg + xf : win),
+      src: m.src, label: m.labelCn + '·脸', fx: 'none', blend: base.blend,
+      transform: { ...baseTr }, boundTo: shellId, faceLocal: { ...baseFL }, role: 'face',
+      xfadeIn: (dissolve && i > 0) ? xf : undefined,
+      xfadeOut: (dissolve && i < N - 1) ? xf : undefined,
+    } as ImageClip));
+    commit(p => ({ ...p, clips: [...p.clips.filter(c => !(c.trackId === 'image' && (c as ImageClip).boundTo === shellId)), ...cycleFaces] }));
+    setSelectedId(cycleFaces[0].id);
+    setCyclePop(null);
+    toast.success(`🎭 变脸 · ${N} 张表情${dissolve ? ' · 溶解过渡' : ' · 快切'} (在熊猫头时段内轮播)`);
+  }, [project.clips, commit]);
+
   // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
   // 5 命名空间打通: 内置 panda/face + upload-panda/face + custom-face + network-panda/face + custom-panda (整图)
@@ -3474,6 +3526,47 @@ export function AnimateMode() {
   return (
     <div className={'am-root' + (isMobile ? ' am-root-mobile' : '') + (view === 'gif' ? ' am-root--gif' : '')}>
       {view === 'video' ? (<>
+        {cyclePop && (() => {
+          const k = cycleQ.trim().toLowerCase();
+          const list = ALL_FACES.filter(m => !k || m.labelCn.toLowerCase().includes(k) || m.labelEn.toLowerCase().includes(k) || m.tags.some(tg => tg.toLowerCase().includes(k)));
+          const selMats = cycleSel.map(id => ALL_FACES.find(m => m.id === id)).filter(Boolean) as Material[];
+          const toggle = (id: string) => setCycleSel(s => s.includes(id) ? s.filter(x => x !== id) : (s.length >= 6 ? s : [...s, id]));
+          return (
+            <div className="am-combo-picker-overlay" onClick={() => setCyclePop(null)}>
+              <div className="am-combo-picker" onClick={e => e.stopPropagation()}>
+                <div className="am-combo-picker-head">
+                  <span>🎭 变脸 · 选 2-6 张表情依次轮播 · 已选 {cycleSel.length}/6</span>
+                  <button className="am-popover-close" onClick={() => setCyclePop(null)} type="button"><X size={14} /></button>
+                </div>
+                <div className="am-combo-picker-search material-search-box">
+                  <Search size={12} color="#888" />
+                  <input autoFocus type="text" className="material-search-input" placeholder="搜表情…" value={cycleQ} onChange={e => setCycleQ(e.target.value)} />
+                </div>
+                <div className="am-combo-picker-grid">
+                  {list.map(m => {
+                    const idx = cycleSel.indexOf(m.id);
+                    return (
+                      <button key={m.id} type="button" className={'am-combo-picker-card' + (idx >= 0 ? ' is-active' : '')} onClick={() => toggle(m.id)} title={m.labelCn}>
+                        <img src={m.src} alt={m.labelCn} className="am-combo-picker-thumb" loading="lazy" draggable={false} />
+                        <span className="am-combo-picker-name">{m.labelCn}</span>
+                        {idx >= 0 && <span className="am-cycle-badge">{idx + 1}</span>}
+                      </button>
+                    );
+                  })}
+                  {list.length === 0 && <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>}
+                </div>
+                <div className="am-combo-picker-foot">
+                  <button type="button" className={'am-chip' + (cycleDissolve ? ' is-active' : '')} onClick={() => setCycleDissolve(d => !d)} title="溶解 = 脸之间淡入淡出过渡; 关 = 直接快切(鬼畜)">
+                    {cycleDissolve ? '✓ 溶解过渡' : '○ 硬切快换'}
+                  </button>
+                  <button type="button" className="am-cycle-make" disabled={cycleSel.length < 2} onClick={() => applyFaceCycleVideo(cyclePop.shellId, cyclePop.faceId, selMats, cycleDissolve)}>
+                    生成变脸 · {cycleSel.length} 张
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       <AnimateToolbar
         duration={project.duration}
         clipCount={project.clips.length}
@@ -3516,6 +3609,7 @@ export function AnimateMode() {
           setUserBGMs={setUserBGMs}
           onQuickAdd={quickAdd}
           onAddCombo={addComboVideo}
+          onFaceCycle={triggerFaceCycleVideo}
           onAddDraftAsClips={addDraftAsClips}
           onAddClipsBatch={addClipsBatch}
           playhead={playhead}
@@ -3721,6 +3815,7 @@ export function AnimateMode() {
                   setUserBGMs={setUserBGMs}
                   onQuickAdd={(p) => { quickAdd(p); setMobileSheet(null); /* 加完关 sheet, 立即看效果 */ }}
                   onAddCombo={(pa, fa) => { void addComboVideo(pa, fa); setMobileSheet(null); }}
+                  onFaceCycle={() => { triggerFaceCycleVideo(); setMobileSheet(null); }}
                   onAddDraftAsClips={async (s) => { await addDraftAsClips(s); setMobileSheet(null); /* await 避免 toast 没出 sheet 已关 */ }}
                   onAddClipsBatch={(cs) => { addClipsBatch(cs); setMobileSheet(null); }}
                   playhead={playhead}
@@ -4121,7 +4216,7 @@ function LeftPane({
   mode = 'video',
   initialSeg,
   uploads, setUploads, userBGMs, setUserBGMs, onQuickAdd, onAddCombo, onAddDraftAsClips,
-  onAddClipsBatch, playhead, projectDuration,
+  onAddClipsBatch, onFaceCycle, playhead, projectDuration,
 }: {
   mode?: ProjectMode;
   initialSeg?: LibSeg;
@@ -4134,6 +4229,7 @@ function LeftPane({
   onAddDraftAsClips: (slot: DraftSlot) => void;
   // v23-k: 批量加成对 clip (caption + 链 TTS) — 走 commit 一次, 不走 quickAdd 多次
   onAddClipsBatch: (clips: Clip[]) => void;
+  onFaceCycle: () => void;   // 变脸 — 给选中/首个熊猫头配多张表情轮播 (host 解析目标)
   playhead: number;
   projectDuration: number;
 }) {
@@ -4615,6 +4711,11 @@ function LeftPane({
                   );
                 })}
               </div>
+              <button type="button" className="am-facecycle-btn" onClick={onFaceCycle}
+                title="变脸 — 给一个熊猫头配多张表情, 在它的时段里依次轮播 (溶解 / 快切)">
+                <span className="am-facecycle-emoji">🎭</span>
+                <span className="am-facecycle-txt"><b>变脸 · 多表情轮播</b><small>给熊猫头配 2-6 张脸, 在它的时段里自动依次切换</small></span>
+              </button>
               <p className="am-empty-line am-empty-hint">单击 / 拖到特效轨 · 选中片段后可绑定</p>
               {FX_LIB.filter(fx => fxGroup === 'all' || fx.group === fxGroup).map(fx => <FXRow key={fx.id} item={fx} onQuickAdd={onQuickAdd} />)}
             </div>
