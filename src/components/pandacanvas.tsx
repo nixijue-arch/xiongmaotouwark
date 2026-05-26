@@ -2,7 +2,7 @@
 // 替换 <img panda /> + <img face /> 双 overlay 方案
 // 用 canvas 合成 + 白色 mask 裁 face → 解决 face 白边遮 panda 黑廓 + 超出 shell 区
 //
-// Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
+// Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { composeMeme } from '@/lib/composeMeme';

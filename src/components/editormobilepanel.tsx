@@ -18,13 +18,20 @@ import { ALL_PANDAS, ALL_FACES } from '@/data/materials';
 function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return name === 'panda-head' || ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return name === 'panda-head'
+    || ALL_PANDAS.some(p => p.id === name)
+    || name.startsWith('upload-panda-')
+    || name.startsWith('network-panda-')
+    || name.startsWith('custom-panda-');
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-')
+    || name.startsWith('network-face-');
 }
 
 export function EditorMobilePanel() {

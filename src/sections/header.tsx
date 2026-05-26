@@ -1,5 +1,5 @@
 import { useMeme } from '@/context/memecontext';
-import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText, Menu } from 'lucide-react';
+import { Languages, Copy, CheckCircle2, Image, PenTool, BookOpen, User, Zap, FolderOpen, Crosshair, Database, FileText, Menu, Film } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '@/app';
 import { MobileNav } from '@/components/mobilenav';
@@ -72,6 +72,14 @@ export function Header({ page, setPage }: { page: Page; setPage: (page: Page) =>
         >
           <PenTool size={14} />
           <span className="link-label">{state.language === 'zh' ? '编辑器' : 'Editor'}</span>
+        </button>
+        <button
+          onClick={() => setPage('animate')}
+          className={page === 'animate' ? activeLinkClass : 'header-link'}
+          title={state.language === 'zh' ? '沙雕动画剪辑' : 'Animation Editor'}
+        >
+          <Film size={14} />
+          <span className="link-label">{state.language === 'zh' ? '沙雕动画' : 'Animation'}</span>
         </button>
         <button
           onClick={() => setPage('collection')}

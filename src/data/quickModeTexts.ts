@@ -1,4 +1,4 @@
-// 全站统一表情包文案池 (contributed by PandaHead — github.com/jokkibtc/panda)
+// 全站统一表情包文案池 (contributed by PandaHead — github.com/jsybtc/panda)
 //
 // ============== 协作者快速上手 ==============
 // 推荐: 浏览器跑 DEV 文案管理 (顶栏 📝 文案) → 加/改/删 caption → 点 "💾 保存到源文件"

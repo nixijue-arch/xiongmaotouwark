@@ -9,6 +9,8 @@ import { SmartExtractModal } from '@/components/smartextractmodal';
 import { calcEditorFaceLayout, getEditorPandaBox } from '@/lib/composeMeme';
 // 编辑器推荐文字 / 随机文案 ← 与 QuickMode 共享同一个池
 import { RECOMMEND_TEXTS_ZH as ZH_TEXTS, RECOMMEND_TEXTS_EN as EN_TEXTS } from '@/data/quickModeTexts';
+import { fmtShortcut } from '@/lib/keyboard';
+import { showDialog } from '@/components/appdialog';
 import { toast } from 'sonner';
 
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
@@ -218,13 +220,20 @@ function isPanda(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
   // 用 ALL_PANDAS (70 = 24 native + 46 ph) 不是只 PANDA_HEADS
-  return ALL_PANDAS.some(p => p.id === name) || name.startsWith('upload-panda-');
+  return ALL_PANDAS.some(p => p.id === name)
+    || name.startsWith('upload-panda-')
+    || name.startsWith('network-panda-')
+    || name.startsWith('custom-panda-')
+    || name === 'panda-head';   // handleAddFace 兜底命名 (跟 leftsidebar/collection 一致)
 }
 
 function isFace(e: MemeElement): boolean {
   if (e.type !== 'image') return false;
   const name = (e as ImageElement).name;
-  return ALL_FACES.some(f => f.id === name) || name.startsWith('upload-face-') || name.startsWith('custom-face-');
+  return ALL_FACES.some(f => f.id === name)
+    || name.startsWith('upload-face-')
+    || name.startsWith('custom-face-')
+    || name.startsWith('network-face-');
 }
 
 function getTargetPanda(elements: MemeElement[], selectedId: string | null) {
@@ -351,7 +360,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleExport = async () => {
     if (state.elements.length === 0) {
-      alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+      await showDialog({
+        title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+        message: state.language === 'zh' ? '请先添加内容再导出.' : 'Please add content before exporting.',
+        variant: 'info',
+        confirmText: state.language === 'zh' ? '知道了' : 'OK',
+      });
       return;
     }
     setIsExporting(true);
@@ -370,7 +384,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
       console.error('Export failed:', err);
-      alert(state.language === 'zh' ? '导出失败' : 'Export failed');
+      toast.error(state.language === 'zh' ? '导出失败' : 'Export failed');
     } finally {
       setIsExporting(false);
     }
@@ -505,12 +519,25 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
   // bind recommendText after definition
   editorRpcRef.current.recommendText = handleRecommendText;
 
-  const handleAddText = () => {
+  const handleAddText = async () => {
     const promptText = state.language === 'zh' ? '输入文字内容' : 'Enter text content';
     const defaultText = state.language === 'zh' ? '点击输入文字' : 'Click to enter text';
-    const text = window.prompt(promptText, defaultText);
-    if (!text || text.trim() === '') return;
-    const textEl: TextElement = { id: generateId(), type: 'text', text: text.trim(), x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
+    const res = await showDialog({
+      title: state.language === 'zh' ? '添加文字' : 'Add Text',
+      input: {
+        key: 'text',
+        label: promptText,
+        defaultValue: defaultText,
+        placeholder: defaultText,
+        required: true,
+      },
+      confirmText: state.language === 'zh' ? '添加' : 'Add',
+      cancelText: state.language === 'zh' ? '取消' : 'Cancel',
+    });
+    if (!res.confirmed) return;
+    const text = (res.input ?? '').trim();
+    if (!text) return;
+    const textEl: TextElement = { id: generateId(), type: 'text', text, x: 50, y: 440, width: 400, height: 50, rotation: 0, opacity: 1, zIndex: 100, fontFamily: '"Noto Sans SC", "Impact", sans-serif', fontSize: 36, fontWeight: 'bold', textAlign: 'center', fillColor: '#000000', strokeColor: '#000000', strokeWidth: 0 };
     dispatch({ type: 'ADD_ELEMENT', element: textEl });
     dispatch({ type: 'SELECT_ELEMENT', id: textEl.id });
   };
@@ -519,7 +546,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (platform === 'x') {
       // Copy canvas image then open X intent
       if (state.elements.length === 0) {
-        alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+        await showDialog({
+          title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+          message: state.language === 'zh' ? '请先添加内容再分享.' : 'Please add content before sharing.',
+          variant: 'info',
+          confirmText: state.language === 'zh' ? '知道了' : 'OK',
+        });
         return;
       }
       try {
@@ -548,7 +580,12 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
 
   const handleCopyPreview = async () => {
     if (state.elements.length === 0) {
-      alert(state.language === 'zh' ? '画布为空' : 'Canvas is empty');
+      await showDialog({
+        title: state.language === 'zh' ? '画布为空' : 'Empty Canvas',
+        message: state.language === 'zh' ? '请先添加内容再复制.' : 'Please add content before copying.',
+        variant: 'info',
+        confirmText: state.language === 'zh' ? '知道了' : 'OK',
+      });
       return;
     }
 
@@ -577,7 +614,7 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
     if (!file) return;
     const error = validateImageFile(file, state.language);
     if (error) {
-      alert(error);
+      toast.error(error);
       return;
     }
     try {
@@ -605,28 +642,39 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
       dispatch({ type: 'ADD_ELEMENT', element });
     } catch (err) {
       console.error('Upload asset failed:', err);
-      alert(state.language === 'zh' ? '图片读取失败，请重试' : 'Failed to read image, please try again');
+      toast.error(state.language === 'zh' ? '图片读取失败，请重试' : 'Failed to read image, please try again');
     }
   };
 
-  const handleCustomFaceConfirm = (dataUrl: string, facePos?: { x: number; y: number; w: number; h: number }) => {
+  const handleCustomFaceConfirm = async (dataUrl: string, facePos?: { x: number; y: number; w: number; h: number }) => {
     let currentPanda = getTargetPanda(state.elements, state.selectedId);
+    let pandaPos: { x: number; y: number; w: number; h: number };
     if (!currentPanda) {
       const defaultPanda = PANDA_HEADS[0];
       const defaultLay = getShellLayering(defaultPanda.id);
+      const pBox = await getEditorPandaBox(defaultPanda.src);
+      pandaPos = { x: pBox.x, y: pBox.y, w: pBox.w, h: pBox.h };
       currentPanda = {
-        id: generateId(), type: 'image', src: defaultPanda.src, name: defaultPanda.id,
-        x: 75, y: 50, width: 350, height: 350, rotation: 0, opacity: 1,
+        id: generateId(), type: 'image', src: pBox.croppedSrc, name: defaultPanda.id,
+        x: pBox.x, y: pBox.y, width: pBox.w, height: pBox.h, rotation: 0, opacity: 1,
         zIndex: defaultLay.pandaZ, blendMode: defaultLay.pandaBlend, flipX: false,
       };
       dispatch({ type: 'ADD_ELEMENT', element: currentPanda });
+    } else {
+      pandaPos = { x: currentPanda.x, y: currentPanda.y, w: currentPanda.width, h: currentPanda.height };
     }
+    // anchor (350-coord) → panda 实际 box 坐标
     const offset = facePos || getPandaFaceOffset(currentPanda.name);
+    const scaleX = pandaPos.w / 350;
+    const scaleY = pandaPos.h / 350;
     const faceCount = state.elements.filter(isFace).length;
     const customLay = getShellLayering(currentPanda.name);
     const element: ImageElement = {
       id: generateId(), type: 'image', src: dataUrl, name: `custom-face-${Date.now()}`,
-      x: offset.x + faceCount * 6, y: offset.y + faceCount * 6, width: offset.w, height: offset.h,
+      x: Math.round(pandaPos.x + offset.x * scaleX) + faceCount * 6,
+      y: Math.round(pandaPos.y + offset.y * scaleY) + faceCount * 6,
+      width: Math.round(offset.w * scaleX),
+      height: Math.round(offset.h * scaleY),
       rotation: 0, opacity: 1,
       zIndex: customLay.faceZ, blendMode: customLay.faceBlend, flipX: false,
     };
@@ -1406,6 +1454,41 @@ export function RightSidebar({ canvasRef }: { canvasRef: React.RefObject<HTMLDiv
           )}
         </div>
       </div>
+
+      {/* Shortcuts hint — desktop only (mobile 无键盘) */}
+      {!isMobile && (
+        <div className="p-4 win7-panel right-sidebar-static-panel">
+          <div className="text-xs font-semibold mb-2" style={{ color: PANEL_TEXT }}>
+            {state.language === 'zh' ? '快捷键' : 'Shortcuts'}
+          </div>
+          <ul className="space-y-1 text-[11px]" style={{ color: PANEL_MUTED }}>
+            {[
+              { spec: 'Mod+C', label: state.language === 'zh' ? '复制' : 'Copy' },
+              { spec: 'Mod+X', label: state.language === 'zh' ? '剪切' : 'Cut' },
+              { spec: 'Mod+V', label: state.language === 'zh' ? '粘贴' : 'Paste' },
+              { spec: 'Mod+D', label: state.language === 'zh' ? '复制为副本' : 'Duplicate' },
+              { spec: 'Delete', label: state.language === 'zh' ? '删除' : 'Delete' },
+              { spec: 'Escape', label: state.language === 'zh' ? '取消选择' : 'Deselect' },
+              { spec: '[', label: state.language === 'zh' ? '下一层' : 'Send Backward' },
+              { spec: ']', label: state.language === 'zh' ? '上一层' : 'Bring Forward' },
+              { spec: 'ArrowLeft', label: state.language === 'zh' ? '微调 1px (Shift 10px)' : 'Nudge 1px (Shift 10px)' },
+            ].map((row) => (
+              <li key={row.spec} className="flex items-center justify-between gap-2">
+                <span>{row.label}</span>
+                <kbd
+                  className="px-1.5 py-0.5 rounded font-mono text-[10px]"
+                  style={{ backgroundColor: PANEL_SURFACE, color: PANEL_TEXT, border: `1px solid ${PANEL_BORDER}` }}
+                >
+                  {fmtShortcut(row.spec)}
+                </kbd>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10px]" style={{ color: PANEL_MUTED }}>
+            {state.language === 'zh' ? '右键画布上的元素打开菜单' : 'Right-click an element for menu'}
+          </p>
+        </div>
+      )}
 
       {/* Social Share + Footer Actions */}
       <div className="p-4 space-y-2 mt-auto win7-panel win7-panel-footer">

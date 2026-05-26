@@ -16,8 +16,12 @@ import {
   makeNetworkMaterial,
   proxyImageUrl,
   proxyForCanvasDetect,
+  fetchAsDataUrl,
   detectColorfulness,
   detectAIPanda,
+  addRecentNetwork,
+  getRecentNetwork,
+  isGifResult,
   type NetworkResult,
   type SearchResponse,
 } from '@/lib/networkImage';
@@ -47,6 +51,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [resHint, setResHint] = useState<SearchResponse['hint']>(undefined);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [recent, setRecent] = useState<NetworkResult[]>([]);   // 全局「最近搜索」(用过的联网素材, 跨板块通用)
+  useEffect(() => { void getRecentNetwork().then(r => setRecent(r)); }, []);
   // 视觉过滤 (后台 lazy 检测, 默认开启):
   //   - colorfulDetection: 极端彩色 (colorfulRatio > 0.18) — 真彩照片 / 商用素材
   //   - aiPandaDetection: 高饱和 + 无白底 (avgSat > 28 && whiteBg < 10%) — AI 生成 "真实风格熊猫"
@@ -164,13 +170,16 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
     return () => { cancelled = true; };
   }, [results, colorfulDetection, aiPandaDetection]);
 
-  // IntersectionObserver — root = pspRoot (root 是 overflow scroll 容器)
+  // IntersectionObserver — sentinel 始终 mount, rootMargin 800px 提前 prefetch
+  // user 反馈"滚轮下调到一定程度直接自动加载, 不要干等" — rootMargin 大让滚到 ~70% 就 fire
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || !hasMore || loading) return;
+    if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loading) {
+        if (!entries[0]?.isIntersecting) return;
+        // 用 ref check 最新 state, 避免 effect 频繁重建 (依赖 query/loading/hasMore)
+        if (hasMore && !loading) {
           setPage((prevPage) => {
             const next = prevPage + 1;
             void doSearch(query, next);
@@ -178,7 +187,7 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
           });
         }
       },
-      { root: rootRef.current, rootMargin: '300px' },
+      { root: rootRef.current, rootMargin: '800px' },
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -197,27 +206,53 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
     if (c?.terms[0]) setQuery(c.terms[0]);
   }, [featuredChips]);
 
-  // 极简化 handleSelect (2026-05-17 v6):
-  //   user 反馈"修了十几次裁底都不能用" + "点击图片后不会加载到画板".
-  //   决定砍掉所有可能卡死的逻辑 — 0 await race / 0 Promise.race / 0 timer.
-  //   流程: 构造 mat (同步) → onSelect (可能 sync 也可能 async, await 兼容) → toast.
-  //   加 console.log 让 user F12 console 看实际调用链, 报 bug 直接粘.
+  // handleSelect v7 (2026-05-19 大改): fetch dataURL 一次 → 后续全秒响应
+  //   旧实现 mat.src = /api/proxy-image?url=... (proxy URL string)
+  //   → 编辑器画板 <img src=proxy URL> 每次加载都跨海 fetch 1-3s
+  //   → 草图保存时 snapshotElementsForDraft 再 fetch 转 dataURL (~1-3s)
+  //   → 草图加载时 element.src 是 proxy URL → 又 fetch (慢)
+  //   → 用户感知所有操作都卡, 反复跨海
+  //
+  //   新实现 mat.src = dataURL (一次 fetch 转换, 之后永不再 fetch)
+  //   → 编辑器画板 <img src=dataURL> **秒 paint** (0 网络)
+  //   → 草图保存 src 已是 dataURL, snapshotElementsForDraft 直接 return
+  //   → 草图加载 element.src 仍 dataURL, 秒 paint
+  //   → 跨 query 切 keyword/重新搜也保留 (state.elements 内 dataURL)
+  //
+  //   trade-off: 点 PSP 图等 1-3s (loading toast 明确进度) vs 旧版每次画板/草图加载都等
+  //   净时间省 (only once vs many times), UX 也更好 (toast 比破图等待友好)
   const handleSelect = useCallback(
     async (result: NetworkResult) => {
       if (busyId) return;
       setBusyId(result.id);
       const toastId = 'psp-action';
       toast.dismiss(toastId);
+      toast.loading(
+        props.lang === 'zh' ? '加载素材中…' : 'Loading…',
+        { id: toastId, duration: 12000 },
+      );
 
-      // ⭐ 编辑器/QuickMode 用 mat.src 必须走 proxy (不能走智能路由):
-      //   - 编辑器 ImageElement <img src={element.src}>: 浏览器加载时带 Referer=xiongmaotou.work,
-      //     baidu/so360 部分 thumb 看到第三方 referer 会 403 → 画板上图不显示
-      //   - composeMeme.loadImage 用 crossOrigin='anonymous' 抓 dataURL: 跨域无 CORS header → tainted
-      //   PSP 缩略图渲染用 proxyImageUrl 智能路由 (国内 CDN hot-link 快), 是另一回事.
-      const finalSrc = proxyForCanvasDetect(result.src);
+      let finalSrc: string;
+      try {
+        // fetch /api/proxy-image → blob → dataURL (一次过 ~1-3s)
+        finalSrc = await fetchAsDataUrl(result.src);
+      } catch (e) {
+        toast.error(
+          `${props.lang === 'zh' ? '素材加载失败' : 'Load failed'}: ${(e as Error).message ?? 'unknown'}`,
+          { id: toastId, duration: 4000 },
+        );
+        if (mountedRef.current) setBusyId(null);
+        return;
+      }
+
+      if (!mountedRef.current) {
+        toast.dismiss(toastId);
+        return;
+      }
+
       const mat: Material = {
         id: `network-panda-${result.id.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32)}`,
-        src: finalSrc,
+        src: finalSrc,  // dataURL — same-origin, 0 网络, 后续秒响应
         labelCn: (result.hint?.trim() || '网络熊猫').slice(0, 12),
         labelEn: 'Network Panda',
         tags: [],
@@ -232,13 +267,13 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
       // eslint-disable-next-line no-console
       console.log('[PSP] handleSelect →', {
         result: { id: result.id, source: result.source, hint: result.hint?.slice(0, 30) },
-        mat: { id: mat.id, srcPrefix: mat.src.slice(0, 60), srcLen: mat.src.length },
+        mat: { id: mat.id, srcType: 'dataURL', srcLen: mat.src.length },
       });
 
       try {
         await onSelect(mat, result);
-        // eslint-disable-next-line no-console
-        console.log('[PSP] onSelect resolved ✓ (caller dispatched / setCustomPanda done)');
+        void addRecentNetwork(result);   // 记入全局「最近搜索」(跨快速/编辑器/沙雕动画)
+        setRecent(prev => [result, ...prev.filter(x => x.id !== result.id)].slice(0, 20));
         toast.success(
           props.lang === 'zh' ? '已应用' : 'Applied',
           { id: toastId, duration: 2000 },
@@ -357,9 +392,8 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
           ))}
       </div>
 
-      {hasMore && !loading && (
-        <div ref={sentinelRef} className="psp-sentinel" aria-hidden="true" />
-      )}
+      {/* sentinel 始终 mount (即使 loading) — IO 不 disconnect, prefetch 更可靠 */}
+      <div ref={sentinelRef} className="psp-sentinel" aria-hidden="true" style={{ visibility: hasMore ? 'visible' : 'hidden' }} />
 
       {loading && (
         <div className="psp-loading">
@@ -391,6 +425,21 @@ export function PandaSearchPanel(props: PandaSearchPanelProps) {
       {!hasMore && results.length > 0 && !loading && (
         <div className="psp-end">— {t('networkSearchAllLoaded')} —</div>
       )}
+
+      {/* 最近搜索: 用过的联网素材 (全局 ≤20), 常驻底部, 点直接复用 */}
+      {recent.length > 0 && (
+        <div className="psp-recent">
+          <div className="psp-recent-head">🕘 {props.lang === 'zh' ? '最近用过' : 'Recent'}</div>
+          <div className="psp-recent-row">
+            {recent.map(r => (
+              <button key={r.id} type="button" className="psp-recent-card" disabled={!!busyId} onClick={() => handleSelect(r)} title={r.hint || ''}>
+                <img src={proxyImageUrl(r.thumb || r.src)} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0.25'; }} />
+                {isGifResult(r) && <span className="psp-gif-pill">GIF</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -419,7 +468,25 @@ function ResultCard({
   onSave,
   onLoadFailed,
 }: ResultCardProps) {
-  const thumbSrc = proxyImageUrl(item.thumb || item.src);
+  // 智能路由 → hot-link 失败时一次 retry → fallback proxy → 仍失败才 onLoadFailed
+  // 修复"网图有时加载不出来": baidu/so360 hot-link 偶发 timeout/403, 必须给 proxy 兜底
+  const initialSrc = proxyImageUrl(item.thumb || item.src);
+  const [thumbSrc, setThumbSrc] = useState(initialSrc);
+  const [hasRetried, setHasRetried] = useState(false);
+  // item 变化时 reset (key 已是 item.id 但保险起见)
+  useEffect(() => {
+    setThumbSrc(initialSrc);
+    setHasRetried(false);
+  }, [initialSrc]);
+  const handleImgError = useCallback(() => {
+    if (hasRetried) {
+      onLoadFailed();
+      return;
+    }
+    // 第一次失败 (大概率 hot-link 跨域被防盗链 / 短暂 404), retry 走 proxy
+    setHasRetried(true);
+    setThumbSrc(`/api/proxy-image?url=${encodeURIComponent(item.thumb || item.src)}`);
+  }, [hasRetried, item.thumb, item.src, onLoadFailed]);
 
   return (
     <div
@@ -445,20 +512,20 @@ function ResultCard({
         alt={item.hint || item.source}
         className="psp-thumb"
         style={item.w && item.h ? { aspectRatio: `${item.w} / ${item.h}` } : { aspectRatio: '1 / 1' }}
-        // referrerpolicy=no-referrer: 浏览器不发 Referer header, 国内 CDN (baidu/so360 hot-link)
-        // 看不到第三方 referer https://xiongmaotou.work → 不会触发 referer 防盗链 403.
-        // 这让智能路由 (国内 CDN 直加载) 100% 可靠, 国内用户首屏 200ms 内出图.
+        // referrerpolicy=no-referrer: 浏览器不发 Referer header, 防国内 CDN referer 防盗链
         referrerPolicy="no-referrer"
-        onError={onLoadFailed}
-        // 空图过滤: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
+        onError={handleImgError}
+        // 空图: HTTP 200 但 0 byte / 损坏 PNG / 0×0 → onLoad 触发但 naturalWidth=0
         onLoad={(e) => {
           const img = e.currentTarget;
           if (img.naturalWidth === 0 || img.naturalHeight === 0) {
-            onLoadFailed();
+            handleImgError();
           }
         }}
         draggable={false}
       />
+      {/* GIF 动图标记 (URL 嗅探) */}
+      {isGifResult(item) && <span className="psp-gif-pill psp-gif-pill-card">GIF</span>}
       {/* source badge 仅 DEV 显示 — 生产端用户不需知道图源 */}
       {import.meta.env.DEV && (
         <span className="psp-source-badge" aria-hidden="true" title={`${tFrom} ${item.source}`}>

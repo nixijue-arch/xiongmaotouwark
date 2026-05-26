@@ -1,11 +1,14 @@
 import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
 import { useMeme } from '@/context/memecontext';
-import type { ImageElement, TextElement } from '@/context/memecontext';
+import type { ImageElement, TextElement, MemeElement } from '@/context/memecontext';
 import { useIsMobile } from '@/hooks/usemediaquery';
 import Draggable from 'react-draggable';
-import { Eraser, RotateCcw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
+import { Eraser, RotateCcw, RotateCw, LogOut, Save, Undo2, Redo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchAsDataUrl } from '@/lib/networkImage';
+import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
+import { showDialog } from '@/components/appdialog';
+import { fmtShortcut, isMetaOrCtrl, isTypingTarget, matchShortcut } from '@/lib/keyboard';
 
 // blendMode 直接读 element.blendMode (创建时已根据 shell 透明/不透明 决定)
 // 不再用硬编码 isPandaElement / isFaceElement 判定
@@ -18,6 +21,7 @@ interface DraggableImageProps {
   onSelect: () => void;
   onStartEdit: () => void;
   canvasScale: number;
+  onContextMenu?: (e: React.MouseEvent, element: ImageElement) => void;
 }
 
 type ResizeDir = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
@@ -221,7 +225,39 @@ function ResizeHandle({ dir, onStart }: { dir: ResizeDir; onStart: (e: React.Mou
   );
 }
 
-function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScale }: DraggableImageProps) {
+function useRotateHandler(element: ImageElement, centerRef: React.RefObject<HTMLElement | null>) {
+  const { dispatch } = useMeme();
+  return useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation(); e.preventDefault();
+    const sx = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const sy = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const node = centerRef.current;
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const ccx = r.left + r.width / 2, ccy = r.top + r.height / 2;
+    const startAngle = Math.atan2(sy - ccy, sx - ccx) * 180 / Math.PI;
+    const startRot = element.rotation;
+    const onMove = (ev: MouseEvent | TouchEvent) => {
+      const px = 'touches' in ev ? ev.touches[0].clientX : ev.clientX;
+      const py = 'touches' in ev ? ev.touches[0].clientY : ev.clientY;
+      const a = Math.atan2(py - ccy, px - ccx) * 180 / Math.PI;
+      let rot = startRot + (a - startAngle);
+      if ((ev as MouseEvent).shiftKey) rot = Math.round(rot / 15) * 15;
+      rot = Math.round(((rot % 360) + 360) % 360);
+      dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { rotation: rot } });
+    };
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', cleanup);
+      window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', cleanup);
+      window.removeEventListener('touchcancel', cleanup); window.removeEventListener('blur', cleanup);
+    };
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', cleanup);
+    window.addEventListener('touchmove', onMove); window.addEventListener('touchend', cleanup);
+    window.addEventListener('touchcancel', cleanup); window.addEventListener('blur', cleanup);  // 失焦兜底 (跟 useResizeHandler 一致, 防拖拽中 alt-tab 漏清监听)
+  }, [element.id, element.rotation, dispatch, centerRef]);
+}
+
+function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScale, onContextMenu }: DraggableImageProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const { dispatch, state } = useMeme();
   const lang = state.language;
@@ -234,6 +270,8 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
   const rhSW = useResizeHandler(element, 'sw', canvasScale);
   const rhS  = useResizeHandler(element, 's', canvasScale);
   const rhSE = useResizeHandler(element, 'se', canvasScale);
+  const rotWrapRef = useRef<HTMLDivElement>(null);
+  const rotate = useRotateHandler(element, rotWrapRef);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +303,7 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
   return (
     <Draggable
       nodeRef={nodeRef}
-      cancel="button, input, .resize-handle"
+      cancel="button, input, .resize-handle, .rotate-handle"
       position={{ x: element.x, y: element.y }}
       scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
@@ -277,8 +315,9 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
         style={{ zIndex: isSelected ? 50 : element.zIndex, opacity: element.opacity }}
         onMouseDown={handleElementPointerStart}
         onTouchStart={handleElementPointerStart}
+        onContextMenu={onContextMenu ? (e) => { onSelect(); onContextMenu(e, element); } : undefined}
       >
-        <div style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
+        <div ref={rotWrapRef} style={{ position: 'relative', transform: `rotate(${element.rotation}deg)` }}>
           {/* panda 元素用 mix-blend-mode: multiply
               panda 在 face 之上 (zIndex panda > face)
               panda 白色内部 × face = face (face 透过来)
@@ -307,6 +346,9 @@ function DraggableImage({ element, isSelected, onSelect, onStartEdit, canvasScal
                 <ResizeHandle dir="sw" onStart={handleSelectionStart(rhSW)} />
                 <ResizeHandle dir="s"  onStart={handleSelectionStart(rhS)} />
                 <ResizeHandle dir="se" onStart={handleSelectionStart(rhSE)} />
+                <div className="absolute" style={{ left: '50%', top: -22, width: 2, height: 22, transform: 'translateX(-50%)', background: '#FF5E00', zIndex: 14, pointerEvents: 'none' }} />
+                <div className="absolute rotate-handle" style={{ left: '50%', top: -29, width: 16, height: 16, marginLeft: -8, borderRadius: '50%', background: '#FF5E00', border: '2px solid #fff', zIndex: 16, pointerEvents: 'auto', cursor: 'grab', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}
+                  onMouseDown={handleSelectionStart(rotate)} onTouchStart={handleSelectionStart(rotate)} title="拖动旋转 (Shift 锁 15°)"><RotateCw size={10} strokeWidth={2.6} style={{ pointerEvents: 'none' }} /></div>
               </div>
               {/* 编辑/删除 action — base 调大 (font 14, padding 5/11, svg 13, gap 4)
                  * scale 限 max(0.6, 1/canvasScale) → canvasScale 2.0 时 visual 仍 base*0.6 = font 8.4
@@ -405,11 +447,12 @@ function useTextResizeHandler(element: TextElement, canvasScale: number) {
   }, [element, dispatch]);
 }
 
-function DraggableText({ element, isSelected, onSelect, canvasScale }: {
+function DraggableText({ element, isSelected, onSelect, canvasScale, onContextMenu }: {
   element: TextElement;
   isSelected: boolean;
   onSelect: () => void;
   canvasScale: number;
+  onContextMenu?: (e: React.MouseEvent, element: TextElement) => void;
 }) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -477,7 +520,7 @@ function DraggableText({ element, isSelected, onSelect, canvasScale }: {
   return (
     <Draggable
       nodeRef={nodeRef}
-      cancel="button, input, .resize-handle"
+      cancel="button, input, .resize-handle, .rotate-handle"
       position={{ x: element.x, y: element.y }}
       scale={canvasScale}
       onStop={(_, data) => dispatch({ type: 'UPDATE_ELEMENT', id: element.id, updates: { x: data.x, y: data.y } })}
@@ -489,6 +532,7 @@ function DraggableText({ element, isSelected, onSelect, canvasScale }: {
         style={{ zIndex: isSelected ? 50 : element.zIndex, cursor: isEditing ? 'text' : 'move' }}
         onClick={handleClick}
         onDoubleClick={isMobile ? undefined : handleDoubleClick}
+        onContextMenu={onContextMenu ? (e) => { if (isEditing) return; onSelect(); onContextMenu(e, element); } : undefined}
       >
         {isEditing ? (
           <input
@@ -583,6 +627,8 @@ function buildCursorSVG(tool: 'brush' | 'eraser', size: number, color: string): 
 /* ========== CanvasArea ========== */
 export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivElement | null> }) {
   const { state, dispatch, generateId, undo, redo, canUndo, canRedo } = useMeme();
+  const ctxMenu = useContextMenu();
+  const clipboardRef = useRef<MemeElement | null>(null);
 
   // Image edit (eraser/brush) state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -718,7 +764,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
   const handleDroppedImage = useCallback(async (file: File, clientX: number, clientY: number) => {
     const validationError = validateDroppedImage(file, state.language);
     if (validationError) {
-      alert(validationError);
+      toast.error(validationError);
       return;
     }
 
@@ -756,7 +802,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
       });
     } catch (error) {
       console.error('Drop image failed:', error);
-      alert(state.language === 'zh' ? '拖拽图片失败，请重试' : 'Failed to drop image, please try again');
+      toast.error(state.language === 'zh' ? '拖拽图片失败，请重试' : 'Failed to drop image, please try again');
     }
   }, [dispatch, generateId, getCanvasPoint, state.language]);
 
@@ -961,52 +1007,280 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
     lastDrawPos.current = null;
   };
 
-  /* ===== Keyboard: Delete / Undo / Redo ===== */
+  /* ===== Clipboard / duplicate / z-order helpers ===== */
+  const findElement = useCallback((id: string | null): MemeElement | undefined => {
+    if (!id) return undefined;
+    return state.elements.find(e => e.id === id);
+  }, [state.elements]);
+
+  const cloneElementAt = useCallback((source: MemeElement, x: number, y: number): MemeElement => {
+    const base = { ...source, id: generateId(), x, y, zIndex: 0 };
+    return base as MemeElement;
+  }, [generateId]);
+
+  const copyToClipboard = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    clipboardRef.current = { ...el };
+  }, [findElement]);
+
+  const pasteFromClipboard = useCallback((targetX?: number, targetY?: number) => {
+    const source = clipboardRef.current;
+    if (!source) return;
+    const offsetX = typeof targetX === 'number' ? targetX : Math.min(CANVAS_SIZE - source.width, Math.max(0, source.x + 16));
+    const offsetY = typeof targetY === 'number' ? targetY : Math.min(CANVAS_SIZE - source.height, Math.max(0, source.y + 16));
+    const element = cloneElementAt(source, offsetX, offsetY);
+    dispatch({ type: 'ADD_ELEMENT', element });
+  }, [cloneElementAt, dispatch]);
+
+  const duplicateElement = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    const offsetX = Math.min(CANVAS_SIZE - el.width, Math.max(0, el.x + 16));
+    const offsetY = Math.min(CANVAS_SIZE - el.height, Math.max(0, el.y + 16));
+    const element = cloneElementAt(el, offsetX, offsetY);
+    dispatch({ type: 'ADD_ELEMENT', element });
+  }, [cloneElementAt, dispatch, findElement]);
+
+  const cutElement = useCallback((id: string | null) => {
+    if (!id) return;
+    copyToClipboard(id);
+    dispatch({ type: 'REMOVE_ELEMENT', id });
+  }, [copyToClipboard, dispatch]);
+
+  const deleteElement = useCallback((id: string | null) => {
+    if (!id) return;
+    dispatch({ type: 'REMOVE_ELEMENT', id });
+  }, [dispatch]);
+
+  const bringForward = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: el.zIndex + 1 } });
+  }, [dispatch, findElement]);
+
+  const sendBackward = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: Math.max(0, el.zIndex - 1) } });
+  }, [dispatch, findElement]);
+
+  const bringToFront = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    const maxZ = state.elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: maxZ + 1 } });
+  }, [dispatch, findElement, state.elements]);
+
+  const sendToBack = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el) return;
+    const minZ = state.elements.reduce((m, e) => Math.min(m, e.zIndex), Infinity);
+    const next = Number.isFinite(minZ) ? Math.max(0, minZ - 1) : 0;
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { zIndex: next } });
+  }, [dispatch, findElement, state.elements]);
+
+  const toggleFlipX = useCallback((id: string | null) => {
+    const el = findElement(id);
+    if (!el || el.type !== 'image') return;
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { flipX: !(el as ImageElement).flipX } });
+  }, [dispatch, findElement]);
+
+  const nudgeElement = useCallback((id: string | null, dx: number, dy: number) => {
+    const el = findElement(id);
+    if (!el) return;
+    const x = Math.max(0, Math.min(CANVAS_SIZE - el.width, Math.round(el.x + dx)));
+    const y = Math.max(0, Math.min(CANVAS_SIZE - el.height, Math.round(el.y + dy)));
+    dispatch({ type: 'UPDATE_ELEMENT', id: el.id, updates: { x, y } });
+  }, [dispatch, findElement]);
+
+  /* ===== Context menu builders ===== */
+  const buildElementMenu = useCallback((el: MemeElement): ContextMenuItem[] => {
+    const isImage = el.type === 'image';
+    const items: ContextMenuItem[] = [
+      { id: 'copy', label: state.language === 'zh' ? '复制' : 'Copy', shortcut: fmtShortcut('Mod+C'), onClick: () => copyToClipboard(el.id) },
+      { id: 'cut', label: state.language === 'zh' ? '剪切' : 'Cut', shortcut: fmtShortcut('Mod+X'), onClick: () => cutElement(el.id) },
+      { id: 'paste', label: state.language === 'zh' ? '粘贴' : 'Paste', shortcut: fmtShortcut('Mod+V'), disabled: !clipboardRef.current, onClick: () => pasteFromClipboard() },
+      { id: 'duplicate', label: state.language === 'zh' ? '复制为副本' : 'Duplicate', shortcut: fmtShortcut('Mod+D'), onClick: () => duplicateElement(el.id) },
+      { id: 'sep1', label: '', separator: true },
+      { id: 'front', label: state.language === 'zh' ? '置顶' : 'Bring to Front', onClick: () => bringToFront(el.id) },
+      { id: 'forward', label: state.language === 'zh' ? '上一层' : 'Bring Forward', shortcut: fmtShortcut(']'), onClick: () => bringForward(el.id) },
+      { id: 'backward', label: state.language === 'zh' ? '下一层' : 'Send Backward', shortcut: fmtShortcut('['), onClick: () => sendBackward(el.id) },
+      { id: 'back', label: state.language === 'zh' ? '置底' : 'Send to Back', onClick: () => sendToBack(el.id) },
+      { id: 'sep2', label: '', separator: true },
+    ];
+    if (isImage) {
+      items.push({ id: 'flip', label: state.language === 'zh' ? '水平翻转' : 'Flip Horizontal', onClick: () => toggleFlipX(el.id) });
+      items.push({
+        id: 'copyurl',
+        label: state.language === 'zh' ? '复制为图片 URL' : 'Copy Image URL',
+        onClick: () => {
+          const src = (el as ImageElement).src;
+          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+            void navigator.clipboard.writeText(src).catch(() => undefined);
+          }
+        },
+      });
+      items.push({ id: 'sep3', label: '', separator: true });
+    }
+    items.push({ id: 'delete', label: state.language === 'zh' ? '删除' : 'Delete', shortcut: fmtShortcut('Delete'), danger: true, onClick: () => deleteElement(el.id) });
+    return items;
+  }, [bringForward, bringToFront, copyToClipboard, cutElement, deleteElement, duplicateElement, pasteFromClipboard, sendBackward, sendToBack, state.language, toggleFlipX]);
+
+  const buildBlankMenu = useCallback((): ContextMenuItem[] => {
+    return [
+      { id: 'paste', label: state.language === 'zh' ? '粘贴' : 'Paste', shortcut: fmtShortcut('Mod+V'), disabled: !clipboardRef.current, onClick: () => pasteFromClipboard() },
+      { id: 'selectall', label: state.language === 'zh' ? '全选' : 'Select All', shortcut: fmtShortcut('Mod+A'), disabled: state.elements.length === 0, onClick: () => {
+        const last = state.elements[state.elements.length - 1];
+        if (last) dispatch({ type: 'SELECT_ELEMENT', id: last.id });
+      } },
+      { id: 'sep1', label: '', separator: true },
+      { id: 'clear', label: state.language === 'zh' ? '清空画布' : 'Clear Canvas', danger: true, disabled: state.elements.length === 0, onClick: async () => {
+        const res = await showDialog({
+          title: state.language === 'zh' ? '清空画布' : 'Clear Canvas',
+          message: state.language === 'zh' ? '确定清空画布？' : 'Clear the canvas?',
+          destructive: true,
+          confirmText: state.language === 'zh' ? '清空' : 'Clear',
+          cancelText: state.language === 'zh' ? '取消' : 'Cancel',
+        });
+        if (res.confirmed) dispatch({ type: 'CLEAR_CANVAS' });
+      } },
+    ];
+  }, [dispatch, pasteFromClipboard, state.elements, state.language]);
+
+  const openElementMenu = useCallback((e: React.MouseEvent, el: MemeElement) => {
+    ctxMenu.open(e, buildElementMenu(el));
+  }, [buildElementMenu, ctxMenu]);
+
+  const handleBlankContextMenu = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.canvas-element')) return;
+    if ((e.target as HTMLElement).closest('.edit-toolbar')) return;
+    ctxMenu.open(e, buildBlankMenu());
+  }, [buildBlankMenu, ctxMenu]);
+
+  /* ===== Keyboard: full editor shortcuts =====
+   * Editing mode (brush/eraser) optimizes for stroke-level undo + tool toggle.
+   * Otherwise: full editor shortcuts (Mod+Z/Y undo/redo, copy/cut/paste/dup, nudge, z-order). */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement;
-      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable);
-      if (isTyping) return;
-      // Delete / Backspace 删选中元素
-      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId && !editingId) {
-        e.preventDefault();
-        dispatch({ type: 'REMOVE_ELEMENT', id: state.selectedId });
-        dispatch({ type: 'SELECT_ELEMENT', id: null });
-        return;
-      }
-      // Ctrl+Z / Cmd+Z = undo
-      // ⭐ 编辑模式优先: brush stroke 走本地 editHistory (粒度=单笔). editHistory 用尽 fallback main undo
-      //   (画板级 — undo 整个 element src 替换前的状态)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (editingId && editHistory.length > 1) {
-          handleUndoEdit();  // 编辑模式: 撤回最后一笔 stroke
-        } else {
-          undo();  // 全局: 撤回画板状态
-        }
-        return;
-      }
-      // Ctrl+Y or Ctrl+Shift+Z = redo (编辑模式暂不支持 stroke-level redo)
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      // === inline edit mode 快捷键 (画笔/橡皮/完成/退出) ===
+      if (isTypingTarget(e)) return;
+
+      // Inline edit mode (brush/eraser) — stroke-level undo + tool keys
       if (editingId) {
+        // Mod+Z 编辑模式优先: 多笔 stroke 走本地 editHistory; 只剩 1 笔 fallback 全局
+        if (matchShortcut(e, 'Mod+Z')) {
+          e.preventDefault();
+          if (editHistory.length > 1) handleUndoEdit(); else undo();
+          return;
+        }
         if (e.key.toLowerCase() === 'b') { e.preventDefault(); setEditTool('brush'); return; }
         if (e.key.toLowerCase() === 'e') { e.preventDefault(); setEditTool('eraser'); return; }
         if (e.key === 'Enter') { e.preventDefault(); handleFinishEdit(); return; }
         if (e.key === 'Escape') { e.preventDefault(); exitEdit(); return; }
         if (e.key === '[') { e.preventDefault(); setEditSize((s) => Math.max(2, s - 2)); return; }
         if (e.key === ']') { e.preventDefault(); setEditSize((s) => Math.min(40, s + 2)); return; }
+        return;
+      }
+
+      const selectedId = state.selectedId;
+
+      // Undo / Redo (全局)
+      if (matchShortcut(e, 'Mod+Z')) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (matchShortcut(e, 'Mod+Y') || matchShortcut(e, 'Mod+Shift+Z')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (selectedId) {
+          e.preventDefault();
+          dispatch({ type: 'SELECT_ELEMENT', id: null });
+        }
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedId) {
+          e.preventDefault();
+          deleteElement(selectedId);
+        }
+        return;
+      }
+
+      if (matchShortcut(e, 'Mod+A')) {
+        if (state.elements.length === 0) return;
+        e.preventDefault();
+        const last = state.elements[state.elements.length - 1];
+        if (last) dispatch({ type: 'SELECT_ELEMENT', id: last.id });
+        return;
+      }
+
+      if (matchShortcut(e, 'Mod+C')) {
+        if (!selectedId) return;
+        e.preventDefault();
+        copyToClipboard(selectedId);
+        return;
+      }
+
+      if (matchShortcut(e, 'Mod+X')) {
+        if (!selectedId) return;
+        e.preventDefault();
+        cutElement(selectedId);
+        return;
+      }
+
+      if (matchShortcut(e, 'Mod+V')) {
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        pasteFromClipboard();
+        return;
+      }
+
+      if (matchShortcut(e, 'Mod+D')) {
+        if (!selectedId) return;
+        e.preventDefault();
+        duplicateElement(selectedId);
+        return;
+      }
+
+      if (isMetaOrCtrl(e)) return;
+
+      if (e.key === ']') {
+        if (!selectedId) return;
+        e.preventDefault();
+        bringForward(selectedId);
+        return;
+      }
+
+      if (e.key === '[') {
+        if (!selectedId) return;
+        e.preventDefault();
+        sendBackward(selectedId);
+        return;
+      }
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (!selectedId) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        let dx = 0, dy = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        else if (e.key === 'ArrowRight') dx = step;
+        else if (e.key === 'ArrowUp') dy = -step;
+        else if (e.key === 'ArrowDown') dy = step;
+        nudgeElement(selectedId, dx, dy);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // editHistory.length 加入 deps: 编辑模式 Ctrl+Z 路径切换 (本地 stroke undo vs 全局 undo) 依赖它
+    // editHistory.length / undo / redo 影响 brush-mode 路径切换跟全局 undo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.selectedId, editingId, dispatch, undo, redo, editHistory.length]);
+  }, [bringForward, copyToClipboard, cutElement, deleteElement, dispatch, duplicateElement, editingId, editHistory.length, nudgeElement, pasteFromClipboard, redo, sendBackward, state.elements, state.selectedId, undo]);
 
   const editingEl = state.elements.find(e => e.id === editingId) as ImageElement | undefined;
   const isMobile = useIsMobile();
@@ -1147,13 +1421,14 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
             height: CANVAS_SIZE,
             boxShadow: '0 16px 32px rgba(108, 146, 196, 0.22)',
             border: '3px solid #88a6cf',
-            overflow: 'hidden',
+            overflow: 'visible',  /* 选框/手柄/超出画板元素不被裁 (可选中拖拽); 导出走 composeMeme canvas 按 CANVAS_SIZE 裁, 不受影响 */
             flexShrink: 0,
             transform: canvasScale !== 1 ? `scale(${canvasScale})` : undefined,
             transformOrigin: 'top left',
           }}
           onClick={handleCanvasClick}
           onTouchEnd={handleCanvasClick}
+          onContextMenu={isMobile ? undefined : handleBlankContextMenu}
           onDragEnter={handleCanvasDragEnter}
           onDragOver={handleCanvasDragOver}
           onDragLeave={handleCanvasDragLeave}
@@ -1199,6 +1474,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                   dispatch({ type: 'SELECT_ELEMENT', id: el.id });
                   startEdit(el.id);
                 }}
+                onContextMenu={isMobile ? undefined : openElementMenu}
               />
             );
           }
@@ -1212,6 +1488,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
                 if (editingId) exitEdit();
                 dispatch({ type: 'SELECT_ELEMENT', id: el.id });
               }}
+              onContextMenu={isMobile ? undefined : openElementMenu}
             />
           );
         })}
@@ -1403,6 +1680,7 @@ export function CanvasArea({ canvasRef }: { canvasRef: React.RefObject<HTMLDivEl
         )}
       </div>
     </div>
+    {ctxMenu.render()}
     </div>
   );
 }

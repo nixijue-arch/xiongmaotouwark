@@ -8,6 +8,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="color-scheme" content="light only" />
+    <!-- Permissions-Policy fallback (本地 dev 没 netlify headers, 用 meta 兜底). 修 Copy failed. -->
+    <meta http-equiv="Permissions-Policy" content="clipboard-write=(self), clipboard-read=(self)" />
     <link rel="icon" type="image/png" href="/site-logo.png" />
     <title>MemeForge</title>
   </head>

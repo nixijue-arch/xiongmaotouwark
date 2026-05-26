@@ -6,7 +6,7 @@
 //   - 缩略图 + 搜索 + 按 mode 筛 + 按 tab(panda/face) 切
 //   - 导出 TS code 永久入库
 //
-// Contributed by PandaHead — github.com/jokkibtc/panda
+// Contributed by PandaHead — github.com/jsybtc/panda
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Copy, Trash2, RotateCcw, Pencil } from 'lucide-react';

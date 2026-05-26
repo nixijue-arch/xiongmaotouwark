@@ -11,6 +11,7 @@ import { AboutPanda } from '@/sections/aboutpanda';
 import { QuickMode } from '@/sections/quickmode';
 import { Collection } from '@/sections/collection';
 import { Toaster } from 'sonner';
+import { AppDialogHost } from '@/components/appdialog';
 import './app.css';
 import './sections/mobile.css';
 
@@ -25,7 +26,11 @@ const CaptionManageLazy = import.meta.env.DEV
   ? lazy(() => import('@/sections/captionmanage').then((m) => ({ default: m.CaptionManage })))
   : null;
 
-export type Page = 'quick' | 'editor' | 'collection' | 'museum' | 'about' | 'calibrate' | 'materials' | 'captions';
+// 沙雕动画 (animate + GIF, ~350KB/96KB gz) lazy 化 — 不进主包, 点开板块才加载.
+// 实测主包关键路径 -27% (-95KB gz JS + CSS 自动分离 -20KB gz). prod 必做, 零功能/质量损失.
+const AnimateMode = lazy(() => import('@/sections/animatemode').then((m) => ({ default: m.AnimateMode })));
+
+export type Page = 'quick' | 'editor' | 'animate' | 'collection' | 'museum' | 'about' | 'calibrate' | 'materials' | 'captions';
 
 function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -33,7 +38,7 @@ function App() {
     if (import.meta.env.DEV) {
       const url = new URLSearchParams(window.location.search);
       const p = url.get('page');
-      const allowed: Page[] = ['quick', 'editor', 'collection', 'museum', 'about', 'calibrate', 'materials', 'captions'];
+      const allowed: Page[] = ['quick', 'editor', 'animate', 'collection', 'museum', 'about', 'calibrate', 'materials', 'captions'];
       if (p && (allowed as string[]).includes(p)) {
         return p as Page;
       }
@@ -55,8 +60,12 @@ function App() {
         <Header page={page} setPage={setPage} />
         {page === 'quick' ? (
           <QuickMode onOpenEditor={() => setPage('editor')} />
+        ) : page === 'animate' ? (
+          <Suspense fallback={<div style={{ flex: 1, padding: 32, color: '#888' }}>加载沙雕动画...</div>}>
+            <AnimateMode />
+          </Suspense>
         ) : page === 'collection' ? (
-          <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} />
+          <Collection onOpenQuick={() => setPage('quick')} onOpenEditor={() => setPage('editor')} onOpenAnimate={() => setPage('animate')} />
         ) : page === 'editor' ? (
           <>
             <div className="editor-layout flex-1 flex overflow-hidden main-content">
@@ -85,6 +94,7 @@ function App() {
           <AboutPanda onBack={() => setPage('editor')} />
         )}
         <Toaster position="top-right" theme="dark" richColors closeButton />
+        <AppDialogHost />
       </div>
     </MemeProvider>
   );

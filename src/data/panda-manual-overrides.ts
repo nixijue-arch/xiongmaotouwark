@@ -5,7 +5,7 @@
 // 优先级：手动校准 > align_panda.py 自动 > 默认
 // 在 materials.ts 末尾应用，覆盖 panda-align-overrides.ts 的自动检测值
 //
-// Contributed by PandaHead — github.com/jokkibtc/panda
+// Contributed by PandaHead — github.com/jsybtc/panda
 
 export const PANDA_MANUAL_OVERRIDES: Record<string, { x: number; y: number; w: number; h: number }> = {
   'panda-01': { x: 95, y: 93, w: 170, h: 170 },

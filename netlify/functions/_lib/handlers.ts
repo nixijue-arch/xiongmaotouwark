@@ -203,6 +203,7 @@ export async function handleProxyImage(req: Request): Promise<Response> {
 
   try {
     const upstream = await fetchWithTimeout(parsed.toString(), {
+      redirect: 'error',   // 不跟随重定向: 防白名单 CDN 301/302 → 内网/云元数据 (169.254.169.254) 绕过 isSafeHost (SSRF 加固)
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

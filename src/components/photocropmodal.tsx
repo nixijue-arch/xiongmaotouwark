@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Upload, Check, RotateCcw, Move, Square, PenTool, Eraser, Undo2, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import { PANDA_HEADS } from '@/data/materials';
 
 type Tool = 'rect' | 'lasso';
@@ -140,9 +141,9 @@ export function PhotoCropModal({ isOpen, onClose, onConfirm, language }: PhotoCr
   }, [historyIndex]);
 
   const undo = useCallback(() => {
-    if (historyIndex < 0 || history.length === 0) { alert(t.noUndo); return; }
+    if (historyIndex < 0 || history.length === 0) { toast.warning(t.noUndo); return; }
     const idx = historyIndex - 1;
-    if (idx < 0) { alert(t.noUndo); return; }
+    if (idx < 0) { toast.warning(t.noUndo); return; }
     const canvas = previewCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');

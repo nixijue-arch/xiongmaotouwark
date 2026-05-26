@@ -2,7 +2,7 @@
 // localStorage 池 + 导出 TS code 工具, 让用户在校准里持续补 caption
 // pickRandomText 在 DEV 模式会自动合并这里的条目, QuickMode 抽签立即生效
 //
-// Contributed by PandaHead — github.com/jokkibtc/panda
+// Contributed by PandaHead — github.com/jsybtc/panda
 
 import type { Mode } from '@/data/quickModeTexts';
 import { ALL_MODES } from '@/data/quickModeTexts';

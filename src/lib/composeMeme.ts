@@ -19,7 +19,7 @@
 //   g. destination-out + dark-opaque mask (preserves sunglasses/signs)
 //   h. composite face onto cropped panda
 //
-// Contributed by PandaHead (https://pandahead.fun · github.com/jokkibtc/panda)
+// Contributed by PandaHead (https://pandahead.fun · github.com/jsybtc/panda)
 
 const _imgCache = new Map<string, Promise<HTMLImageElement>>();
 
@@ -53,7 +53,7 @@ const _bboxCache = new Map<string, Bbox>();
 // 把 face PNG 按 alpha>50 的 bbox 抠出来 → 紧凑 dataURL, 加上 padding 防边缘 alpha-clip
 // 编辑器加 face 元素时用 — 元素尺寸 = bbox 而不是 naturalWidth 含的大量透明 padding
 // 这样 face 在 panda anchor 里精确就位, 不会因为 PNG 含 padding 撑得过大
-export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: string; w: number; h: number }> {
+export async function bboxCropImage(src: string, padPx = 4, fillShell = false, maxPx = 0): Promise<{ dataUrl: string; w: number; h: number }> {
   const img = await loadImage(src);
   const [x1, y1, x2, y2] = getContentBbox(img);
   const cw = Math.max(1, x2 - x1);
@@ -61,7 +61,23 @@ export async function bboxCropImage(src: string, padPx = 4): Promise<{ dataUrl: 
   const c = document.createElement('canvas');
   c.width = cw + padPx * 2;
   c.height = ch + padPx * 2;
-  c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  if (fillShell) {
+    // 沙雕动画两图层 panda: 内部 transparent 填白防场景透出 (几何尺寸不变 → face anchor 不偏)
+    drawShellFilled(c.getContext('2d', { willReadFrequently: true })!, img, x1, y1, cw, ch, padPx, padPx, c.width, c.height);
+  } else {
+    c.getContext('2d')!.drawImage(img, x1, y1, cw, ch, padPx, padPx, cw, ch);
+  }
+  // maxPx>0 且超限: 等比缩小成品 (减 dataURL 体积/IDB 占用; w/h 同步缩, 调用方 anchor 用 box.w 一致)
+  if (maxPx > 0 && Math.max(c.width, c.height) > maxPx) {
+    const ds = maxPx / Math.max(c.width, c.height);
+    const c2 = document.createElement('canvas');
+    c2.width = Math.max(1, Math.round(c.width * ds));
+    c2.height = Math.max(1, Math.round(c.height * ds));
+    const cx2 = c2.getContext('2d')!;
+    cx2.imageSmoothingEnabled = true; cx2.imageSmoothingQuality = 'high';
+    cx2.drawImage(c, 0, 0, c2.width, c2.height);
+    return { dataUrl: c2.toDataURL('image/png'), w: c2.width, h: c2.height };
+  }
   return { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height };
 }
 
@@ -110,6 +126,7 @@ export function getContentBbox(img: HTMLImageElement, alphaThresh = 50): Bbox {
   const bbox: Bbox = x2 < 0
     ? [0, 0, W, H]
     : [Math.floor(x1 * inv), Math.floor(y1 * inv), Math.min(W, Math.ceil((x2 + 1) * inv)), Math.min(H, Math.ceil((y2 + 1) * inv))];
+  if (_bboxCache.size >= 200) { const _k = _bboxCache.keys().next().value; if (_k) _bboxCache.delete(_k); }  // 上限防 dataURL key 无限涨
   _bboxCache.set(key, bbox);
   return bbox;
 }
@@ -152,6 +169,8 @@ function getPandaDarkMaskCropped(
     arr[i + 3] = isDarkOpaque ? 255 : 0;
   }
   ctx.putImageData(data, 0, 0);
+  // LRU 上限 60 — darkMask 是整张 canvas, 搜图/上传的 dataURL face 会无限涨; 淘汰时清 backing store
+  if (_darkMaskCache.size >= 60) { const _k = _darkMaskCache.keys().next().value; if (_k) { const _old = _darkMaskCache.get(_k); if (_old) { _old.width = 0; _old.height = 0; } _darkMaskCache.delete(_k); } }
   _darkMaskCache.set(key, c);
   return c;
 }
@@ -162,12 +181,72 @@ export interface ComposeOpts {
   faceOffset: { x: number; y: number; w: number; h: number }; // 350-coord space (align_panda.py)
   rotation?: number; // degrees
   flipX?: boolean;
-  size?: number; // max output dim (proportional output may be Wout=size, Hout<size 或反之)
+  size?: number; // max output dim (proportional output may be Wout=size, Hout<you 或反之)
   faceFill?: number; // face content bbox 占 anchor 的比例，default 0.95
+  // 填充 panda 内部 transparent 为白色 (沙雕动画专用) — 让 panda 头内部不透出背景
+  // 算法: flood fill from 4 corners 标记 "外部 transparent", 内部 transparent fill 白
+  // 编辑器不用 (透明 shell 方便用户调整), 沙雕动画用 (image 直接放场景上不漏底)
+  fillInternalShell?: boolean;
+}
+
+// 描边款 panda 的内部 transparent shell 处理 — flood fill 区分内/外 transparent
+// 4 corners 是外部, BFS 标记 reachable. 不 reachable 的 alpha < threshold 像素 = 内部
+// 返回 mask: 1=外部 transparent (保留 transparent), 0=内部 or panda 实体 (要么 fill 白 要么 panda overlay)
+function detectOuterTransparent(imgData: Uint8ClampedArray, w: number, h: number, alphaThresh = 30): Uint8Array {
+  const total = w * h;
+  const visited = new Uint8Array(total);
+  // 用 stack-based iterative flood fill (BFS using array as queue)
+  const stack: number[] = [];
+  // 4 corners 入栈
+  stack.push(0, w - 1, (h - 1) * w, (h - 1) * w + (w - 1));
+  while (stack.length) {
+    const idx = stack.pop()!;
+    if (idx < 0 || idx >= total) continue;
+    if (visited[idx]) continue;
+    const alpha = imgData[idx * 4 + 3];
+    if (alpha > alphaThresh) continue; // panda 实体, 不跨越
+    visited[idx] = 1;
+    const x = idx % w;
+    const y = (idx - x) / w;
+    if (x > 0) stack.push(idx - 1);
+    if (x < w - 1) stack.push(idx + 1);
+    if (y > 0) stack.push(idx - w);
+    if (y < h - 1) stack.push(idx + w);
+  }
+  return visited;
+}
+
+// 在画布上画"内部填白、外部透明"的 panda 外壳:
+// fill 白底 → 画 panda → flood-fill 标记外部 transparent 并 erase 回 alpha=0.
+// 结果: panda 黑廓内 alpha=0 处变白 (遮住场景背景), 廓外保持 transparent.
+// 复用给 flattenAlphaShell (单拖 panda/face) + bboxCropImage(fillShell) (GIF 配套/随机两图层).
+function drawShellFilled(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  sx: number, sy: number, sw: number, sh: number,
+  dx: number, dy: number, W: number, H: number,
+): void {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+  // 用原始 panda 像素检测外部 transparent (composite 后 alpha=0 处已变白 opaque, 不能用)
+  const detect = document.createElement('canvas');
+  detect.width = W;
+  detect.height = H;
+  const dctx = detect.getContext('2d', { willReadFrequently: true });
+  if (!dctx) return;
+  dctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+  const outerMask = detectOuterTransparent(dctx.getImageData(0, 0, W, H).data, W, H, 30);
+  const md = ctx.getImageData(0, 0, W, H);
+  const data = md.data;
+  for (let i = 0; i < W * H; i++) {
+    if (outerMask[i]) data[i * 4 + 3] = 0;
+  }
+  ctx.putImageData(md, 0, 0);
 }
 
 export function composeMemeCanvas(opts: ComposeOpts): HTMLCanvasElement {
-  const { panda, face, faceOffset, rotation = 0, flipX = false, size = 1024, faceFill = 0.95 } = opts;
+  const { panda, face, faceOffset, rotation = 0, flipX = false, size = 1024, faceFill = 0.95, fillInternalShell = false } = opts;
 
   // 1. 检测 panda 实际内容 bbox（去 whitespace）
   const bbox = getContentBbox(panda);
@@ -189,6 +268,32 @@ export function composeMemeCanvas(opts: ComposeOpts): HTMLCanvasElement {
   mctx.imageSmoothingQuality = 'high';
 
   // 3. 画 cropped panda — 覆盖整个输出画布
+  // 3a. 如果 fillInternalShell, 先 fill 整个画布白色, 然后 erase "外部 transparent" 区域 → 内部保留白
+  //     这样 panda 内部 alpha=0 处变白底, 外部仍 transparent (场景背景透过来), panda 黑廓盖在白上
+  if (fillInternalShell) {
+    // 先 draw panda 到 temp canvas 检测 outline 形状
+    const detect = document.createElement('canvas');
+    detect.width = Wout;
+    detect.height = Hout;
+    const dctx = detect.getContext('2d', { willReadFrequently: true });
+    if (dctx) {
+      dctx.drawImage(panda, bx1, by1, BW, BH, 0, 0, Wout, Hout);
+      const detectData = dctx.getImageData(0, 0, Wout, Hout).data;
+      const outerMask = detectOuterTransparent(detectData, Wout, Hout, 30);
+      // 在 main canvas: fill 整个白, 然后用 ImageData erase outer
+      mctx.fillStyle = '#ffffff';
+      mctx.fillRect(0, 0, Wout, Hout);
+      const mainImgData = mctx.getImageData(0, 0, Wout, Hout);
+      const mainData = mainImgData.data;
+      for (let i = 0; i < Wout * Hout; i++) {
+        if (outerMask[i]) {
+          mainData[i * 4 + 3] = 0;
+        }
+      }
+      mctx.putImageData(mainImgData, 0, 0);
+    }
+  }
+  // 3b. draw panda 在 (可选 white fill) 之上, panda 黑廓盖在白上, 半透明边缘 anti-alias 在白底上 blend (无 noise)
   mctx.drawImage(panda, bx1, by1, BW, BH, 0, 0, Wout, Hout);
 
   // 4. faceOffset 三步换算: 350-coord → native pixel → cropped canvas pixel
@@ -278,6 +383,10 @@ export interface ComposeMemeArgs {
   flipX?: boolean;
   size?: number;
   faceFill?: number;
+  fillInternalShell?: boolean; // 沙雕动画用: panda 内部 transparent → 白色 fill
+  // 'blob' = blob URL (默认, fast preview, session-local) | 'dataurl' = base64 (持久化, IDB 友好)
+  // 沙雕动画 ImageClip 必须 dataurl, 不然刷新破图
+  outputFormat?: 'blob' | 'dataurl';
 }
 
 // 性能优化:
@@ -297,6 +406,8 @@ function makeComposedCacheKey(args: ComposeMemeArgs): string {
     args.rotation ?? 0, args.flipX ? 1 : 0,
     args.size ?? 1024,
     args.faceFill ?? 0.95,
+    args.fillInternalShell ? 1 : 0,
+    args.outputFormat ?? 'blob',
   ].join('|');
 }
 
@@ -328,8 +439,11 @@ export async function composeMeme(args: ComposeMemeArgs): Promise<string> {
     flipX: args.flipX,
     size: args.size,
     faceFill: args.faceFill,
+    fillInternalShell: args.fillInternalShell,
   });
-  const url = await canvasToBlobUrl(c);
+  const url = args.outputFormat === 'dataurl'
+    ? c.toDataURL('image/png')
+    : await canvasToBlobUrl(c);
 
   // LRU 淘汰最旧 (淘汰时不立刻 revoke, 因为可能还有 <img> 在用; 浏览器最终会 GC)
   if (_composedCache.size >= COMPOSED_CACHE_LIMIT) {
@@ -348,34 +462,42 @@ export async function calcEditorFaceLayout(args: {
   faceSrc: string;
   faceOffset350: { x: number; y: number; w: number; h: number };
   faceFill?: number;
-  panda350OffsetX?: number; // panda 在编辑器 canvas 里的左上角 X (default 75)
-  panda350OffsetY?: number; // default 50
+  panda350OffsetX?: number; // panda 在编辑器 canvas 里的左上角 X (default 75 → 居中于 500)
+  panda350OffsetY?: number; // default 75
   /** panda 实际宽度 (default 350). 当 panda 元素 bbox-cropped 后 aspect 非 1:1 时需要传, 让 face anchor 按真实 panda box 缩放 */
   panda350W?: number;
   panda350H?: number;
 }): Promise<{ x: number; y: number; width: number; height: number }> {
   const {
     pandaSrc, faceSrc, faceOffset350, faceFill = 0.95,
-    panda350OffsetX = 75, panda350OffsetY = 50,
+    panda350OffsetX = 75, panda350OffsetY = 75,
     panda350W = 350, panda350H = 350,
   } = args;
-  const [, face] = await Promise.all([loadImage(pandaSrc), loadImage(faceSrc)]);
+  const [panda, face] = await Promise.all([loadImage(pandaSrc), loadImage(faceSrc)]);
   const fbb = getContentBbox(face);
   const fcw = Math.max(1, fbb[2] - fbb[0]);
   const fch = Math.max(1, fbb[3] - fbb[1]);
-  // 350-coord 的 faceOffset 在 panda 实际 box 里的 scale (panda 可能 letterbox 或非 1:1)
-  const scaleX = panda350W / 350;
-  const scaleY = panda350H / 350;
-  const fowActual = faceOffset350.w * scaleX;
-  const fohActual = faceOffset350.h * scaleY;
+  // ⭐ 对齐修复: faceOffset350 是"350 帧含 letterbox 原图"坐标 → 必须三步换算 (350→native px→content-bbox fraction),
+  //    跟 composeMemeCanvas 一致. 旧版直接 *(panda350W/350) 漏了 letterbox + bbox 原点, 当 content-bbox 与 native aspect
+  //    不一致 (panda 留白不对称, 如拍桌款上方透明) 时脸偏移 ~0.17 panda 高 → 编辑器 + GIF 都对不上校准. 修这一个函数两端同时正.
+  const [bx1, by1, bx2, by2] = getContentBbox(panda);
+  const BW = Math.max(1, bx2 - bx1), BH = Math.max(1, by2 - by1);
+  const NW = panda.naturalWidth, NH = panda.naturalHeight;
+  const scaleOrig = Math.min(350 / NW, 350 / NH);
+  const padXOrig = (350 - NW * scaleOrig) / 2, padYOrig = (350 - NH * scaleOrig) / 2;
+  const nfx1 = (faceOffset350.x - padXOrig) / scaleOrig, nfy1 = (faceOffset350.y - padYOrig) / scaleOrig;
+  const nfw = faceOffset350.w / scaleOrig, nfh = faceOffset350.h / scaleOrig;
+  const fracCx = (nfx1 + nfw / 2 - bx1) / BW, fracCy = (nfy1 + nfh / 2 - by1) / BH;
+  const outScaleX = panda350W / BW, outScaleY = panda350H / BH;
+  const fowActual = nfw * outScaleX, fohActual = nfh * outScaleY;
   const fScale = Math.min(fowActual / fcw, fohActual / fch) * faceFill;
   const dispW = face.naturalWidth * fScale;
   const dispH = face.naturalHeight * fScale;
   const ccX = ((fbb[0] + fbb[2]) / 2) * fScale;
   const ccY = ((fbb[1] + fbb[3]) / 2) * fScale;
-  // anchor center 在编辑器画布坐标系 — panda 实际左上 + faceOffset 按 panda box 缩放后的中心
-  const anchorCx = panda350OffsetX + (faceOffset350.x + faceOffset350.w / 2) * scaleX;
-  const anchorCy = panda350OffsetY + (faceOffset350.y + faceOffset350.h / 2) * scaleY;
+  // anchor center 在编辑器画布坐标系 — panda 实际左上 + faceOffset 在 content-bbox 里的 fraction × panda box
+  const anchorCx = panda350OffsetX + fracCx * panda350W;
+  const anchorCy = panda350OffsetY + fracCy * panda350H;
   return {
     x: Math.round(anchorCx - ccX),
     y: Math.round(anchorCy - ccY),
@@ -385,17 +507,22 @@ export async function calcEditorFaceLayout(args: {
 }
 
 /**
- * 算编辑器里 panda 元素的实际 box: bbox-crop 后 contain-fit 到 350×350 区域
+ * 算编辑器里 panda 元素的实际 box: bbox-crop 后 contain-fit 到 FRAME×FRAME 内, 居中于 500×500 画布.
  * 用 cropped dataUrl 作为 element.src 让 panda 显示跟 QuickMode (PandaCanvas) 一致.
+ *
+ * canvasarea.tsx 用 CANVAS_SIZE=500. panda 视觉占满中心 ≈ 70%.
+ * 草图本预览 (PandaCanvas) 跟编辑器/沙雕动画拿同一份 element.x/y/w/h, 视觉对齐.
  *
  * @returns { croppedSrc, x, y, w, h } — panda 元素位置 + 尺寸 + 已 bbox-crop 的 src
  */
-export async function getEditorPandaBox(src: string): Promise<{
+export async function getEditorPandaBox(src: string, opts?: { fillShell?: boolean; maxPx?: number }): Promise<{
   croppedSrc: string;
   x: number; y: number;
   w: number; h: number;
 }> {
-  const cropped = await bboxCropImage(src);
+  // fillShell: GIF 两图层 panda 内部填白防场景透出 (默认 false → 编辑器/快速/校准路径零影响)
+  // maxPx: croppedSrc 分辨率封顶 (GIF 配套传 350 控 IDB 体积; box 几何用 FRAME=350 + aspect, 不受影响)
+  const cropped = await bboxCropImage(src, 4, opts?.fillShell ?? false, opts?.maxPx ?? (opts?.fillShell ? 350 : 0));
   const aspect = cropped.w / Math.max(1, cropped.h);
   const FRAME = 350;
   let w = FRAME, h = FRAME;
@@ -404,9 +531,10 @@ export async function getEditorPandaBox(src: string): Promise<{
   } else if (aspect < 1) {
     w = Math.round(FRAME * aspect);
   }
-  // panda 在 (75, 50) 起始的 350×350 box 中居中
-  const x = 75 + Math.round((FRAME - w) / 2);
-  const y = 50 + Math.round((FRAME - h) / 2);
+  // panda 居中于 500×500 画布 (CANVAS_SIZE)
+  const CANVAS_SIZE = 500;
+  const x = Math.round((CANVAS_SIZE - w) / 2);
+  const y = Math.round((CANVAS_SIZE - h) / 2);
   return { croppedSrc: cropped.dataUrl, x, y, w, h };
 }
 
@@ -420,6 +548,7 @@ export async function composeMemeBlob(args: ComposeMemeArgs): Promise<Blob> {
     flipX: args.flipX,
     size: args.size,
     faceFill: args.faceFill,
+    fillInternalShell: args.fillInternalShell,
   });
   return new Promise<Blob>((resolve, reject) => {
     c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
@@ -429,4 +558,40 @@ export async function composeMemeBlob(args: ComposeMemeArgs): Promise<Blob> {
 // 给校准工具用：直接把已加载的 image 喂进去，跳过 loadImage（同步获 native 尺寸）
 export function composeMemeCanvasSync(opts: ComposeOpts): HTMLCanvasElement {
   return composeMemeCanvas(opts);
+}
+
+// 单 image alpha shell 填充 — flood fill from 4 corners 标记外部 transparent, 内部 transparent fill 白
+// 用例: 沙雕动画板单独拖 panda/face 到场景上, 让 panda 头/face 头内部不透出背景
+// 输出: dataURL — alpha=0 外部保留 transparent, alpha=0 内部 fill 白, alpha>0 黑廓保留
+const _flattenedShellCache = new Map<string, string>();
+const FLATTENED_SHELL_CACHE_LIMIT = 50;
+
+export async function flattenAlphaShell(srcUrl: string): Promise<string> {
+  const cached = _flattenedShellCache.get(srcUrl);
+  if (cached) {
+    // LRU: 取出再 set 让它移到末尾
+    _flattenedShellCache.delete(srcUrl);
+    _flattenedShellCache.set(srcUrl, cached);
+    return cached;
+  }
+  const img = await loadImage(srcUrl);
+  // bbox crop 跟 composeMemeCanvas 行为一致, 输出尺寸 = content bbox
+  const [bx1, by1, bx2, by2] = getContentBbox(img);
+  const W = Math.max(1, bx2 - bx1);
+  const H = Math.max(1, by2 - by1);
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('canvas 2d ctx unavailable');
+  // 内部 transparent 填白, 外部 transparent 保持 (黑廓内遮场景, 廓外透出背景)
+  drawShellFilled(ctx, img, bx1, by1, W, H, 0, 0, W, H);
+  const url = c.toDataURL('image/png');
+  // LRU 淘汰最旧
+  if (_flattenedShellCache.size >= FLATTENED_SHELL_CACHE_LIMIT) {
+    const firstKey = _flattenedShellCache.keys().next().value;
+    if (firstKey) _flattenedShellCache.delete(firstKey);
+  }
+  _flattenedShellCache.set(srcUrl, url);
+  return url;
 }

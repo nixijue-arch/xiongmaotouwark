@@ -193,6 +193,34 @@
   letter-spacing: 0.3px;
 }
 
+/* GIF 动图标记 pill (源结果 + 最近用过 共用) */
+.psp-gif-pill {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(138, 74, 191, 0.92);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  z-index: 2;
+}
+.psp-gif-pill-card { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+
+/* 最近搜索 — 常驻底部, 横向滚动缩略图 */
+.psp-recent { flex-shrink: 0; border-top: 1px solid rgba(127, 157, 200, 0.3); margin-top: 6px; padding-top: 6px; }
+.psp-recent-head { font-size: 11px; font-weight: 700; color: #5a7299; margin-bottom: 5px; padding: 0 2px; }
+.psp-recent-row { display: flex; gap: 6px; overflow-x: auto; padding: 0 2px 4px; scrollbar-width: thin; }
+.psp-recent-card { position: relative; flex: 0 0 auto; width: 56px; height: 56px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(127, 157, 200, 0.4); background: #fff; cursor: pointer; padding: 0; }
+.psp-recent-card:hover:not(:disabled) { border-color: #FF5E00; }
+.psp-recent-card:disabled { opacity: 0.5; cursor: default; }
+.psp-recent-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.psp-recent-card .psp-gif-pill { top: 2px; left: 2px; font-size: 8px; padding: 1px 3px; }
+
 .psp-card-busy-mask {
   position: absolute;
   inset: 0;

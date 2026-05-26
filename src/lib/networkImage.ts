@@ -11,15 +11,38 @@
 //   - dataURL 是 same-origin, 100% 兼容现有 composeMeme / 导出 / 复制流程
 
 import type { Material } from '@/data/materials';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 
 export interface NetworkResult {
   id: string;            // `${source}:${hash}` 后端返
   src: string;           // 原图 URL
   thumb: string;         // 缩略图 URL (一般 = src 或更小)
-  source: 'duitang' | 'fabiaoqing' | 'bing';
+  source: 'duitang' | 'fabiaoqing' | 'bing' | 'baidu' | 'sogou' | 'so360';   // 跟后端 SourceName 对齐 (原漏 baidu/sogou/so360)
   w?: number;
   h?: number;
   hint?: string;
+}
+
+// ============================================================
+// 全局「最近搜索」— 用户用过(选中/加入)的联网素材, 最近 20 个; 跨 快速/编辑器/沙雕动画 通用.
+// 存 NetworkResult (src/thumb/source/hint), 不存 dataURL (太大), 重显缩略图走 thumb URL.
+// ============================================================
+const RECENT_NET_KEY = 'xiongmaotou.network-recent.v1';
+const RECENT_NET_MAX = 20;
+export async function getRecentNetwork(): Promise<NetworkResult[]> {
+  try { const d = await idbGet<NetworkResult[]>(RECENT_NET_KEY); return Array.isArray(d) ? d.slice(0, RECENT_NET_MAX) : []; }
+  catch { return []; }
+}
+export async function addRecentNetwork(r: NetworkResult): Promise<void> {
+  try {
+    const cur = await getRecentNetwork();
+    await idbSet(RECENT_NET_KEY, [r, ...cur.filter(x => x.id !== r.id)].slice(0, RECENT_NET_MAX));   // 最新置顶 + 去重 + 限 20
+  } catch { /* ignore */ }
+}
+// 网络结果是否 GIF (URL 嗅探, 跟 animcore isGifSrc 同规则; 避免 import animcore 到本 lib)
+export function isGifResult(r: { src?: string }): boolean {
+  const s = (r.src || '').toLowerCase();
+  return s.startsWith('data:image/gif') || s.endsWith('.gif') || s.includes('.gif?');
 }
 
 export interface SearchResponse {

@@ -11,7 +11,7 @@
 //   Ctrl+Z / Ctrl+Shift+Z : 撤销/重做
 //   Esc : 返回
 //
-// Contributed by PandaHead — github.com/jokkibtc/panda
+// Contributed by PandaHead — github.com/jsybtc/panda
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ALL_PANDAS, ALL_FACES } from '@/data/materials';
