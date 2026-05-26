@@ -54,6 +54,7 @@ import {
   type MediaAsset, type FxApply,
 } from '@/lib/animcore';
 import { GifMode } from '@/sections/gifmode';
+import { AnimateOnboarding, ONBOARDING_SEEN_KEY } from '@/sections/onboarding';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { VOICE_LIB, VOICE_BY_ID, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
 import { fetchAsDataUrl } from '@/lib/networkImage';
@@ -1605,6 +1606,11 @@ export function AnimateMode() {
   const [view, setView] = useState<'video' | 'gif'>(() => {
     try { const v = localStorage.getItem('xmw.animate-view'); return v === 'video' ? 'video' : 'gif'; } catch { return 'gif'; }  // 默认 GIF (视频太复杂, 多数人首选 GIF); 只有显式选过视频才记住视频
   });
+  // 新手引导 — 首次进沙雕动画自动弹 (localStorage 标记); 顶栏「新手引导」按钮随时重放. lang 跟随全局 中/EN 开关.
+  const { state: memeState } = useMeme();
+  const [showGuide, setShowGuide] = useState<boolean>(() => { try { return !localStorage.getItem(ONBOARDING_SEEN_KEY); } catch { return false; } });
+  const finishGuide = useCallback(() => { setShowGuide(false); try { localStorage.setItem(ONBOARDING_SEEN_KEY, '1'); } catch { /* ignore */ } }, []);
+  const openGuide = useCallback(() => setShowGuide(true), []);
   // v23-l audit-fix: sheet drag-to-dismiss (leftover #4). 之前 cursor:grab 撒谎 — 现在 PointerDown/Move/Up 真支持向下拖关.
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStartYRef = useRef<number | null>(null);
@@ -3525,6 +3531,14 @@ export function AnimateMode() {
 
   return (
     <div className={'am-root' + (isMobile ? ' am-root-mobile' : '') + (view === 'gif' ? ' am-root--gif' : '')}>
+      <AnimateOnboarding
+        open={showGuide}
+        lang={memeState.language === 'en' ? 'en' : 'zh'}
+        theme={view === 'gif' ? 'gif' : 'video'}
+        view={view === 'gif' ? 'gif' : 'video'}
+        onClose={finishGuide}
+        onFinish={finishGuide}
+      />
       {view === 'video' ? (<>
         {cyclePop && (() => {
           const k = cycleQ.trim().toLowerCase();
@@ -3591,6 +3605,7 @@ export function AnimateMode() {
         ttsGenStats={ttsGenStats}
         onExportJSON={exportProjectJSON}
         onImportJSON={importProjectJSON}
+        onOpenGuide={openGuide}
         mode={view}
         onModeChange={(m) => {
           // 融入: 视频/GIF 只切视图 (GIF 视图渲 GifMode 循环编辑器), 无确认弹窗.
@@ -3679,7 +3694,7 @@ export function AnimateMode() {
         onEmptyContextMenu={(e) => ctxMenu.open(e, buildEmptyMenu())}
       />
       </>) : (
-        <GifMode view={view} onSwitchView={(m) => { setView(m); try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ } }} />
+        <GifMode view={view} onOpenGuide={openGuide} onSwitchView={(m) => { setView(m); try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ } }} />
       )}
       {ctxMenu.render()}
       {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}
@@ -3921,7 +3936,7 @@ export function AnimateMode() {
 // ============================================================
 function AnimateToolbar({
   duration, clipCount, canUndo, canRedo, draftsCount,
-  onUndo, onRedo, onRandomize, onClear, onReset, onFlatten, onSetDuration,
+  onUndo, onRedo, onRandomize, onClear, onReset, onFlatten, onSetDuration, onOpenGuide,
   onSaveDraft, onToggleDraftPopover, onOpenPreview, onOpenExport,
   onOpenTemplates, onOpenBgmAlign, onOpenStateDump, onOpenShortcuts,
   ttsGenStats, onExportJSON, onImportJSON,
@@ -3930,7 +3945,7 @@ function AnimateToolbar({
   duration: number; clipCount: number;
   canUndo: boolean; canRedo: boolean; draftsCount: number;
   onUndo: () => void; onRedo: () => void;
-  onRandomize: () => void; onClear: () => void; onReset: () => void; onFlatten: () => void; onSetDuration: (d: number) => void;
+  onRandomize: () => void; onClear: () => void; onReset: () => void; onFlatten: () => void; onSetDuration: (d: number) => void; onOpenGuide: () => void;
   onSaveDraft: () => void; onToggleDraftPopover: () => void;
   onOpenPreview: () => void; onOpenExport: () => void;
   onOpenTemplates?: () => void; onOpenBgmAlign?: () => void; onOpenStateDump?: () => void;
@@ -3984,7 +3999,7 @@ function AnimateToolbar({
       {/* v23-l: 视频 / GIF 模式切换. GIF 模式无声 (TTS/BGM 隐藏) + 短时长 + 走 GIF encoder */}
       {/* 视频 / GIF 视图切换 (Win7 金色 toggle, 无确认弹窗即时切). GIF 视图 = 循环编辑器 GifMode. */}
       {onModeChange && (
-        <div className="am-tb-mode" role="tablist" aria-label="输出模式">
+        <div className="am-tb-mode" role="tablist" aria-label="输出模式" data-tour="mode-toggle">
           <button
             type="button"
             role="tab"
@@ -4002,6 +4017,11 @@ function AnimateToolbar({
             title="GIF 模式 — 无声 + 短时长 + 直出 GIF (微信/X/TG 适配)"
           >🎞️ GIF</button>
         </div>
+      )}
+      {onOpenGuide && (
+        <button type="button" className="am-tb-btn am-tb-guide" data-tour="guide-button" onClick={onOpenGuide} title="新手引导 — 3 分钟上手 (随时点这里重看)">
+          <span style={{ fontSize: 14 }}>🧭</span> <span>新手引导</span>
+        </button>
       )}
       {mode === 'video' && (<>
       <div className="am-toolbar-stat">
@@ -4114,7 +4134,7 @@ function AnimateToolbar({
       <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览"><Eye size={13} /> <span>预览</span></button>
       {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (现 CSS 全隐藏 — 主按钮已全常驻 2 行) */}
       <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title="更多功能">{mobileMore ? '收起 ▲' : '⋯ 更多'}</button>
-      <button className="am-tb-btn am-tb-btn-primary" onClick={onOpenExport} title="渲染 + 下载视频文件">
+      <button className="am-tb-btn am-tb-btn-primary" data-tour="btn-export" onClick={onOpenExport} title="渲染 + 下载视频文件">
         <Download size={13} /> <span>导出视频</span>
       </button>
       {import.meta.env.DEV && (onOpenTemplates || onOpenBgmAlign || onOpenStateDump) && (
@@ -4450,9 +4470,9 @@ function LeftPane({
         <SegBtn active={seg === 'asset'} icon={<ImageIcon size={14} />} label="素材" onClick={() => { setSeg('asset'); setSub('combo'); }} />
         {/* GIF 模式无声 — 音乐 + 配音 隐藏 */}
         {!isGif && <SegBtn active={seg === 'music'} icon={<Music size={14} />} label="音乐" onClick={() => setSeg('music')} />}
-        {!isGif && <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label="配音" onClick={() => setSeg('voice')} />}
-        <SegBtn active={seg === 'caption'} icon={<MessageSquare size={14} />} label="字幕" onClick={() => setSeg('caption')} />
-        <SegBtn active={seg === 'fx'} icon={<Sparkles size={14} />} label="动效" onClick={() => setSeg('fx')} />
+        {!isGif && <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label="配音" onClick={() => setSeg('voice')} tour="panel-voice" />}
+        <SegBtn active={seg === 'caption'} icon={<MessageSquare size={14} />} label="字幕" onClick={() => setSeg('caption')} tour="panel-caption" />
+        <SegBtn active={seg === 'fx'} icon={<Sparkles size={14} />} label="动效" onClick={() => setSeg('fx')} tour="panel-motion" />
       </div>
 
       <div className="sidebar-section win7-panel am-left-section">
@@ -4478,6 +4498,7 @@ function LeftPane({
                 key={k}
                 className={'am-subtab' + (sub === k ? ' is-active' : '')}
                 onClick={() => setSub(k)}
+                data-tour={k === 'combo' ? 'panel-combo' : undefined}
               >
                 {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'netsearch' ? '联网搜' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ` ${draftSlots.length}` : ''}` : '上传'}
               </button>
@@ -4728,9 +4749,9 @@ function LeftPane({
   );
 }
 
-function SegBtn({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+function SegBtn({ active, icon, label, onClick, tour }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void; tour?: string }) {
   return (
-    <button className={'am-seg-btn' + (active ? ' is-active' : '')} onClick={onClick} type="button">
+    <button className={'am-seg-btn' + (active ? ' is-active' : '')} onClick={onClick} type="button" data-tour={tour}>
       <span className="am-seg-ic">{icon}</span>
       <span>{label}</span>
     </button>
@@ -5525,6 +5546,7 @@ function PreviewPane({
       >
         <div
           className={'am-preview-canvas' + (dropHilite ? ' is-drop' : '')}
+          data-tour="preview-canvas"
           style={{ width: canvasSize.w, height: canvasSize.h }}
           onPointerDown={(e) => { if (e.target === e.currentTarget) onSelect(null); }}
         >
@@ -8205,7 +8227,7 @@ function Timeline({
   const timelineBodyHeight = totalLanes * LANE_ROW_H;
 
   return (
-    <section className="am-timeline win7-panel" style={{ '--lane-h': `${LANE_ROW_H}px` } as React.CSSProperties}>
+    <section className="am-timeline win7-panel" data-tour="timeline" style={{ '--lane-h': `${LANE_ROW_H}px` } as React.CSSProperties}>
       <div className="am-tl-head">
         <span className="am-tl-head-title">⏱ 时间轴</span>
         <span className="am-tl-head-sub">{project.clips.length} 片段 · {totalLanes} 轨 · {project.duration.toFixed(1)}s</span>

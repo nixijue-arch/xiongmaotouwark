@@ -4670,6 +4670,19 @@
   background: linear-gradient(180deg, #ff7a2f, #FF5E00); color: #fff; border: none;
 }
 .am-cycle-make:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 新手引导按钮 — 醒目 (橙渐变 + 脉冲微光), 提升可发现性; 视频(深色)/GIF(Win7) 两主题都跳出来 */
+.am-tb-guide {
+  background: linear-gradient(180deg, #ffb65e, #ff8a1f) !important;
+  color: #4a2600 !important; font-weight: 800 !important;
+  border: 1px solid rgba(255,138,31,0.7) !important;
+  animation: am-guide-pulse 2.4s ease-in-out infinite;
+}
+.am-tb-guide:hover { filter: brightness(1.06); }
+@keyframes am-guide-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,31,0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(255,138,31,0); }
+}
+@media (prefers-reduced-motion: reduce) { .am-tb-guide { animation: none; } }
 
 /* ============================================================
    MOBILE — v23-l 剪映式 mobile 复刻

@@ -190,7 +190,7 @@ function makeDefaultGifProject(): GifProject {
   };
 }
 
-export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchView: (v: ProjectMode) => void }) {
+export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode; onSwitchView: (v: ProjectMode) => void; onOpenGuide?: () => void }) {
   const isMobile = useIsMobile();
   const { draftSlots } = useMeme();
   const [project, setProject] = useState<GifProject>(() => makeDefaultGifProject());
@@ -1636,7 +1636,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <span className="am-toolbar-name-text">GIF 循环</span>
         </div>
         {/* 视频/GIF 切换 — 跟视频视图 toolbar 同位置同款金色 toggle */}
-        <div className="am-tb-mode" role="tablist" aria-label="输出模式">
+        <div className="am-tb-mode" role="tablist" aria-label="输出模式" data-tour="mode-toggle">
           <button type="button" role="tab" aria-selected={view === 'video'}
             className={'am-tb-mode-btn' + (view === 'video' ? ' is-active' : '')}
             onClick={() => onSwitchView('video')} title="视频模式 — 含声音 + 长时长 + MP4">🎬 视频</button>
@@ -1644,6 +1644,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
             className={'am-tb-mode-btn' + (view === 'gif' ? ' is-active' : '')}
             onClick={() => onSwitchView('gif')} title="GIF 模式 — 无声 + 短时长 + 循环直出">🎞️ GIF</button>
         </div>
+        {onOpenGuide && (
+          <button type="button" className="am-tb-btn am-tb-guide" data-tour="guide-button" onClick={onOpenGuide} title="新手引导 — 3 分钟上手 (随时点这里重看)">
+            <span style={{ fontSize: 14 }}>🧭</span> <span>新手引导</span>
+          </button>
+        )}
         <select className="gm-tb-select" value={project.preset} title="尺寸预设"
           onChange={e => setPresetId(e.target.value as GifPresetId)}>
           {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -1710,7 +1715,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           <Layers size={13} /> <span>对比变体</span>
         </button>
         <button className="am-tb-btn am-tb-more-toggle" onClick={() => setGifTbMore(v => !v)} title="更多功能">{gifTbMore ? '收起 ▲' : '⋯ 更多'}</button>
-        <button className="am-tb-btn am-tb-btn-primary" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
+        <button className="am-tb-btn am-tb-btn-primary" data-tour="btn-export" onClick={onExport} disabled={exporting} title="渲染 + 下载 GIF">
           {exporting ? <Loader2 size={13} className="gm-spin" /> : <Download size={13} />} <span>{exporting ? '生成中' : '导出 GIF'}</span>
         </button>
       </div>
@@ -1721,15 +1726,15 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         <aside className={'gm-pane gm-pane-left' + (isMobile ? (gmSheet === 'left' ? ' gm-pane-sheet is-open' : ' gm-pane-sheet') : '')}>
           <div className="am-seg-bar gm-segbar">
             <button className={'am-seg-btn' + (seg === 'asset' ? ' is-active' : '')} type="button" onClick={() => setSeg('asset')}><span className="am-seg-ic"><ImageIcon size={14} /></span><span>素材</span></button>
-            <button className={'am-seg-btn' + (seg === 'caption' ? ' is-active' : '')} type="button" onClick={() => setSeg('caption')}><span className="am-seg-ic"><MessageSquare size={14} /></span><span>字幕</span></button>
-            <button className={'am-seg-btn' + (seg === 'fx' ? ' is-active' : '')} type="button" onClick={() => setSeg('fx')}><span className="am-seg-ic"><Sparkles size={14} /></span><span>动效</span></button>
+            <button className={'am-seg-btn' + (seg === 'caption' ? ' is-active' : '')} type="button" data-tour="panel-caption" onClick={() => setSeg('caption')}><span className="am-seg-ic"><MessageSquare size={14} /></span><span>字幕</span></button>
+            <button className={'am-seg-btn' + (seg === 'fx' ? ' is-active' : '')} type="button" data-tour="panel-motion" onClick={() => setSeg('fx')}><span className="am-seg-ic"><Sparkles size={14} /></span><span>动效</span></button>
           </div>
 
           {seg === 'asset' && (
             <>
               <div className="am-subtabs">
                 {(['combo', 'panda', 'face', 'netsearch', 'scene', 'draft', 'upload'] as const).map(k => (
-                  <button key={k} className={'am-subtab' + (assetSub === k ? ' is-active' : '')} onClick={() => setAssetSub(k)}>
+                  <button key={k} className={'am-subtab' + (assetSub === k ? ' is-active' : '')} data-tour={k === 'combo' ? 'panel-combo' : undefined} onClick={() => setAssetSub(k)}>
                     {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'netsearch' ? '联网搜' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ' ' + draftSlots.length : ''}` : '上传'}
                   </button>
                 ))}
@@ -1940,7 +1945,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           </div>
           <div className="am-preview-stage" ref={stageRef}>
             {/* 跟视频一致: DOM 编辑舞台 (am-preview-canvas + am-stage-img/<img> + am-caption-stage), 非 canvas. 循环动画走 rAF CSS transform. */}
-            <div className="am-preview-canvas gm-stage" style={{ width: fit.w || undefined, height: fit.h || undefined }}
+            <div className="am-preview-canvas gm-stage" data-tour="preview-canvas" style={{ width: fit.w || undefined, height: fit.h || undefined }}
               onPointerDown={e => { if (e.target === e.currentTarget) setSelectedId(null); }}
               onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); ctxMenu.open(e, buildGifEmptyMenu()); } }}>
               {imageClips.slice().sort((a, b) => b.lane - a.lane).map(c => {
@@ -2298,7 +2303,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
                 ))}
                 <span className={'gm-tl-seam gm-seam-' + project.loop.mode} title={`循环接缝 — ${loopInfo?.hint ?? ''}`} style={{ left: Math.max(0, D * pxPerSec - 18) }}>{loopGlyph}</span>
                 <div ref={playheadHandleRef} className="am-tl-playhead-handle" title="拖动跳转" onPointerDown={e => { e.stopPropagation(); tlScrub(e); }} />
-                <div className="gm-tl-durhandle" style={{ left: D * pxPerSec }} onPointerDown={tlDurationDrag} title={`拖动改循环时长 (当前 ${D.toFixed(1)}s · 上限 ${Math.min(GIF_MAX_DURATION, preset.maxDuration)}s)`}>
+                <div className="gm-tl-durhandle" data-tour="duration-handle" style={{ left: D * pxPerSec }} onPointerDown={tlDurationDrag} title={`拖动改循环时长 (当前 ${D.toFixed(1)}s · 上限 ${Math.min(GIF_MAX_DURATION, preset.maxDuration)}s)`}>
                   <span className="am-tl-duration-handle-bar" />
                 </div>
               </div>
