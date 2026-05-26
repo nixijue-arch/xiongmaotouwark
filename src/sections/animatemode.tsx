@@ -3784,6 +3784,7 @@ export function AnimateMode() {
 
   return (
     <div className={'am-root' + (isMobile ? ' am-root-mobile' : '') + (view === 'gif' ? ' am-root--gif' : '')}>
+      {/* 引导卡始终用 'gif'(Win7 浅色) 主题 — 全站(含视频模式)都是浅色 Win7 风, 故不用深色 ob-theme-video(现 dead). 用户要求统一复古风. */}
       <AnimateOnboarding
         open={showGuide}
         lang={memeState.language === 'en' ? 'en' : 'zh'}
@@ -6150,12 +6151,12 @@ function PreviewPane({
           {activeImageClips.map((c, idx) => {
             void idx;
             // 绑定脸: 位置由 shell 实时框(含 FX) ∘ faceLocal 推导, 跟着壳一起动 (pan/zoom/shake/旋转/move);
-            //   选中+暂停时 freeze 壳 FX → 拖脸跟手不被运镜位移干扰. 椭圆裁切跟导出一致 (contentBboxFrac).
+            //   仅「正在拖该绑定脸」时 freeze 壳 FX → 拖脸跟手; 暂停/播完不冻 → 末态不弹回原位 (同 editingFrozen). 椭圆裁切跟导出一致 (contentBboxFrac).
             if (c.boundTo) {
               const shellC = clips.find(s => s.id === c.boundTo && s.trackId === 'image') as ImageClip | undefined;
               if (shellC) {
                 const isSelF = c.id === selectedId;
-                const freezeF = isSelF && !isPlaying;
+                const freezeF = isSelF && stageDragging;   // 同 editingFrozen: 仅拖动时冻壳 FX (拖脸跟手); 暂停/播完不冻 → 绑定脸末态不弹回原位 (审计补)
                 const shellAspect = naturalAspects.get(shellC.id) ?? 1;
                 const faceAspect = naturalAspects.get(c.id) ?? 1;
                 const bf = resolveBoundFaceBoxVideo(c, shellC, time, clips, canvasSize.w, canvasSize.h, 1, shellAspect, 1, faceAspect, freezeF);
