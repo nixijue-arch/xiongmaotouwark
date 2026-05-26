@@ -643,13 +643,13 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
   const tlClips: Clip[] = ([...imageClips].sort((a, b) => a.lane - b.lane) as Clip[]).concat(captionClips);
   const frameCount = Math.max(1, Math.round(D * preset.fps));
   const exportFrames = project.loop.mode === 'boomerang' ? Math.max(1, frameCount * 2 - 2) : frameCount;
-  const effMax = Math.min(GIF_MAX_DURATION, preset.maxDuration);   // 时间轴满宽 = 0..effMax (10s), 10s 在最右
-  const tlTicks = useMemo(() => { const a: number[] = []; for (let s = 0; s <= Math.floor(effMax); s++) a.push(s); return a; }, [effMax]);
+  const effMax = Math.min(GIF_MAX_DURATION, preset.maxDuration);   // 时长上限 (10s); 仅用于定标尺比例 (effMax=满宽基准) + 时长手柄延长上限. 时间轴实画到当前 D.
+  const tlTicks = useMemo(() => { const a: number[] = []; for (let s = 0; s <= Math.floor(D); s++) a.push(s); return a; }, [D]);   // 标尺刻度 0..D (缩短时长→刻度跟着减少)
   const loopGlyph = project.loop.mode === 'boomerang' ? '⇄' : project.loop.mode === 'crossfade' ? '✦' : project.loop.mode === 'reverse' ? '◀' : project.loop.mode === 'rewind' ? '⏪' : '↻';
-  // 满宽适配 max: zoom 1 = 0..10s 正好铺满 lanes (无横向空白, 10s 在最右); clip 等比 px (3s=30%); zoom>1 才滚动
-  const pxPerSec = Math.max(8, (lanesW - 24) / effMax);   // 满宽适配: GIF (≤10s) 铺满, 留 24px 右边距给时长手柄+末尾标签 (否则 overflow:hidden 会剪掉可拖的手柄), 无横向滚动 (极简, 不缩放)
+  // 标尺比例: effMax(10s)=满宽基准, 故 D 秒占 D/effMax 宽; 时间轴只画到当前 D (缩短时长→时间轴跟着缩短, 见 tlContentW); 延长 = 拖时长手柄到右侧留白区
+  const pxPerSec = Math.max(8, (lanesW - 24) / effMax);   // 定标尺比例: effMax=满宽; 留 24px 右边距给延长手柄 (lanes overflow:hidden 否则剪掉手柄), 无横向滚动 (极简)
   pxPerSecRef.current = pxPerSec;
-  const tlContentW = Math.round(effMax * pxPerSec);
+  const tlContentW = Math.round(D * pxPerSec);   // 时间轴内容宽 = 当前时长 D (非 effMax) → 缩短时长则下面时间轴/标尺/轨道跟着缩短 (跟视频模式一致)
 
   // hydrate
   useEffect(() => {
