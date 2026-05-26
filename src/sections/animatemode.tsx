@@ -5981,6 +5981,9 @@ function PreviewPane({
   };
   const imgClipById = (id: string | undefined): ImageClip | null =>
     (id ? (clips.find(c => c.id === id && c.trackId === 'image') as ImageClip | undefined) : undefined) ?? null;
+  // 仅在「正在拖/缩/转某图层」时冻结该层 FX (拖动跟手, 不被运镜位移干扰); 暂停/播完时不冻
+  // → 修用户反馈: 结尾被截断、播放停在末尾时, 动效带来的位移不该一瞬间弹回原位.
+  const [stageDragging, setStageDragging] = useState(false);
   const startStageDrag = (e: React.PointerEvent, clip: ImageClip, kind: 'move' | 'scale' | 'rotate') => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -5996,6 +5999,7 @@ function PreviewPane({
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     onSelect(target.id);
     onBeginDrag();
+    setStageDragging(true);
     const startT = getTransform(target);
     const startX = e.clientX;
     const startY = e.clientY;
@@ -6053,6 +6057,7 @@ function PreviewPane({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       onEndDrag();
+      setStageDragging(false);
       if (kind === 'move' && moved) signalOnboardingDemo('drag-layer');   // 新手引导: 拖动了图层就推进
       // 纯单击(没拖) + 选中层在点下 + 有重叠 → 切到下一层; 拖动则不切 (拖的是当前选中层)
       if (kind === 'move' && !moved && selIdx >= 0 && stack.length > 1) onSelect(stack[(selIdx + 1) % stack.length]);
@@ -6207,8 +6212,8 @@ function PreviewPane({
             const tr = computeLiveTransform(c, time, fxInfo);
             const rawFxA = computeFx(fxInfo.fx, fxInfo.fxStart, fxInfo.fxDur, time, canvasSize.w, fxInfo.fxClip);
             const isSel = c.id === selectedId;
-            // 编辑模式 — paused + selected 时 freeze fx
-            const editingFrozen = isSel && !isPlaying;
+            // 仅「正在拖动该层」时冻结 FX (拖动跟手); 暂停/播完不冻 → 动效末态不弹回 (审计修)
+            const editingFrozen = isSel && stageDragging;
             const fxA: FxApply = editingFrozen
               ? { offsetX: 0, offsetY: 0, scaleMul: 1, rotateAdd: 0, alpha: 1, filter: '' }
               : rawFxA;
@@ -9228,9 +9233,6 @@ function Timeline({
               );
             })}
             {snapLine !== null && <div className="am-tl-snap-line" style={{ left: snapLine * pxPerSec }} />}
-            {timelineEnd > project.duration + 0.01 && (
-              <div className="am-tl-cutzone" style={{ left: project.duration * pxPerSec, width: (timelineEnd - project.duration) * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} title={tl.cutzone} />
-            )}
             <div className="am-tl-playhead" style={{ left: playhead * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} />
           </div>
         </div>

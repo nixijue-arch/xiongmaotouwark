@@ -341,11 +341,13 @@ function DemoHint({ demo, rect, lang }: { demo: NonNullable<OnboardingStep['demo
     'add-combo': { icon: '👆', zh: '点一个', en: 'click one', cls: 'ob-demo-click' },
   };
   const m = meta[demo];
-  // 手势放在 anchor 中心偏下, 不挡内容
+  // 点击类: 手势挪到「框(含 pad)底部」下方, 指尖朝上对准框底 (用户反馈: 别停在框中间);
+  // 拖动类: 留在框中心 (左右晃, 中心最直观).
+  const isDrag = demo === 'drag-layer';
   const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
+  const cy = isDrag ? (rect.top + rect.height / 2) : (rect.top + rect.height + SPOTLIGHT_PAD);
   return (
-    <div className={'ob-demo-hint ' + m.cls} style={{ left: cx, top: cy }} aria-hidden>
+    <div className={'ob-demo-hint ' + m.cls} style={{ left: cx, top: cy, transform: isDrag ? undefined : 'translate(-50%, 0)' }} aria-hidden>
       <span className="ob-demo-hand">{m.icon}</span>
       <span className="ob-demo-tip">{lang === 'zh' ? m.zh : m.en}</span>
     </div>
