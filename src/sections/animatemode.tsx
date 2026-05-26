@@ -2736,16 +2736,14 @@ export function AnimateMode() {
     } else {
       const slot = findNextSlotOnLane0(type, project.clips, playheadRef.current, dur, project.duration);
       if (slot) { start = slot.start; end = slot.end; lane = 0; }
-      else if (type === 'fx') {
-        // FX 轨 0 在游标处放不下 → 开新 FX 轨叠加 (FX 可多轨, effectiveFxFor 跨轨找 active) → 点特效不再"放不下"卡死 (随机后 FX 轨已被 4 段填满)
-        const newLane = project.lanes.fx;
+      else {
+        // lane 0 在游标处放不下 → 开新轨叠加 (image/fx/tts/bgm 统一), 绝不卡用户.
+        // (FX 多轨 effectiveFxFor 跨轨找 active; 其余类型新轨独立放.) 超出 duration 部分导出时按总时长截断.
+        const newLane = project.lanes[type];
         start = Math.max(0, Math.min(playheadRef.current, Math.max(0, project.duration - dur)));
         end = Math.min(project.duration, start + dur);
         lane = newLane;
-        commit(p => ({ ...p, lanes: { ...p.lanes, fx: newLane + 1 } }));
-      } else {
-        toast.error(`时长 ${project.duration.toFixed(1)}s 内放不下, 请用 ⏱ 加长时长 / 或拖到指定轨叠加`);
-        return;
+        commit(p => ({ ...p, lanes: { ...p.lanes, [type]: newLane + 1 } }));
       }
     }
     const id = uid(type[0]);
@@ -2857,7 +2855,10 @@ export function AnimateMode() {
           blend: L.faceBlend,
           transform: L.faceTransform, boundTo: pandaId, faceLocal: L.faceLocal, role: 'face',
         };
-        return { ...p, clips: [...bumped, pandaClip, faceClip], lanes: { ...p.lanes, image: p.lanes.image + 2 } };
+        // image 轨数 = 实际占用的最高 image lane + 1 (含新配套占的 lane 0/1).
+        // 修"加双层却多一条空轨" bug (原来无脑 +2: 空项目 lanes.image 1→3 却只用 lane 0/1).
+        const maxImgLane = bumped.reduce((m, c) => (c.trackId === 'image' ? Math.max(m, c.lane) : m), 1);
+        return { ...p, clips: [...bumped, pandaClip, faceClip], lanes: { ...p.lanes, image: maxImgLane + 1 } };
       });
       setSelectedId(faceId);
       toast.success('已加双层配套 — 拖脸微调 / 给壳加特效脸会跟着动', { id: tid });
@@ -2960,14 +2961,19 @@ export function AnimateMode() {
 
     // 傻瓜式 — lane 0 接末尾 (跟剪映/CapCut 一致). 不再每次开新 lane (旧 bug 根因)
     const dur = 2.8;
-    const imgSlot = findNextSlotOnLane0('image', project.clips, playhead, dur, project.duration);
+    let imgSlot = findNextSlotOnLane0('image', project.clips, playhead, dur, project.duration);
+    let imgLane = 0;
+    let bumpImageLane = false;
     if (!imgSlot) {
-      toast.error(`时长 ${project.duration.toFixed(1)}s 内放不下, 请用 ⏱ 加长视频时长`);
-      return;
+      // 放不下 lane 0 → 开新 image 轨叠加, 不卡用户 (超出 duration 部分导出截断)
+      imgLane = project.lanes.image;
+      bumpImageLane = true;
+      const s = Math.max(0, Math.min(playhead, Math.max(0, project.duration - dur)));
+      imgSlot = { start: s, end: Math.min(project.duration, s + dur) };
     }
     const { start, end } = imgSlot;
     const imageClip: ImageClip = {
-      id: uid('di'), trackId: 'image', lane: 0, start, end,
+      id: uid('di'), trackId: 'image', lane: imgLane, start, end,
       src: imgSrc, label: slot.name || '草图',
       fx: 'none', transform: { ...DEFAULT_TRANSFORM },
     };
@@ -2984,7 +2990,7 @@ export function AnimateMode() {
         });
       }
     }
-    commit(p => ({ ...p, clips: [...p.clips, ...newClips] }));
+    commit(p => ({ ...p, clips: [...p.clips, ...newClips], lanes: bumpImageLane ? { ...p.lanes, image: imgLane + 1 } : p.lanes }));
     setSelectedId(imageClip.id);
     toast.success(text ? '已加 画面 + 字幕 双轨' : '已加画面');
   }, [commit, playhead, project]);
@@ -3206,16 +3212,19 @@ export function AnimateMode() {
         pasteStart = c.end;
       }
     }
-    if (pasteStart + dur > project.duration) {
-      // 缩短到 available
-      const avail = project.duration - pasteStart;
-      if (avail < 0.2) { toast.error('放不下, 加长视频时长'); return; }
+    // 同轨末尾几乎没空间 → 在 playhead 处开新轨叠加 (不卡用户; 超出 duration 部分导出截断)
+    let pasteLane = cb.lane;
+    let bumpPasteLane = false;
+    if (project.duration - pasteStart < 0.2) {
+      pasteStart = Math.max(0, Math.min(playhead, Math.max(0, project.duration - 0.3)));
+      pasteLane = project.lanes[cb.trackId];
+      bumpPasteLane = true;
     }
     const newId = uid('p');
-    const newClip: Clip = { ...JSON.parse(JSON.stringify(cb)), id: newId, start: pasteStart, end: Math.min(project.duration, pasteStart + dur) };
-    commit(p => ({ ...p, clips: [...p.clips, newClip] }));
+    const newClip: Clip = { ...JSON.parse(JSON.stringify(cb)), id: newId, lane: pasteLane, start: pasteStart, end: Math.min(project.duration, pasteStart + dur) };
+    commit(p => ({ ...p, clips: [...p.clips, newClip], lanes: bumpPasteLane ? { ...p.lanes, [cb.trackId]: pasteLane + 1 } : p.lanes }));
     setSelectedId(newId);
-    toast.success(`已粘贴 ${clipDisplayName(cb)}`);
+    toast.success(`已粘贴 ${clipDisplayName(cb)}${bumpPasteLane ? ' (新轨)' : ''}`);
   }, [commit, playhead, project]);
   const selectAllClips = useCallback(() => {
     // 单选只允许选最近 click 的; 但 "全选 → 删" 这种场景, 选第一个 + 提示快捷键继续
@@ -7777,7 +7786,11 @@ function Timeline({
 
   // v24: GIF 模式隐藏 TTS/BGM 轨道 (GIF 无声音)
   const isGifMode = project.mode === 'gif';
-  const totalWidth = project.duration * pxPerSec;
+  // 时间轴可视长度 = max(总时长, 最远片段末尾). 允许片段超出 duration (导出按 duration 截断) —
+  // 缩短 duration 时片段不会消失, 超出部分进右侧"截断区"显示, 用户一眼看到"这段会被切".
+  const maxClipEnd = project.clips.reduce((m, c) => Math.max(m, c.end), 0);
+  const timelineEnd = Math.max(project.duration, maxClipEnd);
+  const totalWidth = timelineEnd * pxPerSec;
   // 防御 NaN: 旧 IDB project 缺 fx lane 字段时, undefined 累加 = NaN
   const totalLanes = TRACK_ORDER.reduce((sum, type) => {
     if (isGifMode && (type === 'tts' || type === 'bgm')) return sum;
@@ -7814,7 +7827,9 @@ function Timeline({
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     const startX = e.clientX;
     const startDur = project.duration;
-    const minDur = Math.max(1, ...project.clips.map(c => c.end));
+    // 下限只 1s — 允许往左拖缩短 (原来卡在"最后片段末尾", 时间轴填满时根本拖不动).
+    // 超出新时长的片段导出时按 duration 自动截断 (不删数据/不卡用户), 拖回来还在.
+    const minDur = 1;
     const maxDur = isGifMode ? GIF_MAX_DURATION : 60;
     const onMove = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSec;
@@ -8045,9 +8060,9 @@ function Timeline({
 
   const ticks = useMemo(() => {
     const arr: { s: number; major: boolean }[] = [];
-    for (let s = 0; s <= project.duration; s++) arr.push({ s, major: s % 5 === 0 });
+    for (let s = 0; s <= Math.ceil(timelineEnd); s++) arr.push({ s, major: s % 5 === 0 });
     return arr;
-  }, [project.duration]);
+  }, [timelineEnd]);
   // 用户自定义 track 顺序 (持久化 IDB), 默认 TRACK_ORDER. 拖 label 调换
   const [customTrackOrder, setCustomTrackOrder] = useState<TrackType[]>(TRACK_ORDER);
   useEffect(() => {
@@ -8153,7 +8168,7 @@ function Timeline({
                 className="am-tl-duration-handle"
                 style={{ left: project.duration * pxPerSec }}
                 onPointerDown={startDurationDrag}
-                title={`拖动改总时长 (当前 ${project.duration.toFixed(1)}s · 上限 ${isGifMode ? GIF_MAX_DURATION : 60}s)`}
+                title={`拖动改总时长 — 左缩短 / 右延长 (当前 ${project.duration.toFixed(1)}s · 上限 ${isGifMode ? GIF_MAX_DURATION : 60}s)`}
               >
                 <span className="am-tl-duration-handle-bar" />
                 <span className="am-tl-duration-handle-lbl">{project.duration.toFixed(1)}s</span>
@@ -8183,6 +8198,9 @@ function Timeline({
               );
             })}
             {snapLine !== null && <div className="am-tl-snap-line" style={{ left: snapLine * pxPerSec }} />}
+            {timelineEnd > project.duration + 0.01 && (
+              <div className="am-tl-cutzone" style={{ left: project.duration * pxPerSec, width: (timelineEnd - project.duration) * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} title="超出总时长 — 导出时这部分会被截断 (拖时长手柄右移可保留)" />
+            )}
             <div className="am-tl-playhead" style={{ left: playhead * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} />
           </div>
         </div>
@@ -8222,9 +8240,9 @@ function TLClip({ clip, pxPerSec, isSelected, onDown, onResizeL, onResizeR, onCo
     const stateIcon = ts.text?.trim()
       ? (ts.audioSrc ? ' 🔊' : ts.genFailed ? ' ❌' : (v?.source === 'youdao' ? ' ⏳' : ' 🎤'))
       : '';
-    inner = (<><span className="am-tl-clip-emoji"><VIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{v?.name ? `${v.name}：` : ''}{ts.text || '空配音'}{stateIcon}</div></>);
+    inner = (<><span className="am-tl-clip-emoji"><VIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{v?.name ? `${v.name}：` : ''}{ts.text || '空配音'}{stateIcon}</div><span className="am-tl-clip-dur" title="配音时长">{(clip.end - clip.start).toFixed(1)}s</span></>);
   } else {
-    inner = (<><span className="am-tl-clip-emoji"><Music size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{(clip as BGMClip).name || 'BGM'}</div></>);
+    inner = (<><span className="am-tl-clip-emoji"><Music size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{(clip as BGMClip).name || 'BGM'}</div><span className="am-tl-clip-dur" title="音乐时长">{(clip.end - clip.start).toFixed(1)}s</span></>);
   }
   // v23-h: 'move' FX clip 用更显眼的样式 (跟其他 FX 区分, 提示用户可点击编辑)
   const isMoveFx = clip.trackId === 'fx' && (clip as FXClip).fx === 'move';

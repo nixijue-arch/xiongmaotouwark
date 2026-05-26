@@ -3008,6 +3008,27 @@
   pointer-events: none;
 }
 
+/* 配音/音乐片段右端的时长标注 (用户要求"时长要注明") */
+.am-tl-clip-dur {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+/* 超出总时长的"截断区" — 片段在这里仍可见, 但导出时按 duration 截断 (拖时长手柄右移可保留) */
+.am-tl-cutzone {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  background: repeating-linear-gradient(135deg, rgba(0,0,0,0.30) 0 6px, rgba(0,0,0,0.14) 6px 12px);
+  border-left: 2px dashed rgba(255,94,0,0.85);
+}
+
 /* Snap 指示线 */
 .am-tl-snap-line {
   position: absolute;
