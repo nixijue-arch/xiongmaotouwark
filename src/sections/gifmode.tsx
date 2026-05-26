@@ -114,7 +114,12 @@ function normalizeCombo(p: GifProject): GifProject {
     if (shell.lane !== shellLane || f.lane !== faceLane) { shell.lane = shellLane; f.lane = faceLane; changed = true; }
     if (pid && shell.shellPandaId !== pid) { shell.shellPandaId = pid; changed = true; }
   }
-  return changed ? { ...p, clips } : p;
+  // 老草稿/导入项目的循环方式可能是已移除的 crossfade/reverse/rewind → 归一到 normal
+  // (现仅保留 直接/乒乓; 防 loopShort 取不到标签显示空徽章 + 行为一致). 审计 R1 发现.
+  const validMode = p.loop.mode === 'normal' || p.loop.mode === 'boomerang';
+  const loop = validMode ? p.loop : { ...p.loop, mode: 'normal' as const };
+  if (!changed && loop === p.loop) return p;
+  return { ...p, clips, loop };
 }
 
 // 时长变化时夹紧 clip [start,end] (全幅的跟随新时长; 部分的只夹上限) — 不再强制全部全幅, 让用户能在时间轴自定时段
@@ -1463,7 +1468,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
   const loadGifDraft = useCallback((slot: GifDraftSlot) => {
     historyRef.current = { past: [], future: [] }; // 读草稿 = 全新项目, 清历史
     skipHistRef.current = true;
-    setProject(slot.project);
+    setProject(normalizeCombo(slot.project));
     setSelectedId(slot.project.clips[0]?.id ?? null);
     setScrubT(0); frozenRef.current = 0; startRef.current = performance.now();
     setDraftPopOpen(false);

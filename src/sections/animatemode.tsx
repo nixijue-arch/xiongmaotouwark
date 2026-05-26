@@ -3846,6 +3846,7 @@ export function AnimateMode() {
           // 融入: 视频/GIF 只切视图 (GIF 视图渲 GifMode 循环编辑器), 无确认弹窗.
           setIsPlaying(false);
           audioEngine.destroyAll();   // 切到 GIF 视图必须显式停所有 TTS/BGM 播放器 (playback guard 只拦"新起", 不停"已在响的") — 审计 B1
+          setCyclePop(null);   // 关掉变脸选脸弹窗 — 否则切去 GIF 再切回视频它会自己冒出来 (审计 R2)
           setView(m);
           try { localStorage.setItem('xmw.animate-view', m); } catch { /* ignore */ }
         }}
@@ -4259,7 +4260,7 @@ function AnimateToolbar({
 }) {
   const lang = useUiLang();
   const t = TOOLBAR_DICT[lang];
-  const [name, setName] = useState<string>(TOOLBAR_DICT.zh.defaultName);
+  const [name, setName] = useState<string>(() => t.defaultName);   // 默认项目名跟随语言 (EN 用户不再看到中文默认名) — 审计 R3
   const [editing, setEditing] = useState(false);
   const [tmp, setTmp] = useState(name);
   const [durOpen, setDurOpen] = useState(false);
