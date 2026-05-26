@@ -58,7 +58,7 @@ import { AnimateOnboarding, ONBOARDING_SEEN_KEY } from '@/sections/onboarding';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
 import { VOICE_LIB, VOICE_BY_ID, VOICE_NAME_EN, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
 import { fetchAsDataUrl } from '@/lib/networkImage';
-import { useUiLang, pickLang, type UiLang } from '@/lib/animate-i18n';
+import { useUiLang, pickLang, signalOnboardingDemo, type UiLang } from '@/lib/animate-i18n';
 
 // ============================================================
 // Types
@@ -1846,6 +1846,15 @@ export function AnimateMode() {
   const [showGuide, setShowGuide] = useState<boolean>(() => { try { return !localStorage.getItem(ONBOARDING_SEEN_KEY); } catch { return false; } });
   const finishGuide = useCallback(() => { setShowGuide(false); try { localStorage.setItem(ONBOARDING_SEEN_KEY, '1'); } catch { /* ignore */ } }, []);
   const openGuide = useCallback(() => setShowGuide(true), []);
+  // 引导「动手 demo」推进器 — 必须稳定引用 (useCallback []). 否则 AnimateMode 每次 re-render 都让
+  // onboarding 的 demo effect cleanup 清掉刚 setTimeout 的推进定时器 (加配套/拖图层会触发 re-render →
+  // 永远推进不了, 审计实测). 监听 signalOnboardingDemo 发的事件, 类型匹配则 0.85s 后推进 (留时间看效果).
+  const onboardDemoMount = useCallback((demo: 'add-combo' | 'drag-layer' | 'click-motion', advance: () => void) => {
+    let timer = 0;
+    const h = (e: Event) => { if ((e as CustomEvent).detail?.type === demo) { window.clearTimeout(timer); timer = window.setTimeout(advance, 850); } };
+    window.addEventListener('xmw-onboard-demo', h);
+    return () => { window.clearTimeout(timer); window.removeEventListener('xmw-onboard-demo', h); };
+  }, []);
   // v23-l audit-fix: sheet drag-to-dismiss (leftover #4). 之前 cursor:grab 撒谎 — 现在 PointerDown/Move/Up 真支持向下拖关.
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStartYRef = useRef<number | null>(null);
@@ -3070,6 +3079,7 @@ export function AnimateMode() {
     // 用 functional setState 防 race (字幕 path 可能先 commit 了 lanes+1)
     commit(p => ({ ...p, clips: [...p.clips, clip] }));
     setSelectedId(id);
+    if (type === 'fx') signalOnboardingDemo('click-motion');   // 新手引导: 加了动效/特效就推进
   }, [commit, project, selectedId, t, lang]);
 
   // 配套双层 combo (跟 GIF 同款): panda 壳 + 绑定脸 两个图层 (而非合成一张). 脸 boundTo 壳 + faceLocal 跟随.
@@ -3103,6 +3113,7 @@ export function AnimateMode() {
       });
       setSelectedId(faceId);
       toast.success(t.comboAdded, { id: tid });
+      signalOnboardingDemo('add-combo');   // 新手引导: 加了配套就推进
     } catch (e) {
       toast.error(t.comboFail((e as Error).message), { id: tid });
     }
@@ -3769,10 +3780,11 @@ export function AnimateMode() {
       <AnimateOnboarding
         open={showGuide}
         lang={memeState.language === 'en' ? 'en' : 'zh'}
-        theme={view === 'gif' ? 'gif' : 'video'}
+        theme="gif"
         view={view === 'gif' ? 'gif' : 'video'}
         onClose={finishGuide}
         onFinish={finishGuide}
+        onDemoMount={onboardDemoMount}
       />
       {view === 'video' ? (<>
         {cyclePop && (() => {
@@ -6034,6 +6046,7 @@ function PreviewPane({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       onEndDrag();
+      if (kind === 'move' && moved) signalOnboardingDemo('drag-layer');   // 新手引导: 拖动了图层就推进
       // 纯单击(没拖) + 选中层在点下 + 有重叠 → 切到下一层; 拖动则不切 (拖的是当前选中层)
       if (kind === 'move' && !moved && selIdx >= 0 && stack.length > 1) onSelect(stack[(selIdx + 1) % stack.length]);
     };

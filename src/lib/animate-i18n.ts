@@ -36,3 +36,10 @@ const MOTION_EN: Record<string, string> = {
 export function motionLabel(kind: string, zhLabel: string, lang: UiLang): string {
   return lang === 'en' ? (MOTION_EN[kind] ?? zhLabel) : zhLabel;
 }
+
+// 新手引导「动手 demo」信号 — animate/gif 在「用户真做了某动作」(加配套/拖图层/加动效) 时调一下,
+// 引导组件 (AnimateOnboarding 的 onDemoMount) 监听到匹配类型就自动推进到下一步 → 真·交互式而非只读+下一步.
+export type OnboardDemoType = 'add-combo' | 'drag-layer' | 'click-motion';
+export function signalOnboardingDemo(type: OnboardDemoType): void {
+  try { window.dispatchEvent(new CustomEvent('xmw-onboard-demo', { detail: { type } })); } catch { /* SSR/旧环境忽略 */ }
+}

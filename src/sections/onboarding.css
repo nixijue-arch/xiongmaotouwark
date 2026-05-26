@@ -19,7 +19,6 @@
 .ob-backdrop {
   position: fixed;
   background: rgba(8, 16, 30, 0.62);
-  cursor: pointer;
   animation: ob-fade 180ms ease;
 }
 .ob-backdrop-full { inset: 0; }

@@ -27,7 +27,7 @@ import { showDialog } from '@/components/appdialog';
 import { makeDraftThumb } from '@/lib/thumbutil';
 import { Maximize2, FileDown, FileUp, FilePlus, ChevronDown, Scissors, Copy as CopyIcon, ChevronUp, Link2, Link2Off, Drama } from 'lucide-react';
 import { useContextMenu, type ContextMenuItem } from '@/components/contextmenu';
-import { useUiLang, pickLang, motionLabel, type UiLang } from '@/lib/animate-i18n';
+import { useUiLang, pickLang, motionLabel, signalOnboardingDemo, type UiLang } from '@/lib/animate-i18n';
 import './gifmode.css';
 
 const GIF_PROJECT_IDB_KEY = 'xiongmaotou.gifmode-current.v1';
@@ -932,6 +932,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
         return { ...p, clips: [...bumped, pandaClip, faceClip] };
       });
       setSelectedId(faceId);
+      signalOnboardingDemo('add-combo');   // 新手引导: 加了配套就推进
       const lg = langRef.current;
       toast.success(fmt(tRef.current('comboAddedLayers'), lg === 'en' ? panda.labelEn : panda.labelCn, lg === 'en' ? face.labelEn : face.labelCn));
     } catch {
@@ -991,6 +992,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
       const to = kind === 'customMove' ? (ic.loopMotion?.to ?? { ...(ic.transform ?? DEFAULT_TRANSFORM), x: Math.min(50, (ic.transform?.x ?? 0) + 24) }) : ic.loopMotion?.to;
       return { ...ic, loopMotion: { kind, amp: ic.loopMotion?.amp ?? 1, cycles: ic.loopMotion?.cycles ?? 1, to } } as Clip;
     }) }));
+    if (kind !== 'none') signalOnboardingDemo('click-motion');   // 新手引导: 选了动作就推进
   }, []);
   // 把选中主体的动作套到所有图层 (customMove 各层从自己位置出发)
   const applyMotionToAll = useCallback(() => {
@@ -1413,6 +1415,28 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
     }
   }, [project, exporting]);
 
+  // 快捷键说明 (对齐视频模式的「⌨️ 快捷键」小按钮 — 用户反馈 GIF 缺这些)
+  const showShortcuts = useCallback(() => {
+    const en = langRef.current === 'en';
+    const rows: [string, string][] = en
+      ? [['Space', 'Play / pause loop'], ['S', 'Split selected layer at playhead'], ['Del / ⌫', 'Delete selected'], ['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z / Ctrl+Y', 'Redo'], ['Esc', 'Deselect']]
+      : [['Space', '播放 / 暂停循环'], ['S', '在游标处切分选中图层'], ['Del / ⌫', '删除选中图层'], ['Ctrl+Z', '撤回'], ['Ctrl+Shift+Z / Ctrl+Y', '重做'], ['Esc', '取消选中']];
+    void showDialog({
+      title: en ? 'Keyboard shortcuts' : '快捷键',
+      variant: 'info',
+      confirmText: en ? 'Got it' : '知道了',
+      message: (
+        <div style={{ display: 'grid', gap: 7, fontSize: 13 }}>
+          {rows.map(([k, d]) => (
+            <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+              <kbd style={{ flex: '0 0 auto', minWidth: 96, padding: '1px 6px', borderRadius: 5, fontWeight: 800, fontFamily: 'ui-monospace, SFMono-Regular, monospace', background: 'rgba(13,103,198,0.1)', border: '1px solid rgba(13,103,198,0.3)' }}>{k}</kbd>
+              <span>{d}</span>
+            </div>
+          ))}
+        </div>
+      ),
+    });
+  }, []);
   const openVariants = useCallback(async () => {
     if (variantBusy) return;
     const tt = tRef.current;
@@ -1821,6 +1845,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
+      if (kind === 'move' && moved) signalOnboardingDemo('drag-layer');   // 新手引导: 拖动了图层就推进
       // 纯单击(没拖动) + 选中层就在点下 + 有重叠 → 切到下一层(循环穿透); 拖动则不切, 拖的就是当前选中层
       if (kind === 'move' && !moved && selIdx >= 0 && stack.length > 1) setSelectedId(stack[(selIdx + 1) % stack.length]);
     };
@@ -2038,6 +2063,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
             </>
           )}
         </div>
+        <button className="am-tb-btn" onClick={showShortcuts} title={lang === 'en' ? 'Keyboard shortcuts' : '快捷键列表'} data-mobile-hide><span style={{ fontSize: 14 }}>⌨️</span> <span>{lang === 'en' ? 'Shortcuts' : '快捷键'}</span></button>
         <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title={t('previewTip')}><Maximize2 size={13} /> <span>{t('preview')}</span></button>
         <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title={t('compareVariantsTip')} data-mobile-hide>
           <Layers size={13} /> <span>{t('compareVariants')}</span>

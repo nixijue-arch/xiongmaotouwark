@@ -62,7 +62,7 @@ const CARD_GAP = 14;         // coach 卡跟 anchor 的间距
 const CARD_W = 320;          // coach 卡桌面宽度 (跟 css 同步)
 const VIEWPORT_MARGIN = 12;  // 卡距视口边缘最小留白
 
-type Rect = { top: number; left: number; width: number; height: number };
+type Rect = { top: number; left: number; width: number; height: number; panelRight?: number };
 type Placement = NonNullable<OnboardingStep['placement']>;
 
 // ============================================================
@@ -138,7 +138,11 @@ export function AnimateOnboarding(props: OnboardingProps): React.JSX.Element | n
     const r = el.getBoundingClientRect();
     // 元素被折叠/隐藏 (0 尺寸) 也降级居中, 避免在角落打个看不见的洞
     if (r.width < 1 || r.height < 1) { setAnchorRect(null); return; }
-    setAnchorRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+    // anchor 若在左栏面板内, 记面板右缘 → coach 卡放到面板右侧 (不遮挡用户要点的面板内容, 如 combo 列表)
+    let panelRight: number | undefined;
+    const panel = el.closest('.am-pane-left, .gm-pane-left');
+    if (panel) { const pr = panel.getBoundingClientRect(); if (pr.right > r.left + r.width) panelRight = pr.right; }
+    setAnchorRect({ top: r.top, left: r.left, width: r.width, height: r.height, panelRight });
   }, [step]);
 
   // step 变 / 打开 → 立即测 (useLayoutEffect 防闪烁); 并把 anchor 滚进视野
@@ -223,10 +227,10 @@ export function AnimateOnboarding(props: OnboardingProps): React.JSX.Element | n
     >
       {/* 背景遮罩 + 聚光灯 cutout. 有 anchor → 用 4 块挖空洞 (box-shadow 法对滚动更稳, 这里用 clip 思路: 中间洞透出, 四周暗) */}
       {anchorRect ? (
-        <Spotlight rect={anchorRect} onSkip={onClose} />
+        <Spotlight rect={anchorRect} />
       ) : (
-        // 无 anchor: 整屏暗背景, 点击空白 = 跳过
-        <div className="ob-backdrop ob-backdrop-full" onClick={onClose} />
+        // 无 anchor: 整屏暗背景. 不再"点空白就退出"(用户反馈误触退出); 退出走 跳过/X/Esc.
+        <div className="ob-backdrop ob-backdrop-full" />
       )}
 
       {/* demo 视觉提示: anchor 旁脉冲手势 / 箭头 (纯引导, 不劫持事件) */}
@@ -304,22 +308,23 @@ export function AnimateOnboarding(props: OnboardingProps): React.JSX.Element | n
 // 聚光灯 — 用 4 块半透明遮罩拼出「中间镂空」(避开 anchor 区), 比单个 box-shadow 在多滚动容器下更稳;
 // 镂空区描个发光边框. 点 4 块遮罩任意处 = 跳过 (但镂空区本身可穿透到底层真实 UI, 不拦事件).
 // ============================================================
-function Spotlight({ rect, onSkip }: { rect: Rect; onSkip: () => void }): React.JSX.Element {
+function Spotlight({ rect }: { rect: Rect }): React.JSX.Element {
   const x = Math.max(0, rect.left - SPOTLIGHT_PAD);
   const y = Math.max(0, rect.top - SPOTLIGHT_PAD);
   const w = rect.width + SPOTLIGHT_PAD * 2;
   const h = rect.height + SPOTLIGHT_PAD * 2;
-  const stop = (e: React.MouseEvent) => { e.stopPropagation(); onSkip(); };
+  // 4 块遮罩只「变暗 + 拦住高亮区外的点击」, 不再"点一下就退出引导"(用户反馈误触退出).
+  // 退出走 跳过 / X / Esc. 镂空区本身无遮罩 + ring pointer-events:none → 底层真实 UI 可点 (demo「真去做」能命中).
   return (
     <>
       {/* 上 */}
-      <div className="ob-backdrop" style={{ top: 0, left: 0, right: 0, height: y }} onClick={stop} />
+      <div className="ob-backdrop" style={{ top: 0, left: 0, right: 0, height: y }} />
       {/* 下 */}
-      <div className="ob-backdrop" style={{ top: y + h, left: 0, right: 0, bottom: 0 }} onClick={stop} />
+      <div className="ob-backdrop" style={{ top: y + h, left: 0, right: 0, bottom: 0 }} />
       {/* 左 */}
-      <div className="ob-backdrop" style={{ top: y, left: 0, width: x, height: h }} onClick={stop} />
+      <div className="ob-backdrop" style={{ top: y, left: 0, width: x, height: h }} />
       {/* 右 */}
-      <div className="ob-backdrop" style={{ top: y, left: x + w, right: 0, height: h }} onClick={stop} />
+      <div className="ob-backdrop" style={{ top: y, left: x + w, right: 0, height: h }} />
       {/* 镂空区描边 (pointer-events:none, 不拦真实 UI 交互 → demo 「真去拖」时能点到底层) */}
       <div className="ob-spotlight-ring" style={{ top: y, left: x, width: w, height: h }} aria-hidden />
     </>
@@ -430,7 +435,11 @@ function computeCardLayout(
   const cy = rect.top + rect.height / 2;
   if (place === 'bottom') { left = cx - cardW / 2; top = rect.top + rect.height + CARD_GAP; }
   else if (place === 'top') { left = cx - cardW / 2; top = rect.top - cardH - CARD_GAP; }
-  else if (place === 'right') { left = rect.left + rect.width + CARD_GAP; top = cy - cardH / 2; }
+  else if (place === 'right') {
+    // 卡放 anchor 右侧; anchor 在左栏面板内时放到「面板右缘」之外 → 不遮挡面板内容 (用户要点的 combo/列表)
+    left = Math.max(rect.left + rect.width + CARD_GAP, (rect.panelRight ?? 0) + CARD_GAP);
+    top = cy - cardH / 2;
+  }
   else { left = rect.left - cardW - CARD_GAP; top = cy - cardH / 2; } // left
 
   // clamp 进视口 (留 margin), 记录夹了多少 → 箭头补偿对准 anchor
