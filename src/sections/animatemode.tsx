@@ -56,8 +56,9 @@ import {
 import { GifMode } from '@/sections/gifmode';
 import { AnimateOnboarding, ONBOARDING_SEEN_KEY } from '@/sections/onboarding';
 import { uid, ComboTab, MaterialCardClip, MaterialSourceButtons, DraftCardClip, CaptionQuickGen, CaptionPositionPresets, CaptionEmojiPicker, CaptionBatchImport, type DragPayload } from '@/lib/sharededitor';
-import { VOICE_LIB, VOICE_BY_ID, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
+import { VOICE_LIB, VOICE_BY_ID, VOICE_NAME_EN, resolveVoiceId, estimateTTSDuration, type VoicePreset } from '@/lib/voicelib';
 import { fetchAsDataUrl } from '@/lib/networkImage';
+import { useUiLang, pickLang, type UiLang } from '@/lib/animate-i18n';
 
 // ============================================================
 // Types
@@ -93,6 +94,11 @@ const TRACK_META: Record<TrackType, { name: string; icon: LucideIcon }> = {
   tts:     { name: '配音', icon: Mic },
   bgm:     { name: '音乐', icon: Music },
 };
+// 轨道名 EN (跟随语言; 渲染处用 trackName)
+const TRACK_NAME_EN: Record<TrackType, string> = {
+  image: 'Image', caption: 'Caption', fx: 'FX', tts: 'Voice', bgm: 'Music',
+};
+function trackName(type: TrackType, lang: UiLang): string { return lang === 'en' ? TRACK_NAME_EN[type] : TRACK_META[type].name; }
 const TRACK_ORDER: TrackType[] = ['image', 'caption', 'fx', 'tts', 'bgm'];
 
 // VOICE_LIB / VOICE_BY_ID / estimateTTSDuration / resolveVoiceId → '@/lib/voicelib' (E0 抽出)
@@ -463,6 +469,69 @@ const FX_LABEL: Record<ImageFx, string> = {
   move: '移动',
   bob: '上下浮', sway: '摇摆', swing: '钟摆', wobble: '果冻晃', hop: '横跳', float: '8字漂', orbit: '绕圈',
 };
+// EN 名 (跟随全局 中/EN 开关; 仅渲染用, 不动上面的 *数据* 结构. lang==='en' 时查这里, 回退中文.)
+const FX_LABEL_EN: Record<ImageFx, string> = {
+  none: 'None', shake: 'Shake', zoom: 'Pop', flash: 'Flash',
+  'fade-in': 'Fade in', 'fade-out': 'Fade out', 'slide-l': 'Slide in L', 'slide-r': 'Slide in R',
+  bounce: 'Bounce', spin: 'Spin', pulse: 'Pulse', glitch: 'Glitch',
+  'pan-l': 'Pan left', 'pan-r': 'Pan right', 'pan-u': 'Pan up', 'pan-d': 'Pan down',
+  'zoom-in': 'Zoom in', 'zoom-out': 'Zoom out', 'ken-burns': 'Ken Burns',
+  move: 'Move',
+  bob: 'Bob', sway: 'Sway', swing: 'Pendulum', wobble: 'Wobble', hop: 'Hop', float: 'Figure-8', orbit: 'Orbit',
+};
+// FX_LIB 的 name / desc EN 映射 (按 id). 渲染处用 fxName/fxDesc 取当前语言.
+const FX_NAME_EN: Partial<Record<ImageFx, string>> = {
+  zoom: 'Pop', 'fade-in': 'Fade in', 'slide-l': 'Slide in L', 'slide-r': 'Slide in R', bounce: 'Bounce',
+  shake: 'Shake', flash: 'Flash', pulse: 'Pulse', spin: 'Spin', glitch: 'Glitch',
+  'fade-out': 'Fade out',
+  'pan-l': 'Cam · Left', 'pan-r': 'Cam · Right', 'pan-u': 'Cam · Up', 'pan-d': 'Cam · Down',
+  'zoom-in': 'Cam · In', 'zoom-out': 'Cam · Out', 'ken-burns': 'Ken Burns',
+  move: 'Move',
+  bob: 'Bob', sway: 'Sway', swing: 'Pendulum', wobble: 'Wobble', hop: 'Hop', float: 'Figure-8', orbit: 'Orbit',
+};
+const FX_DESC_EN: Partial<Record<ImageFx, string>> = {
+  zoom: 'Pops in from small', 'fade-in': 'Transparent → clear', 'slide-l': 'Slides in from the left',
+  'slide-r': 'Slides in from the right', bounce: 'Bounces in up & down',
+  shake: 'A quick shake', flash: 'A bright flash', pulse: 'Heartbeat in & out', spin: 'Spins once in place',
+  glitch: 'Glitchy cyberpunk flicker',
+  'fade-out': 'Clear → transparent',
+  'pan-l': 'Camera pans slowly right → left', 'pan-r': 'Camera pans slowly left → right',
+  'pan-u': 'Camera pans slowly down → up', 'pan-d': 'Camera pans slowly up → down',
+  'zoom-in': 'Camera zooms in 1.0→1.25x', 'zoom-out': 'Camera zooms out 1.25→1.0x',
+  'ken-burns': 'Zoom-in + slow pan (classic documentary feel)',
+  move: 'Start/end keyframe tween (right-click a material to record start/end)',
+  bob: 'Gently bobs up & down', sway: 'Sways head side to side', swing: 'Pendulum swing (shift + rotate)',
+  wobble: 'Jelly wobble (scale + rotate)', hop: 'Hops side to side', float: 'Drifts in a figure-8',
+  orbit: 'Drifts in a small circle',
+};
+const FX_GROUP_LABEL_EN: Record<FxGroup, string> = {
+  enter: 'Entrance', emphasis: 'Emphasis', exit: 'Exit', camera: 'Camera', move: 'Move', rhythm: 'Rhythm',
+};
+const BGM_NAME_EN: Record<string, string> = {
+  'bgm-jigou': 'The Bigwigs Have Arrived', 'bgm-mox': 'Earworm Loop', 'bgm-cool': 'Flex Mode',
+};
+const BGM_MOOD_EN: Record<string, string> = {
+  'bgm-jigou': 'Familiar · meme anthem', 'bgm-mox': 'Catchy · 4-beat loop', 'bgm-cool': 'Slow drip flex',
+};
+// 配音音色描述 EN (按 voice id; VOICE_NAME_EN 在 voicelib, desc 这里就近)
+const VOICE_DESC_EN: Record<string, string> = {
+  'zh-youdao': 'Chinese female · Youdao read-aloud · mature anchor tone',
+  'en-joey': 'US English · cloud read-aloud (same tone as Chinese)',
+};
+// 取 FX 显示名/描述 (跟随语言)
+function fxName(id: ImageFx, name: string, lang: UiLang): string { return lang === 'en' ? (FX_NAME_EN[id] ?? name) : name; }
+function fxDesc(id: ImageFx, desc: string, lang: UiLang): string { return lang === 'en' ? (FX_DESC_EN[id] ?? desc) : desc; }
+function fxLabel(id: ImageFx, lang: UiLang): string { return lang === 'en' ? (FX_LABEL_EN[id] ?? FX_LABEL[id]) : FX_LABEL[id]; }
+function bgmName(id: string, name: string, lang: UiLang): string { return lang === 'en' ? (BGM_NAME_EN[id] ?? name) : name; }
+function bgmMood(id: string, mood: string, lang: UiLang): string { return lang === 'en' ? (BGM_MOOD_EN[id] ?? mood) : mood; }
+// 配音音色名 (跟随语言; voicelib 导出的 VOICE_NAME_EN 按 id)
+function voiceName(id: string, name: string, lang: UiLang): string { return lang === 'en' ? (VOICE_NAME_EN[id] ?? name) : name; }
+// voice.lang → 短标 (中/US/UK)
+function voiceLangTag(vlang: string, lang: UiLang): string {
+  if (vlang === 'zh-CN') return lang === 'en' ? 'CN' : '中';
+  if (vlang === 'en-US') return 'US';
+  return 'UK';
+}
 
 // PICSUM / SCENE_LIB → '@/lib/sharededitor' (E1 抽出, 12 scene)
 
@@ -1591,6 +1660,167 @@ export async function exportGIF(
 // ============================================================
 // Main Component
 // ============================================================
+const AM_DICT = {
+  zh: {
+    // hydrate / JSON io
+    cleanedInvalid: (n: number) => `检测到 ${n} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`,
+    newBlank: '已新建空白项目',
+    jsonExported: (clips: number, dur: string) => `✓ 已导出项目 JSON · ${clips} 片段 · ${dur}s`,
+    jsonExportFail: (msg: string) => `导出 JSON 失败: ${msg}`,
+    jsonMax20: 'JSON 文件最多 20MB', notValidAmjson: '不是有效 .amjson 文件',
+    importTitle: '导入项目', importMsg: (n: number) => `导入会替换当前工作 · 当前 ${n} 个片段会清空 (已存草稿不影响). 继续?`, importConfirm: '导入',
+    jsonImported: (clips: number, dur: string, name: string, cleaned: number) => `✓ 已导入项目 · ${clips} 片段 · ${dur}s${name ? ` · 名称: ${name}` : ''}${cleaned > 0 ? ` · 清理 ${cleaned} 失效图` : ''}`,
+    jsonImportFail: (msg: string) => `导入失败: ${msg}`,
+    // dumps
+    dumpTTSClip: (n: number) => `🔬 已 dump ${n} 段 TTS → console + 剪贴板`, dumpTTSConsole: (n: number) => `🔬 已 dump ${n} 段 TTS → console`,
+    dumpClips: (n: number) => `🎬 已 dump ${n} clips → console + 剪贴板`, dumpClipsConsole: (n: number) => `🎬 已 dump ${n} clips → console`,
+    dumpTplClip: '📋 模板代码 → 剪贴板 (可粘到 source 作为预设)', dumpTplConsole: '📋 模板代码 → console',
+    // clip ops
+    deletedClip: '已删除片段', reordered: '已调整图层顺序', tidiedLanes: '已整理空轨', flattened: '已展平到主轨 — 多轨已合并',
+    splitDone: '已切分为两段', duplicatedClip: '已复制片段',
+    splitTooClose: '切分点太靠边', topLane: '已是顶轨', keepOneLane: '至少保留 1 条轨道',
+    movedToNewLane: (track: string, n: number) => `已下移到新轨 (${track} ${n})`,
+    laneHasClips: '该轨道还有片段, 不能删',
+    durCapMsg: (kind: string, max: number, capped: number) => `${kind} 时长上限 ${max}s, 已 cap 到 ${capped}s`,
+    gifWord: 'GIF', videoWord: '视频',
+    durExtended: (d: number) => `时长已加长 ${d}s`,
+    clearTitle: '清空时间轴', clearMsg: (n: number) => `会清掉当前 ${n} 个片段 (已存草稿/导出的不受影响). 继续?`, clearConfirm: '清空', cancel: '取消', timelineCleared: '时间轴已清空',
+    randTitle: '随机生成', randMsg: (n: number) => `会清空当前 ${n} 个片段重新随机 (已存草稿/导出的不受影响). 继续?`, randConfirm: '随机',
+    randLoadingGif: '随机生成中 (GIF 模式 · 无声)', randLoadingVideo: '随机生成中 (panda+face 合成…)',
+    randFail: (msg: string) => '随机生成失败: ' + msg,
+    randDoneGif: (dur: string) => `已生成 4 段 GIF · 总时长 ${dur}s · 无声`,
+    randDoneVideo: (dur: string) => `已生成 4 段双层配套 (壳+脸可分别调) · 总时长 ${dur}s`,
+    addLayerFirst: '先在「素材」加个图层, 再加特效/动效',
+    addedMove: '已加入移动动画 · 在画板上拖 A/B 圆圈设位置',
+    addedFx: (name: string, target: string, sceneTag: string) => `已加 ${name} · 作用于 ${target}${sceneTag} · Inspector 可改对象`,
+    sceneTag: ' (场景)',
+    comboLoading: '合成配套熊猫头 (双层)…', comboAdded: '已加双层配套 — 拖脸微调 / 给壳加特效脸会跟着动', comboFail: (msg: string) => '合成失败: ' + msg,
+    boundFace: '已绑定 — 表情跟随熊猫头壳', noShellToBind: '没有可绑定的熊猫头壳 — 先加个熊猫头图层', unbound: '已解绑 — 表情现在独立',
+    needComboFace: '先做一个「配套」(熊猫头 + 表情) 才能变脸', needComboFace2: '先在「素材 → 配套」加个熊猫头+表情, 再来变脸',
+    faceCycleDone: (n: number, dissolve: boolean) => `🎭 变脸 · ${n} 张表情${dissolve ? ' · 溶解过渡' : ' · 快切'} (在熊猫头时段内轮播)`,
+    addedImgCap: '已加 画面 + 字幕 双轨', addedImg: '已加画面',
+    savedAs: (name: string) => `已保存为 ${name}`,
+    copySuffix: ' 副本',
+    draftMax: (max: number) => `最多 ${max} 个草稿, 先删`, duplicatedDraft: (name: string) => `已复制 ${name}`,
+    draftInvalid: '草稿数据格式无效, 无法加载',
+    loadedDraft: (name: string, cleaned: number) => `已读入 ${name}${cleaned > 0 ? ` · 自动清理 ${cleaned} 失效图` : ''}`,
+    deletedDraft: '已删除草稿',
+    uploadMaxCount: (max: number) => `素材库已达 ${max} 张上限`, uploadStorageFull: (mb: string) => `素材库存储已满 (${mb}MB)`,
+    pasted: '✓ 已粘贴到素材库「上传」分页 — 点缩略图加入时间轴', pastedImgLabel: '粘贴图',
+    downloadingImg: '下载链接图片中…', pasteFail: (msg: string) => `粘贴失败: ${msg}`,
+    copiedClip: (name: string) => `已复制 ${name}`, cutClip: (name: string) => `已剪切 ${name}`,
+    clipboardEmpty: '剪贴板空', pastedClip: (name: string, bump: boolean) => `已粘贴 ${name}${bump ? ' (新轨)' : ''}`,
+    selectAllHint: (n: number) => `本编辑器单选, 删全部请 Ctrl+A → Delete (将循环删 ${n} 个)`,
+    delAllTitle: '删除全部片段', delAllMsg: (n: number) => `确认删除全部 ${n} 个片段?`, delAllConfirm: '删除全部',
+    copiedTc: (tc: string) => '已复制: ' + tc, clipboardUnavailable: '剪贴板不可用',
+    noFitTTS: '找不到合适的配音对齐', linkedCapTTS: (txt: string) => `✓ 字幕 ⇌ 配音 双向链接 · 文字 "${txt}"`,
+    capEmpty: '字幕为空, 先填文字', genTTSDone: (dur: string) => `✓ 已生成配音 · 时段对齐 ${dur}s · auto-gen 中`,
+    noFitCap: '找不到合适的字幕对齐', linkedTTSCap: (txt: string) => `✓ 配音 ⇌ 字幕 双向链接 · 文字 "${txt}"`,
+    ttsEmpty: '配音为空, 先填文字', genCapDone: (n: number) => `✓ 已生成同步字幕 (${n} 字)`,
+    tplInvalid: '模板数据格式无效', loadedTpl: (name: string) => `已读入模板 ${name}`, tplFormatInvalid: (msg: string) => '模板格式无效: ' + msg,
+    addedBeatCaps: (n: number) => `已加 ${n} 个节拍字幕`,
+    // context menu
+    cmSplit: '切分 (在 playhead)', cmDup: '复制片段', cmCopy: '拷贝', cmCut: '剪切', cmPaste: '粘贴到 playhead',
+    cmLaneUp: '上移一轨', cmLaneDown: '下移一轨', cmCopyTc: '复制时间码',
+    cmClearEnd: '清除终帧 (取消 move)', cmRecordEnd: '🚀 把当前为终帧 (启动 move)',
+    cmCapUnlink: '🔗 解除配音链接', cmCapLink: (n: number) => `🔗 链接到已有配音${n > 0 ? ` (${n})` : ''}`, cmCapGenTts: '🎙 同步生成配音 (新 TTS clip)',
+    cmTtsUnlink: '🔗 解除字幕链接', cmTtsLink: (n: number) => `🔗 链接到已有字幕${n > 0 ? ` (${n})` : ''}`, cmTtsGenCap: '📝 同步生成字幕 (新 Caption clip)',
+    cmTargetAll: '🌐 所有同时刻图 (全局)', cmSepChar: '— 角色 / 熊猫 —', cmSepScene: '— 场景 —',
+    cmCharLabel: (label: string, s: string, e: string) => `🐼 ${label} · ${s}-${e}s`, cmSceneLabel: (label: string, s: string, e: string) => `🎬 ${label} · ${s}-${e}s`,
+    cmFxTarget: '🎯 作用对象', cmDelete: '删除',
+    cmDeselect: '取消选择', cmAddImg: '加图片轨', cmAddCap: '加字幕轨', cmAddFx: '加特效轨',
+    imgWord: '图片', sceneWord: '场景',
+    // cycle modal
+    cycleTitle: (n: number) => `🎭 变脸 · 选 2-6 张表情依次轮播 · 已选 ${n}/6`,
+    searchFace: '搜表情…', noMatchKw: '无匹配 · 改关键词试试',
+    dissolveTip: '溶解 = 脸之间淡入淡出过渡; 关 = 直接快切(鬼畜)', dissolveOn: '✓ 溶解过渡', dissolveOff: '○ 硬切快换',
+    makeCycle: (n: number) => `生成变脸 · ${n} 张`,
+    // mobile bottombar
+    bottomTools: '底部工具',
+    mbAssets: '素材', mbMusic: '音乐', mbVoice: '配音', mbCaption: '字幕', mbFx: '动效', mbEdit: '编辑', mbExport: '导出',
+    selectFirst: '先选中片段', editSelected: '编辑选中片段',
+    sheetAssets: '🎨 素材库', sheetMusic: '🎵 背景音乐', sheetVoice: '🎙 配音音色', sheetCaption: '💬 字幕', sheetFx: '✨ 动效', sheetEdit: '🔧 编辑',
+    close: '关闭',
+    // default content (新 clip 内容)
+    faceSuffix: '·脸', draftWord: '草图',
+  },
+  en: {
+    cleanedInvalid: (n: number) => `${n} invalid image clips auto-cleaned (temporary URLs after refresh); re-add them via the "Combo" tab on the left`,
+    newBlank: 'New blank project created',
+    jsonExported: (clips: number, dur: string) => `✓ Project JSON exported · ${clips} clips · ${dur}s`,
+    jsonExportFail: (msg: string) => `JSON export failed: ${msg}`,
+    jsonMax20: 'JSON file is at most 20MB', notValidAmjson: 'Not a valid .amjson file',
+    importTitle: 'Import project', importMsg: (n: number) => `Importing replaces your current work · the current ${n} clips will be cleared (saved drafts unaffected). Continue?`, importConfirm: 'Import',
+    jsonImported: (clips: number, dur: string, name: string, cleaned: number) => `✓ Project imported · ${clips} clips · ${dur}s${name ? ` · name: ${name}` : ''}${cleaned > 0 ? ` · cleaned ${cleaned} invalid images` : ''}`,
+    jsonImportFail: (msg: string) => `Import failed: ${msg}`,
+    dumpTTSClip: (n: number) => `🔬 Dumped ${n} TTS clips → console + clipboard`, dumpTTSConsole: (n: number) => `🔬 Dumped ${n} TTS clips → console`,
+    dumpClips: (n: number) => `🎬 Dumped ${n} clips → console + clipboard`, dumpClipsConsole: (n: number) => `🎬 Dumped ${n} clips → console`,
+    dumpTplClip: '📋 Template code → clipboard (paste into source as a preset)', dumpTplConsole: '📋 Template code → console',
+    deletedClip: 'Clip deleted', reordered: 'Layer order adjusted', tidiedLanes: 'Empty tracks tidied', flattened: 'Flattened to main track — tracks merged',
+    splitDone: 'Split into two', duplicatedClip: 'Clip duplicated',
+    splitTooClose: 'Split point too close to the edge', topLane: 'Already the top track', keepOneLane: 'Keep at least 1 track',
+    movedToNewLane: (track: string, n: number) => `Moved down to a new track (${track} ${n})`,
+    laneHasClips: 'This track still has clips, cannot delete',
+    durCapMsg: (kind: string, max: number, capped: number) => `${kind} max duration ${max}s, capped to ${capped}s`,
+    gifWord: 'GIF', videoWord: 'Video',
+    durExtended: (d: number) => `Duration extended by ${d}s`,
+    clearTitle: 'Clear timeline', clearMsg: (n: number) => `This clears the current ${n} clips (saved drafts/exports are unaffected). Continue?`, clearConfirm: 'Clear', cancel: 'Cancel', timelineCleared: 'Timeline cleared',
+    randTitle: 'Random generate', randMsg: (n: number) => `This clears the current ${n} clips and re-randomizes (saved drafts/exports are unaffected). Continue?`, randConfirm: 'Random',
+    randLoadingGif: 'Generating randomly (GIF mode · silent)', randLoadingVideo: 'Generating randomly (compositing panda+face…)',
+    randFail: (msg: string) => 'Random generation failed: ' + msg,
+    randDoneGif: (dur: string) => `Generated 4 GIF clips · total ${dur}s · silent`,
+    randDoneVideo: (dur: string) => `Generated 4 two-layer combos (shell+face adjustable separately) · total ${dur}s`,
+    addLayerFirst: 'Add a layer in "Materials" first, then add FX/motion',
+    addedMove: 'Move animation added · drag the A/B circles on the canvas to set positions',
+    addedFx: (name: string, target: string, sceneTag: string) => `Added ${name} · applied to ${target}${sceneTag} · change target in the Inspector`,
+    sceneTag: ' (scene)',
+    comboLoading: 'Compositing panda combo (two layers)…', comboAdded: 'Two-layer combo added — drag the face to fine-tune / FX on the shell follows', comboFail: (msg: string) => 'Compositing failed: ' + msg,
+    boundFace: 'Bound — face follows the panda shell', noShellToBind: 'No panda shell to bind to — add a panda head layer first', unbound: 'Unbound — face is independent',
+    needComboFace: 'Make a "Combo" (panda head + face) first to use Face Cycle', needComboFace2: 'Add a panda head + face via "Materials → Combo" first, then use Face Cycle',
+    faceCycleDone: (n: number, dissolve: boolean) => `🎭 Face Cycle · ${n} faces${dissolve ? ' · dissolve' : ' · hard cut'} (cycling within the panda head span)`,
+    addedImgCap: 'Added image + caption (two tracks)', addedImg: 'Image added',
+    savedAs: (name: string) => `Saved as ${name}`,
+    copySuffix: ' copy',
+    draftMax: (max: number) => `Max ${max} drafts, delete some first`, duplicatedDraft: (name: string) => `Duplicated ${name}`,
+    draftInvalid: 'Invalid draft data, cannot load',
+    loadedDraft: (name: string, cleaned: number) => `Loaded ${name}${cleaned > 0 ? ` · auto-cleaned ${cleaned} invalid images` : ''}`,
+    deletedDraft: 'Draft deleted',
+    uploadMaxCount: (max: number) => `Material library reached the ${max} limit`, uploadStorageFull: (mb: string) => `Material library storage full (${mb}MB)`,
+    pasted: '✓ Pasted to the "Upload" tab of the material library — tap the thumbnail to add to the timeline', pastedImgLabel: 'Pasted image',
+    downloadingImg: 'Downloading linked image…', pasteFail: (msg: string) => `Paste failed: ${msg}`,
+    copiedClip: (name: string) => `Copied ${name}`, cutClip: (name: string) => `Cut ${name}`,
+    clipboardEmpty: 'Clipboard empty', pastedClip: (name: string, bump: boolean) => `Pasted ${name}${bump ? ' (new track)' : ''}`,
+    selectAllHint: (n: number) => `This editor is single-select; to delete all use Ctrl+A → Delete (will delete ${n} one by one)`,
+    delAllTitle: 'Delete all clips', delAllMsg: (n: number) => `Delete all ${n} clips?`, delAllConfirm: 'Delete all',
+    copiedTc: (tc: string) => 'Copied: ' + tc, clipboardUnavailable: 'Clipboard unavailable',
+    noFitTTS: 'No suitable voice to align with', linkedCapTTS: (txt: string) => `✓ Caption ⇌ voice linked · text "${txt}"`,
+    capEmpty: 'Caption is empty, fill in text first', genTTSDone: (dur: string) => `✓ Voice generated · aligned to ${dur}s · auto-gen running`,
+    noFitCap: 'No suitable caption to align with', linkedTTSCap: (txt: string) => `✓ Voice ⇌ caption linked · text "${txt}"`,
+    ttsEmpty: 'Voice is empty, fill in text first', genCapDone: (n: number) => `✓ Synced caption generated (${n} chars)`,
+    tplInvalid: 'Invalid template data', loadedTpl: (name: string) => `Loaded template ${name}`, tplFormatInvalid: (msg: string) => 'Invalid template format: ' + msg,
+    addedBeatCaps: (n: number) => `Added ${n} beat captions`,
+    cmSplit: 'Split (at playhead)', cmDup: 'Duplicate clip', cmCopy: 'Copy', cmCut: 'Cut', cmPaste: 'Paste at playhead',
+    cmLaneUp: 'Move up a track', cmLaneDown: 'Move down a track', cmCopyTc: 'Copy timecode',
+    cmClearEnd: 'Clear end frame (cancel move)', cmRecordEnd: '🚀 Set current as end frame (start move)',
+    cmCapUnlink: '🔗 Unlink voice', cmCapLink: (n: number) => `🔗 Link to existing voice${n > 0 ? ` (${n})` : ''}`, cmCapGenTts: '🎙 Sync-generate voice (new TTS clip)',
+    cmTtsUnlink: '🔗 Unlink caption', cmTtsLink: (n: number) => `🔗 Link to existing caption${n > 0 ? ` (${n})` : ''}`, cmTtsGenCap: '📝 Sync-generate caption (new Caption clip)',
+    cmTargetAll: '🌐 All images at this moment (global)', cmSepChar: '— Characters / Panda —', cmSepScene: '— Scene —',
+    cmCharLabel: (label: string, s: string, e: string) => `🐼 ${label} · ${s}-${e}s`, cmSceneLabel: (label: string, s: string, e: string) => `🎬 ${label} · ${s}-${e}s`,
+    cmFxTarget: '🎯 Target', cmDelete: 'Delete',
+    cmDeselect: 'Deselect', cmAddImg: 'Add image track', cmAddCap: 'Add caption track', cmAddFx: 'Add FX track',
+    imgWord: 'image', sceneWord: 'scene',
+    cycleTitle: (n: number) => `🎭 Face Cycle · pick 2-6 faces to cycle · ${n}/6 selected`,
+    searchFace: 'Search faces…', noMatchKw: 'No match · try different keywords',
+    dissolveTip: 'Dissolve = cross-fade between faces; off = hard cut (meme style)', dissolveOn: '✓ Dissolve', dissolveOff: '○ Hard cut',
+    makeCycle: (n: number) => `Make Face Cycle · ${n} faces`,
+    bottomTools: 'Bottom tools',
+    mbAssets: 'Materials', mbMusic: 'Music', mbVoice: 'Voice', mbCaption: 'Captions', mbFx: 'Motion', mbEdit: 'Edit', mbExport: 'Export',
+    selectFirst: 'Select a clip first', editSelected: 'Edit selected clip',
+    sheetAssets: '🎨 Material library', sheetMusic: '🎵 Background music', sheetVoice: '🎙 Voice tones', sheetCaption: '💬 Captions', sheetFx: '✨ Motion', sheetEdit: '🔧 Edit',
+    close: 'Close',
+    faceSuffix: ' face', draftWord: 'Draft',
+  },
+} as const;
 export function AnimateMode() {
   const isMobile = useIsMobile();
   const [project, setProject] = useState<ProjectState>(() => makeInitialProject());
@@ -1608,6 +1838,11 @@ export function AnimateMode() {
   });
   // 新手引导 — 首次进沙雕动画自动弹 (localStorage 标记); 顶栏「新手引导」按钮随时重放. lang 跟随全局 中/EN 开关.
   const { state: memeState } = useMeme();
+  const lang = useUiLang();
+  const t = AM_DICT[lang];
+  // mount-only effects (hydrate / dump 注册) 引用文案时走 ref, 避免 lang 进 dep array (否则切语言会重跑 hydrate 覆盖编辑).
+  const tRef = useRef(t);
+  tRef.current = t;
   const [showGuide, setShowGuide] = useState<boolean>(() => { try { return !localStorage.getItem(ONBOARDING_SEEN_KEY); } catch { return false; } });
   const finishGuide = useCallback(() => { setShowGuide(false); try { localStorage.setItem(ONBOARDING_SEEN_KEY, '1'); } catch { /* ignore */ } }, []);
   const openGuide = useCallback(() => setShowGuide(true), []);
@@ -1682,7 +1917,7 @@ export function AnimateMode() {
           if (hydrated) {
             setProject(hydrated.project);
             if (hydrated.cleanedInvalidImages > 0) {
-              toast.warning(`检测到 ${hydrated.cleanedInvalidImages} 个失效图片片段已自动清理 (刷新后的临时 URL), 请用左侧 "配套" tab 重新加`);
+              toast.warning(tRef.current.cleanedInvalid(hydrated.cleanedInvalidImages));
             }
           }
         }
@@ -1773,10 +2008,10 @@ export function AnimateMode() {
     setPlayhead(0);
     setSelectedId(null);
     historyRef.current = { past: [], future: [] };
-    setHistoryTick(t => t + 1);
+    setHistoryTick(n => n + 1);
     audioEngine.destroyAll();
-    toast.success('已新建空白项目');
-  }, []);
+    toast.success(t.newBlank);
+  }, [t]);
 
   // v23-k Phase A: 项目 JSON 导入/导出 (跨设备 / 备份 / 分享)
   const exportProjectJSON = useCallback(() => {
@@ -1796,11 +2031,11 @@ export function AnimateMode() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success(`✓ 已导出项目 JSON · ${project.clips.length} 片段 · ${project.duration.toFixed(1)}s`);
+      toast.success(t.jsonExported(project.clips.length, project.duration.toFixed(1)));
     } catch (e) {
-      toast.error(`导出 JSON 失败: ${(e as Error).message}`);
+      toast.error(t.jsonExportFail((e as Error).message));
     }
-  }, [project]);
+  }, [project, t]);
 
   const importProjectJSON = useCallback(() => {
     const input = document.createElement('input');
@@ -1811,21 +2046,21 @@ export function AnimateMode() {
       if (!file) return;
       try {
         if (file.size > 20 * 1024 * 1024) {
-          toast.error('JSON 文件最多 20MB');
+          toast.error(t.jsonMax20);
           return;
         }
         const text = await file.text();
         const data = JSON.parse(text) as { project?: ProjectState; name?: string };
         const hydrated = hydrateProject(data.project);
         if (!hydrated) {
-          toast.error('不是有效 .amjson 文件');
+          toast.error(t.notValidAmjson);
           return;
         }
         const importRes = await showDialog({
-          title: '导入项目',
-          message: `导入会替换当前工作 · 当前 ${project.clips.length} 个片段会清空 (已存草稿不影响). 继续?`,
+          title: t.importTitle,
+          message: t.importMsg(project.clips.length),
           variant: 'warning',
-          confirmText: '导入',
+          confirmText: t.importConfirm,
         });
         if (!importRes.confirmed) return;
         setProject(hydrated.project);
@@ -1836,13 +2071,13 @@ export function AnimateMode() {
         historyRef.current = { past: [], future: [] };
         setHistoryTick(t => t + 1);
         audioEngine.destroyAll();
-        toast.success(`✓ 已导入项目 · ${hydrated.project.clips.length} 片段 · ${hydrated.project.duration.toFixed(1)}s${data.name ? ` · 名称: ${data.name}` : ''}${hydrated.cleanedInvalidImages > 0 ? ` · 清理 ${hydrated.cleanedInvalidImages} 失效图` : ''}`);
+        toast.success(t.jsonImported(hydrated.project.clips.length, hydrated.project.duration.toFixed(1), data.name ?? '', hydrated.cleanedInvalidImages));
       } catch (e) {
-        toast.error(`导入失败: ${(e as Error).message}`);
+        toast.error(t.jsonImportFail((e as Error).message));
       }
     };
     input.click();
-  }, [project.clips.length]);
+  }, [project.clips.length, t]);
 
   // ========================================================
   // Auto-gen TTS audioSrc — 推翻级: 所有 voice 都走云端 (统一 sync 体验)
@@ -1968,9 +2203,9 @@ export function AnimateMode() {
       try {
         const json = JSON.stringify(rows, null, 2);
         void navigator.clipboard.writeText(json);
-        toast.success(`🔬 已 dump ${rows.length} 段 TTS → console + 剪贴板`);
+        toast.success(t.dumpTTSClip(rows.length));
       } catch {
-        toast.success(`🔬 已 dump ${rows.length} 段 TTS → console`);
+        toast.success(t.dumpTTSConsole(rows.length));
       }
     };
     // 扩展: 全 project 时间表 dump (含 image / caption / tts / bgm / fx 对齐时间)
@@ -2016,9 +2251,9 @@ export function AnimateMode() {
       console.table(rows);
       try {
         void navigator.clipboard.writeText(JSON.stringify(rows, null, 2));
-        toast.success(`🎬 已 dump ${rows.length} clips → console + 剪贴板`);
+        toast.success(t.dumpClips(rows.length));
       } catch {
-        toast.success(`🎬 已 dump ${rows.length} clips → console`);
+        toast.success(t.dumpClipsConsole(rows.length));
       }
     };
 
@@ -2047,9 +2282,9 @@ export function AnimateMode() {
       console.log(code);
       try {
         void navigator.clipboard.writeText(code);
-        toast.success('📋 模板代码 → 剪贴板 (可粘到 source 作为预设)');
+        toast.success(t.dumpTplClip);
       } catch {
-        toast.success('📋 模板代码 → console');
+        toast.success(t.dumpTplConsole);
       }
     };
 
@@ -2079,7 +2314,7 @@ export function AnimateMode() {
       window.removeEventListener('keydown', onKey);
       delete win.__dumpTTS; delete win.__dumpProject; delete win.__dumpTemplate;
     };
-  }, [view, project.clips, project.duration, project.lanes]);
+  }, [view, project.clips, project.duration, project.lanes, t]);
 
   // FIX #8a: 切到其他板块时 (AnimateMode unmount), audio 还在响 — destroyAll 彻底销毁
   useEffect(() => () => {
@@ -2340,8 +2575,8 @@ export function AnimateMode() {
       return { ...p, clips, lanes };
     });
     if (selectedId === id) setSelectedId(null);
-    toast.success('已删除片段');
-  }, [commit, selectedId]);
+    toast.success(t.deletedClip);
+  }, [commit, selectedId, t]);
 
   // 图层拖动改 z-order — 交换两个 image/caption clip 的 lane (高 lane 盖低 lane)
   // v23-i: insertion-based reorder — 修用户痛点 "调图层顺序无变化" (之前是 swap, 同 lane 时不变)
@@ -2369,8 +2604,8 @@ export function AnimateMode() {
       if (reordered.length > lanes[a.trackId]) lanes[a.trackId] = reordered.length;
       return { ...p, clips: newClips, lanes };
     });
-    toast.success('已调整图层顺序');
-  }, [commit]);
+    toast.success(t.reordered);
+  }, [commit, t]);
 
   // 一键整理 — 收所有 type 末尾的空 lane (保留 >= 1)
   const compactLanes = useCallback(() => {
@@ -2387,8 +2622,8 @@ export function AnimateMode() {
       if (!changed) return p;
       return { ...p, lanes };
     });
-    toast.success('已整理空轨');
-  }, [commit]);
+    toast.success(t.tidiedLanes);
+  }, [commit, t]);
 
   // 全平 — 把所有 image/caption/fx 等 clip 重排到 lane 0, 按 start 时序接龙
   // 用于救救已经被多 lane 顶穿的 broken project (用户截图里 7 image lane 的场景)
@@ -2419,12 +2654,12 @@ export function AnimateMode() {
         lanes: { image: 1, caption: 1, fx: 1, tts: 1, bgm: 1 },
       };
     });
-    toast.success('已展平到主轨 — 多轨已合并');
-  }, [commit]);
+    toast.success(t.flattened);
+  }, [commit, t]);
   const splitAt = useCallback((id: string, time: number) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
-    if (time <= c.start + 0.1 || time >= c.end - 0.1) { toast('切分点太靠边'); return; }
+    if (time <= c.start + 0.1 || time >= c.end - 0.1) { toast(t.splitTooClose); return; }
     const aId = c.id;
     const bId = uid(c.trackId[0]);
     commit(p => {
@@ -2440,8 +2675,8 @@ export function AnimateMode() {
       return { ...p, clips: newClips };
     });
     setSelectedId(aId);
-    toast.success('已切分为两段');
-  }, [commit, project]);
+    toast.success(t.splitDone);
+  }, [commit, project, t]);
   const duplicateClip = useCallback((id: string) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
@@ -2460,14 +2695,14 @@ export function AnimateMode() {
       return { ...p, clips: [...p.clips, dup] };
     });
     setSelectedId(newId);
-    toast.success('已复制片段');
-  }, [commit, project]);
+    toast.success(t.duplicatedClip);
+  }, [commit, project, t]);
   // v23-b: dir=+1 越界自动 add lane (用户痛点 "无法改变图层" — 之前 disabled)
   const moveClipLane = useCallback((id: string, dir: -1 | 1) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
     const newLane = c.lane + dir;
-    if (newLane < 0) { toast('已是顶轨'); return; }
+    if (newLane < 0) { toast(t.topLane); return; }
     const max = project.lanes[c.trackId] - 1;
     if (newLane > max) {
       // 自动加一条新 lane 把 clip 放过去
@@ -2476,11 +2711,11 @@ export function AnimateMode() {
         lanes: { ...p.lanes, [c.trackId]: p.lanes[c.trackId] + 1 },
         clips: p.clips.map(x => x.id === id ? ({ ...x, lane: newLane }) as Clip : x),
       }));
-      toast.success(`已下移到新轨 (${TRACK_META[c.trackId].name} ${newLane + 1})`);
+      toast.success(t.movedToNewLane(trackName(c.trackId, lang), newLane + 1));
       return;
     }
     updateClipCommit(id, { lane: newLane });
-  }, [project, updateClipCommit, commit]);
+  }, [project, updateClipCommit, commit, t, lang]);
   // v23-b: 直接 set lane 到具体 index (Inspector lane Field 用)
   const setClipLane = useCallback((id: string, targetLane: number) => {
     const c = project.clips.find(x => x.id === id);
@@ -2502,33 +2737,33 @@ export function AnimateMode() {
   }, [commit]);
   const removeLane = useCallback((type: TrackType, lane: number) => {
     const used = project.clips.some(c => c.trackId === type && c.lane === lane);
-    if (used) { toast.error('该轨道还有片段, 不能删'); return; }
-    if (project.lanes[type] <= 1) { toast('至少保留 1 条轨道'); return; }
+    if (used) { toast.error(t.laneHasClips); return; }
+    if (project.lanes[type] <= 1) { toast(t.keepOneLane); return; }
     commit(p => ({
       ...p,
       lanes: { ...p.lanes, [type]: p.lanes[type] - 1 },
       clips: p.clips.map(c => c.trackId === type && c.lane > lane ? ({ ...c, lane: c.lane - 1 }) as Clip : c),
     }));
-  }, [commit, project]);
+  }, [commit, project, t]);
   const setDuration = useCallback((d: number) => {
     // v24+: mode-aware cap — GIF 15s / video 60s. 超 cap toast 提示用户.
     const targetMax = (project.mode ?? 'video') === 'gif' ? GIF_MAX_DURATION : 60;
     const rounded = Math.round(d * 10) / 10;
     const capped = Math.max(1, Math.min(targetMax, rounded));
     if (capped < rounded) {
-      toast.info(`${(project.mode ?? 'video') === 'gif' ? 'GIF' : '视频'} 时长上限 ${targetMax}s, 已 cap 到 ${capped}s`);
+      toast.info(t.durCapMsg((project.mode ?? 'video') === 'gif' ? t.gifWord : t.videoWord, targetMax, capped));
     }
     commit(p => ({ ...p, duration: capped }));
-  }, [commit, project.mode]);
+  }, [commit, project.mode, t]);
   const extendDuration = useCallback((delta: number) => {
     // v24+: mode-aware cap — GIF 15s / video 60s
     const targetMax = (project.mode ?? 'video') === 'gif' ? GIF_MAX_DURATION : 60;
     commit(p => ({ ...p, duration: Math.min(targetMax, p.duration + delta) }));
-    toast(`时长已加长 ${delta}s`);
-  }, [commit, project.mode]);
+    toast(t.durExtended(delta));
+  }, [commit, project.mode, t]);
   const clearAll = useCallback(async () => {
     if (project.clips.length > 0) {
-      const { confirmed } = await showDialog({ title: '清空时间轴', message: `会清掉当前 ${project.clips.length} 个片段 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '清空', cancelText: '取消' });
+      const { confirmed } = await showDialog({ title: t.clearTitle, message: t.clearMsg(project.clips.length), variant: 'warning', confirmText: t.clearConfirm, cancelText: t.cancel });
       if (!confirmed) return;
     }
     // 清空 = 清 clips + 重置 lanes 到全 1 (傻瓜式默认)
@@ -2536,8 +2771,8 @@ export function AnimateMode() {
     setSelectedId(null);
     setPlayhead(0);
     audioEngine.cancelAll();
-    toast('时间轴已清空');
-  }, [commit, project]);
+    toast(t.timelineCleared);
+  }, [commit, project, t]);
   const nudge = useCallback((id: string, delta: number) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
@@ -2579,7 +2814,7 @@ export function AnimateMode() {
   }, []);
   const randomize = useCallback(async () => {
     if (project.clips.length > 0) {
-      const { confirmed } = await showDialog({ title: '随机生成', message: `会清空当前 ${project.clips.length} 个片段重新随机 (已存草稿/导出的不受影响). 继续?`, variant: 'warning', confirmText: '随机', cancelText: '取消' });
+      const { confirmed } = await showDialog({ title: t.randTitle, message: t.randMsg(project.clips.length), variant: 'warning', confirmText: t.randConfirm, cancelText: t.cancel });
       if (!confirmed) return;
     }
     // 字幕走完整文案池 (quickModeTexts ~150 条) + pickRandomText 自带最近10去重 + exclude 防连续重复 → 每段都不一样 (原来固定 10 句翻来覆去)
@@ -2596,7 +2831,7 @@ export function AnimateMode() {
     const initialOffset = isGifMode ? 0 : 0.3;
     const gifSegDur = 1.5;
     const ts = Date.now();
-    const tid = toast.loading(isGifMode ? '随机生成中 (GIF 模式 · 无声)' : '随机生成中 (panda+face 合成…)');
+    const tid = toast.loading(isGifMode ? t.randLoadingGif : t.randLoadingVideo);
     try {
       // 视频模式 → 双层 combo (壳 + 绑定脸, 各自可编辑 / 给壳加特效脸跟随); GIF 模式 → 单张合成图 (保留旧逻辑)
       const combos = isGifMode ? [] : await Promise.all(
@@ -2713,14 +2948,14 @@ export function AnimateMode() {
       toast.dismiss(tid);
       toast.success(
         isGifMode
-          ? `已生成 4 段 GIF · 总时长 ${totalDur.toFixed(1)}s · 无声`
-          : `已生成 4 段双层配套 (壳+脸可分别调) · 总时长 ${totalDur.toFixed(1)}s`,
+          ? t.randDoneGif(totalDur.toFixed(1))
+          : t.randDoneVideo(totalDur.toFixed(1)),
       );
     } catch (e) {
       toast.dismiss(tid);
-      toast.error('随机生成失败: ' + (e as Error).message);
+      toast.error(t.randFail((e as Error).message));
     }
-  }, [commit, project, computeComboLayout]);
+  }, [commit, project, computeComboLayout, t]);
   const quickAdd = useCallback((payload: DragPayload) => {
     const dur = payload.defaultDuration ?? 2.5;
     const type = payload.type;
@@ -2793,7 +3028,7 @@ export function AnimateMode() {
       if (!targetImage) {
         const imgs = project.clips.filter(c => c.trackId === 'image' && (c as ImageClip).kind !== 'scene') as ImageClip[];
         const first = imgs.sort((a, b) => a.start - b.start)[0] ?? (project.clips.find(c => c.trackId === 'image') as ImageClip | undefined);
-        if (!first) { toast.warning('先在「素材」加个图层, 再加特效/动效'); return; }
+        if (!first) { toast.warning(t.addLayerFirst); return; }
         targetImage = first;
         start = first.start;
         end = Math.min(first.end, first.start + dur);
@@ -2803,9 +3038,9 @@ export function AnimateMode() {
       // v23-j (phase 2): 按 fx.id 初始化 defaults
       initFXDefaults(fxBase, targetTr);
       if (fxKind === 'move') {
-        toast.success('已加入移动动画 · 在画板上拖 A/B 圆圈设位置', { duration: 4000 });
+        toast.success(t.addedMove, { duration: 4000 });
       } else if (targetImage) {
-        toast.success(`已加 ${FX_LIB.find(f => f.id === fxKind)?.name || fxKind} · 作用于 ${targetImage.label || '图片'}${targetImage.kind === 'scene' ? ' (场景)' : ''} · Inspector 可改对象`, { duration: 3500 });
+        toast.success(t.addedFx(fxLabel(fxKind, lang) || fxKind, targetImage.label || (lang === 'en' ? 'image' : '图片'), targetImage.kind === 'scene' ? t.sceneTag : ''), { duration: 3500 });
       }
       clip = fxBase;
     }
@@ -2835,12 +3070,12 @@ export function AnimateMode() {
     // 用 functional setState 防 race (字幕 path 可能先 commit 了 lanes+1)
     commit(p => ({ ...p, clips: [...p.clips, clip] }));
     setSelectedId(id);
-  }, [commit, project, selectedId]);
+  }, [commit, project, selectedId, t, lang]);
 
   // 配套双层 combo (跟 GIF 同款): panda 壳 + 绑定脸 两个图层 (而非合成一张). 脸 boundTo 壳 + faceLocal 跟随.
   //   faceLocal 归一化(跟分辨率无关), 用固定 1000² 参考算; 渲染时按实际画板/导出尺寸 resolveBoundFaceBoxVideo 还原.
   const addComboVideo = useCallback(async (panda: Material, face: Material) => {
-    const tid = toast.loading('合成配套熊猫头 (双层)…');
+    const tid = toast.loading(t.comboLoading);
     try {
       const L = await computeComboLayout(panda, face);
       const dur = 2.5;
@@ -2867,11 +3102,11 @@ export function AnimateMode() {
         return { ...p, clips: [...bumped, pandaClip, faceClip], lanes: { ...p.lanes, image: maxImgLane + 1 } };
       });
       setSelectedId(faceId);
-      toast.success('已加双层配套 — 拖脸微调 / 给壳加特效脸会跟着动', { id: tid });
+      toast.success(t.comboAdded, { id: tid });
     } catch (e) {
-      toast.error('合成失败: ' + (e as Error).message, { id: tid });
+      toast.error(t.comboFail((e as Error).message), { id: tid });
     }
-  }, [commit, project.duration, computeComboLayout]);
+  }, [commit, project.duration, computeComboLayout, t]);
 
   // 脸跟壳 绑定/解绑 (跟 GIF 同款; 用固定 1000² 参考算 — faceLocal 归一化跟分辨率无关).
   //   绑定: 捕获脸相对壳的当前局部位姿 → 移动/旋转/缩放壳时脸自动跟随.
@@ -2881,7 +3116,7 @@ export function AnimateMode() {
     const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
     if (!face) return;
     const others = p.clips.filter(c => c.trackId === 'image' && c.id !== faceId && (c as ImageClip).kind !== 'scene') as ImageClip[];
-    if (others.length === 0) { toast('没有可绑定的熊猫头壳 — 先加个熊猫头图层'); return; }
+    if (others.length === 0) { toast(t.noShellToBind); return; }
     // 壳候选 = role shell / blend multiply / 非·脸; 多壳时挑跟脸时段重叠最多的 → face_B 自动绑 shell_B
     const shellCands = others.filter(o => o.role === 'shell' || o.blend === 'multiply' || !(o.label ?? '').endsWith('·脸'));
     const cands = shellCands.length ? shellCands : others;
@@ -2894,8 +3129,8 @@ export function AnimateMode() {
     const fBox = computeImageBox(face, 0, p.clips, W, H, 1, fAsp, true);
     const faceLocal = captureFaceLocal({ cx: sBox.cx, cy: sBox.cy, iw: sBox.iw }, sBox.rotation, { cx: fBox.cx, cy: fBox.cy, iw: fBox.iw }, fBox.rotation);
     commit(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, boundTo: shell.id, faceLocal, role: 'face' } as Clip) : c) }));
-    toast.success('已绑定 — 表情跟随熊猫头壳');
-  }, [project, commit]);
+    toast.success(t.boundFace);
+  }, [project, commit, t]);
   const unbindFaceVideo = useCallback(async (faceId: string) => {
     const p = project;
     const face = p.clips.find(c => c.id === faceId && c.trackId === 'image') as ImageClip | undefined;
@@ -2913,8 +3148,8 @@ export function AnimateMode() {
       }
     }
     commit(pp => ({ ...pp, clips: pp.clips.map(c => c.id === faceId ? ({ ...c, transform: baked, boundTo: undefined, faceLocal: undefined, role: undefined } as Clip) : c) }));
-    toast('已解绑 — 表情现在独立');
-  }, [project, commit]);
+    toast(t.unbound);
+  }, [project, commit, t]);
 
   // ===== 变脸 (face-cycle) 视频版 — 跟 GIF 同款, 但脸的时段落在「熊猫头壳」自己的 [start,end] 内轮播 =====
   // 渲染核心 (renderExportFrame / resolveBoundFaceBoxVideo) 已支持"多张绑定脸 + 时段窗口 + xfade 溶解", 这里只造 clip.
@@ -2927,12 +3162,12 @@ export function AnimateMode() {
     let face: ImageClip | undefined, shellId: string | undefined;
     if (clip.boundTo) { face = clip; shellId = clip.boundTo; }
     else { face = project.clips.find(c => c.trackId === 'image' && (c as ImageClip).boundTo === clip.id) as ImageClip | undefined; shellId = clip.id; }
-    if (!face || !shellId) { toast.error('先做一个「配套」(熊猫头 + 表情) 才能变脸'); return; }
+    if (!face || !shellId) { toast.error(t.needComboFace); return; }
     setCyclePop({ shellId, faceId: face.id });
     const curMat = ALL_FACES.find(m => m.src === face!.src);
     setCycleSel(curMat ? [curMat.id] : []);
     setCycleDissolve(true); setCycleQ('');
-  }, [project.clips]);
+  }, [project.clips, t]);
   // 「动效」面板 / 入口按钮调用: 选中图层优先, 否则首个绑定脸/壳; 都没有就提示先加配套
   const triggerFaceCycleVideo = useCallback(() => {
     const sel = selectedId ? project.clips.find(c => c.id === selectedId) : undefined;
@@ -2941,9 +3176,9 @@ export function AnimateMode() {
       const faces = project.clips.filter(c => c.trackId === 'image' && (c as ImageClip).boundTo) as ImageClip[];
       target = faces[0] ?? (project.clips.find(c => c.trackId === 'image' && (c as ImageClip).role === 'shell') as ImageClip | undefined);
     }
-    if (!target) { toast.error('先在「素材 → 配套」加个熊猫头+表情, 再来变脸'); return; }
+    if (!target) { toast.error(t.needComboFace2); return; }
     openFaceCycleVideo(target);
-  }, [selectedId, project.clips, openFaceCycleVideo]);
+  }, [selectedId, project.clips, openFaceCycleVideo, t]);
   // 生成 N 个绑定脸: 在「壳自己的时段」内平分轮播 (区别于 GIF 的 [0,D] 整段循环). 溶解则相邻重叠 + xfade.
   const applyFaceCycleVideo = useCallback((shellId: string, baseFaceId: string, faceMats: Material[], dissolve: boolean) => {
     const base = project.clips.find(c => c.id === baseFaceId && c.trackId === 'image') as ImageClip | undefined;
@@ -2965,8 +3200,8 @@ export function AnimateMode() {
     commit(p => ({ ...p, clips: [...p.clips.filter(c => !(c.trackId === 'image' && (c as ImageClip).boundTo === shellId)), ...cycleFaces] }));
     setSelectedId(cycleFaces[0].id);
     setCyclePop(null);
-    toast.success(`🎭 变脸 · ${N} 张表情${dissolve ? ' · 溶解过渡' : ' · 快切'} (在熊猫头时段内轮播)`);
-  }, [project.clips, commit]);
+    toast.success(t.faceCycleDone(N, dissolve));
+  }, [project.clips, commit, t]);
 
   // 把草图拆成 image clip (panda+face / 整图 panda only) + caption clip (text)
   // 解决: 草图收藏时 caption 嵌入到 previewUrl 合成图里, 拖到动画后无法独立调字幕
@@ -3032,7 +3267,7 @@ export function AnimateMode() {
     const { start, end } = imgSlot;
     const imageClip: ImageClip = {
       id: uid('di'), trackId: 'image', lane: imgLane, start, end,
-      src: imgSrc, label: slot.name || '草图',
+      src: imgSrc, label: slot.name || t.draftWord,
       fx: 'none', transform: { ...DEFAULT_TRANSFORM },
     };
     const newClips: Clip[] = [imageClip];
@@ -3050,8 +3285,8 @@ export function AnimateMode() {
     }
     commit(p => ({ ...p, clips: [...p.clips, ...newClips], lanes: bumpImageLane ? { ...p.lanes, image: imgLane + 1 } : p.lanes }));
     setSelectedId(imageClip.id);
-    toast.success(text ? '已加 画面 + 字幕 双轨' : '已加画面');
-  }, [commit, playhead, project]);
+    toast.success(text ? t.addedImgCap : t.addedImg);
+  }, [commit, playhead, project, t]);
 
   // Drafts (IDB)
   const [drafts, setDrafts] = useState<AnimateDraftSlot[]>([]);
@@ -3073,36 +3308,36 @@ export function AnimateMode() {
     const thumbSrc = firstImage?.src ? await makeDraftThumb(firstImage.src) : undefined;
     const slot: AnimateDraftSlot = {
       id: uid('amd'),
-      name: name || `草稿${drafts.length + 1}`,
+      name: name || DRAFT_POPOVER_DICT[lang].defaultName(drafts.length + 1),
       updatedAt: Date.now(),
       project: JSON.parse(JSON.stringify(project)),
       thumbSrc,
     };
     persistDrafts([slot, ...drafts].slice(0, AM_DRAFT_MAX));
-    toast.success(`已保存为 ${slot.name}`);
-  }, [project, drafts, persistDrafts]);
+    toast.success(t.savedAs(slot.name));
+  }, [project, drafts, persistDrafts, t, lang]);
   // v23-b: 复制草稿 — 一份变两份, 防直接改后丢原版
   const duplicateDraftAM = useCallback((id: string) => {
     const src = drafts.find(s => s.id === id);
     if (!src) return;
-    if (drafts.length >= AM_DRAFT_MAX) { toast.error(`最多 ${AM_DRAFT_MAX} 个草稿, 先删`); return; }
+    if (drafts.length >= AM_DRAFT_MAX) { toast.error(t.draftMax(AM_DRAFT_MAX)); return; }
     const slot: AnimateDraftSlot = {
       ...src,
       id: uid('amd'),
-      name: `${src.name} 副本`,
+      name: `${src.name}${t.copySuffix}`,
       updatedAt: Date.now(),
       project: JSON.parse(JSON.stringify(src.project)),
     };
     persistDrafts([slot, ...drafts].slice(0, AM_DRAFT_MAX));
-    toast.success(`已复制 ${src.name}`);
-  }, [drafts, persistDrafts]);
+    toast.success(t.duplicatedDraft(src.name));
+  }, [drafts, persistDrafts, t]);
   const loadDraft = useCallback((id: string) => {
     const slot = drafts.find(s => s.id === id);
     if (!slot) return;
     // FIX: 走 hydrateProject 统一反序列化 (旧 draft 无 mode/gifPresetId 字段时默认 video, 跟 IDB/JSON import 对齐)
     const hydrated = hydrateProject(slot.project);
     if (!hydrated) {
-      toast.error('草稿数据格式无效, 无法加载');
+      toast.error(t.draftInvalid);
       return;
     }
     audioEngine.destroyAll(); // upgrade cancelAll → destroyAll, 释放旧 clipId 的 player Map
@@ -3111,12 +3346,12 @@ export function AnimateMode() {
     void idbSet(getCurrentIdbKey(hydrated.project.mode), hydrated.project).catch(() => {});
     setSelectedId(null);
     setPlayhead(0);
-    toast.success(`已读入 ${slot.name}${hydrated.cleanedInvalidImages > 0 ? ` · 自动清理 ${hydrated.cleanedInvalidImages} 失效图` : ''}`);
-  }, [drafts, commit]);
+    toast.success(t.loadedDraft(slot.name, hydrated.cleanedInvalidImages));
+  }, [drafts, commit, t]);
   const deleteDraft = useCallback((id: string) => {
     persistDrafts(drafts.filter(s => s.id !== id));
-    toast.success('已删除草稿');
-  }, [drafts, persistDrafts]);
+    toast.success(t.deletedDraft);
+  }, [drafts, persistDrafts, t]);
   const renameDraftAM = useCallback((id: string, name: string) => {
     persistDrafts(drafts.map(s => s.id === id ? { ...s, name, updatedAt: Date.now() } : s));
   }, [drafts, persistDrafts]);
@@ -3131,7 +3366,7 @@ export function AnimateMode() {
   useEffect(() => {
     let on = false;
     try { on = localStorage.getItem('xmw.animate-open-export') === '1'; if (on) localStorage.removeItem('xmw.animate-open-export'); } catch { /* ignore */ }
-    if (on) { const t = setTimeout(() => setExportModalOpen(true), 450); return () => clearTimeout(t); }
+    if (on) { const tmr = setTimeout(() => setExportModalOpen(true), 450); return () => clearTimeout(tmr); }
   }, []);
   const [draftPopoverOpen, setDraftPopoverOpen] = useState(false);
   // DEV-only modals (import.meta.env.DEV 控制是否能开 — 按钮 toolbar 内 gate, 这里 state 反正不耗)
@@ -3175,16 +3410,16 @@ export function AnimateMode() {
     if (view !== 'video') return;
     const addPasted = (dataUrl: string) => {
       const cur = uploadsRef.current;
-      if (cur.length >= AM_UPLOAD_MAX_COUNT) { toast.error(`素材库已达 ${AM_UPLOAD_MAX_COUNT} 张上限`); return; }
+      if (cur.length >= AM_UPLOAD_MAX_COUNT) { toast.error(t.uploadMaxCount(AM_UPLOAD_MAX_COUNT)); return; }
       const usedBytes = cur.reduce((a, m) => a + (m.src?.length || 0), 0);
-      if (usedBytes + dataUrl.length > AM_UPLOAD_MAX_BYTES) { toast.error(`素材库存储已满 (${(AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)}MB)`); return; }
-      const mat: Material = { id: `paste-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: dataUrl, labelCn: '粘贴图', labelEn: 'Pasted', tags: [], tagsEn: [], faceOffset: { x: 100, y: 70, w: 250, h: 250 }, kind: 'upload' };
+      if (usedBytes + dataUrl.length > AM_UPLOAD_MAX_BYTES) { toast.error(t.uploadStorageFull((AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0))); return; }
+      const mat: Material = { id: `paste-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: dataUrl, labelCn: t.pastedImgLabel, labelEn: 'Pasted', tags: [], tagsEn: [], faceOffset: { x: 100, y: 70, w: 250, h: 250 }, kind: 'upload' };
       setUploads(prev => [mat, ...prev].slice(0, AM_UPLOAD_MAX_COUNT));
-      toast.success('✓ 已粘贴到素材库「上传」分页 — 点缩略图加入时间轴');
+      toast.success(t.pasted);
     };
     const onPaste = (e: ClipboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
       const items = e.clipboardData?.items;
       if (!items || items.length === 0) return;
       for (const item of items) {   // 1. 图片二进制 (截图工具)
@@ -3202,8 +3437,8 @@ export function AnimateMode() {
           item.getAsString((raw) => {
             const url = raw.trim();
             if (!/^https?:\/\//i.test(url) || !/\.(jpe?g|png|gif|webp|bmp|avif)(\?|#|$)/i.test(url)) return;
-            const tid = toast.loading('下载链接图片中…');
-            fetchAsDataUrl(url).then(d => { toast.dismiss(tid); addPasted(d); }).catch(err => toast.error(`粘贴失败: ${(err as Error).message}`, { id: tid }));
+            const tid = toast.loading(t.downloadingImg);
+            fetchAsDataUrl(url).then(d => { toast.dismiss(tid); addPasted(d); }).catch(err => toast.error(t.pasteFail((err as Error).message), { id: tid }));
           });
           return;
         }
@@ -3211,7 +3446,7 @@ export function AnimateMode() {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [view]);
+  }, [view, t]);
   useEffect(() => {
     if (userBgmsLoadedRef.current) return;
     userBgmsLoadedRef.current = true;
@@ -3221,17 +3456,17 @@ export function AnimateMode() {
   }, []);
   useEffect(() => {
     if (!uploadsLoadedRef.current) return;
-    const t = window.setTimeout(() => {
+    const tmr = window.setTimeout(() => {
       void idbSet(AM_UPLOADS_IDB_KEY, uploads).catch(() => {});
     }, 400);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(tmr);
   }, [uploads]);
   useEffect(() => {
     if (!userBgmsLoadedRef.current) return;
-    const t = window.setTimeout(() => {
+    const tmr = window.setTimeout(() => {
       void idbSet(AM_USER_BGMS_IDB_KEY, userBGMs).catch(() => {});
     }, 400);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(tmr);
   }, [userBGMs]);
 
   const selectedClip = useMemo(
@@ -3247,18 +3482,18 @@ export function AnimateMode() {
     if (!c) return;
     // deep-clone (avoid live ref into project state)
     clipboardRef.current = JSON.parse(JSON.stringify(c));
-    toast.success(`已复制 ${clipDisplayName(c)}`);
-  }, [project.clips]);
+    toast.success(t.copiedClip(clipDisplayName(c, lang)));
+  }, [project.clips, t, lang]);
   const cutClipToClipboard = useCallback((id: string) => {
     const c = project.clips.find(x => x.id === id);
     if (!c) return;
     clipboardRef.current = JSON.parse(JSON.stringify(c));
     deleteClip(id);
-    toast.success(`已剪切 ${clipDisplayName(c)}`);
-  }, [project.clips, deleteClip]);
+    toast.success(t.cutClip(clipDisplayName(c, lang)));
+  }, [project.clips, deleteClip, t, lang]);
   const pasteClipFromClipboard = useCallback(() => {
     const cb = clipboardRef.current;
-    if (!cb) { toast.error('剪贴板空'); return; }
+    if (!cb) { toast.error(t.clipboardEmpty); return; }
     const dur = cb.end - cb.start;
     // 粘贴位置 = 当前 playhead. 跟同类 sameLane clip 冲突则后移
     let pasteStart = playhead;
@@ -3282,56 +3517,56 @@ export function AnimateMode() {
     const newClip: Clip = { ...JSON.parse(JSON.stringify(cb)), id: newId, lane: pasteLane, start: pasteStart, end: Math.min(project.duration, pasteStart + dur) };
     commit(p => ({ ...p, clips: [...p.clips, newClip], lanes: bumpPasteLane ? { ...p.lanes, [cb.trackId]: pasteLane + 1 } : p.lanes }));
     setSelectedId(newId);
-    toast.success(`已粘贴 ${clipDisplayName(cb)}${bumpPasteLane ? ' (新轨)' : ''}`);
-  }, [commit, playhead, project]);
+    toast.success(t.pastedClip(clipDisplayName(cb, lang), bumpPasteLane));
+  }, [commit, playhead, project, t, lang]);
   const selectAllClips = useCallback(() => {
     // 单选只允许选最近 click 的; 但 "全选 → 删" 这种场景, 选第一个 + 提示快捷键继续
     if (project.clips.length === 0) return;
     setSelectedId(project.clips[0].id);
-    toast(`本编辑器单选, 删全部请 Ctrl+A → Delete (将循环删 ${project.clips.length} 个)`);
-  }, [project.clips]);
+    toast(t.selectAllHint(project.clips.length));
+  }, [project.clips, t]);
   const deleteAllClips = useCallback(async () => {
     if (project.clips.length === 0) return;
     const res = await showDialog({
-      title: '删除全部片段',
-      message: `确认删除全部 ${project.clips.length} 个片段?`,
+      title: t.delAllTitle,
+      message: t.delAllMsg(project.clips.length),
       destructive: true,
-      confirmText: '删除全部',
+      confirmText: t.delAllConfirm,
     });
     if (!res.confirmed) return;
     commit(p => ({ ...p, clips: [] }));
     setSelectedId(null);
-  }, [commit, project.clips.length]);
+  }, [commit, project.clips.length, t]);
 
   // ContextMenu — 通用 clip 右键菜单
   const ctxMenu = useContextMenu();
   const buildClipMenu = useCallback((c: Clip): ContextMenuItem[] => {
-    const trackLabel = TRACK_META[c.trackId].name;
+    const trackLabel = trackName(c.trackId, lang);
     const items: ContextMenuItem[] = [
-      { id: 'split', label: '切分 (在 playhead)', shortcut: 'S', icon: <Scissors size={12} />,
+      { id: 'split', label: t.cmSplit, shortcut: 'S', icon: <Scissors size={12} />,
         disabled: playhead <= c.start + 0.1 || playhead >= c.end - 0.1,
         onClick: () => splitAt(c.id, playhead) },
-      { id: 'duplicate', label: '复制片段', shortcut: fmtShortcut('Mod+D'), icon: <CopyIcon size={12} />,
+      { id: 'duplicate', label: t.cmDup, shortcut: fmtShortcut('Mod+D'), icon: <CopyIcon size={12} />,
         onClick: () => duplicateClip(c.id) },
-      { id: 'copy', label: '拷贝', shortcut: fmtShortcut('Mod+C'), icon: <CopyIcon size={12} />,
+      { id: 'copy', label: t.cmCopy, shortcut: fmtShortcut('Mod+C'), icon: <CopyIcon size={12} />,
         onClick: () => copyClipToClipboard(c.id) },
-      { id: 'cut', label: '剪切', shortcut: fmtShortcut('Mod+X'),
+      { id: 'cut', label: t.cmCut, shortcut: fmtShortcut('Mod+X'),
         onClick: () => cutClipToClipboard(c.id) },
-      { id: 'paste', label: '粘贴到 playhead', shortcut: fmtShortcut('Mod+V'),
+      { id: 'paste', label: t.cmPaste, shortcut: fmtShortcut('Mod+V'),
         disabled: !clipboardRef.current,
         onClick: () => pasteClipFromClipboard() },
       { id: 'sep1', label: '', separator: true },
-      { id: 'lane-up', label: '上移一轨', icon: <ChevronUp size={12} />,
+      { id: 'lane-up', label: t.cmLaneUp, icon: <ChevronUp size={12} />,
         disabled: c.lane === 0,
         onClick: () => moveClipLane(c.id, -1) },
-      { id: 'lane-down', label: '下移一轨', icon: <ChevronDown size={12} />,
+      { id: 'lane-down', label: t.cmLaneDown, icon: <ChevronDown size={12} />,
         disabled: c.lane >= project.lanes[c.trackId] - 1,
         onClick: () => moveClipLane(c.id, 1) },
       { id: 'sep2', label: '', separator: true },
-      { id: 'copy-tc', label: '复制时间码',
+      { id: 'copy-tc', label: t.cmCopyTc,
         onClick: () => {
           const tc = `${formatTC(c.start)} → ${formatTC(c.end)}  (${(c.end - c.start).toFixed(2)}s)`;
-          try { navigator.clipboard.writeText(tc); toast.success('已复制: ' + tc); } catch { toast.error('剪贴板不可用'); }
+          try { navigator.clipboard.writeText(tc); toast.success(t.copiedTc(tc)); } catch { toast.error(t.clipboardUnavailable); }
         }},
       { id: 'info', label: `📋 ${trackLabel} · L${c.lane + 1}`, disabled: true },
     ];
@@ -3340,10 +3575,10 @@ export function AnimateMode() {
       const ic = c as ImageClip;
       items.push({ id: 'sep-img', label: '', separator: true });
       if (ic.fx === 'move' && ic.endTransform) {
-        items.push({ id: 'clear-end', label: '清除终帧 (取消 move)',
+        items.push({ id: 'clear-end', label: t.cmClearEnd,
           onClick: () => updateClipCommit(c.id, { fx: 'none', endTransform: undefined }) });
       } else {
-        items.push({ id: 'record-end', label: '🚀 把当前为终帧 (启动 move)',
+        items.push({ id: 'record-end', label: t.cmRecordEnd,
           onClick: () => updateClipCommit(c.id, { fx: 'move', endTransform: { ...(ic.transform ?? DEFAULT_TRANSFORM) } }) });
       }
     }
@@ -3352,24 +3587,24 @@ export function AnimateMode() {
       const cc = c as CaptionClip;
       items.push({ id: 'sep-cap', label: '', separator: true });
       if (cc.linkedTTSId) {
-        items.push({ id: 'cap-unlink', label: '🔗 解除配音链接',
+        items.push({ id: 'cap-unlink', label: t.cmCapUnlink,
           onClick: () => unlinkCaptionTTS(c.id) });
       } else {
         const ttsCount = project.clips.filter(x => x.trackId === 'tts').length;
-        items.push({ id: 'cap-link', label: `🔗 链接到已有配音${ttsCount > 0 ? ` (${ttsCount})` : ''}`,
+        items.push({ id: 'cap-link', label: t.cmCapLink(ttsCount),
           disabled: ttsCount === 0,
           onClick: () => {
             const counter = findCounterpartClip(project.clips, { start: c.start, end: c.end }, 'tts') as TTSClip | null;
-            if (!counter) { toast.error('找不到合适的配音对齐'); return; }
+            if (!counter) { toast.error(t.noFitTTS); return; }
             updateClipCommit(c.id, { start: counter.start, end: counter.end, text: counter.text || cc.text });
             linkCaptionTTS(c.id, counter.id);
-            toast.success(`✓ 字幕 ⇌ 配音 双向链接 · 文字 "${(counter.text || '').slice(0, 12)}"`);
+            toast.success(t.linkedCapTTS((counter.text || '').slice(0, 12)));
           }});
-        items.push({ id: 'cap-gen-tts', label: '🎙 同步生成配音 (新 TTS clip)',
+        items.push({ id: 'cap-gen-tts', label: t.cmCapGenTts,
           onClick: () => {
             const ttsVoice = VOICE_LIB[0].id;
             const ttsText = cc.text || '';
-            if (!ttsText.trim()) { toast.error('字幕为空, 先填文字'); return; }
+            if (!ttsText.trim()) { toast.error(t.capEmpty); return; }
             const ttsDur = estimateTTSDuration(ttsText, ttsVoice);
             const ttsEnd = Math.min(project.duration, c.start + ttsDur);
             const ttsId = uid('t');
@@ -3380,7 +3615,7 @@ export function AnimateMode() {
                 { id: ttsId, trackId: 'tts' as const, lane: 0, start: c.start, end: ttsEnd, text: ttsText, voice: ttsVoice, linkedCaptionId: c.id } as Clip,
               ],
             }));
-            toast.success(`✓ 已生成配音 · 时段对齐 ${ttsDur.toFixed(1)}s · auto-gen 中`);
+            toast.success(t.genTTSDone(ttsDur.toFixed(1)));
           }});
       }
     }
@@ -3389,23 +3624,23 @@ export function AnimateMode() {
       const ts = c as TTSClip;
       items.push({ id: 'sep-tts', label: '', separator: true });
       if (ts.linkedCaptionId) {
-        items.push({ id: 'tts-unlink', label: '🔗 解除字幕链接',
+        items.push({ id: 'tts-unlink', label: t.cmTtsUnlink,
           onClick: () => unlinkCaptionTTS(c.id) });
       } else {
         const capCount = project.clips.filter(x => x.trackId === 'caption').length;
-        items.push({ id: 'tts-link', label: `🔗 链接到已有字幕${capCount > 0 ? ` (${capCount})` : ''}`,
+        items.push({ id: 'tts-link', label: t.cmTtsLink(capCount),
           disabled: capCount === 0,
           onClick: () => {
             const counter = findCounterpartClip(project.clips, { start: c.start, end: c.end }, 'caption') as CaptionClip | null;
-            if (!counter) { toast.error('找不到合适的字幕对齐'); return; }
+            if (!counter) { toast.error(t.noFitCap); return; }
             updateClipCommit(c.id, { start: counter.start, end: counter.end, text: counter.text || ts.text, audioSrc: undefined, audioEngine: undefined, genFailed: false });
             linkCaptionTTS(counter.id, c.id);
-            toast.success(`✓ 配音 ⇌ 字幕 双向链接 · 文字 "${(counter.text || '').slice(0, 12)}"`);
+            toast.success(t.linkedTTSCap((counter.text || '').slice(0, 12)));
           }});
-        items.push({ id: 'tts-gen-cap', label: '📝 同步生成字幕 (新 Caption clip)',
+        items.push({ id: 'tts-gen-cap', label: t.cmTtsGenCap,
           onClick: () => {
             const ttsText = ts.text || '';
-            if (!ttsText.trim()) { toast.error('配音为空, 先填文字'); return; }
+            if (!ttsText.trim()) { toast.error(t.ttsEmpty); return; }
             const capId = uid('c');
             commit(p => ({
               ...p,
@@ -3414,7 +3649,7 @@ export function AnimateMode() {
                 { id: capId, trackId: 'caption' as const, lane: 0, start: c.start, end: c.end, text: ttsText, style: DEFAULT_CAPTION_STYLE, linkedTTSId: c.id } as Clip,
               ],
             }));
-            toast.success(`✓ 已生成同步字幕 (${ttsText.length} 字)`);
+            toast.success(t.genCapDone(ttsText.length));
           }});
       }
     }
@@ -3425,49 +3660,49 @@ export function AnimateMode() {
       const pandas = imageClips.filter(ic => ic.kind !== 'scene');
       const scenes = imageClips.filter(ic => ic.kind === 'scene');
       const submenu: ContextMenuItem[] = [
-        { id: 'fx-target-all', label: '🌐 所有同时刻图 (全局)',
+        { id: 'fx-target-all', label: t.cmTargetAll,
           icon: !fc.targetClipId ? <Check size={12} /> : undefined,
           onClick: () => updateClipCommit(c.id, { targetClipId: undefined }) },
       ];
       if (pandas.length > 0) {
-        submenu.push({ id: 'sep-pandas', label: '— 角色 / 熊猫 —', separator: true });
+        submenu.push({ id: 'sep-pandas', label: t.cmSepChar, separator: true });
         pandas.forEach(p => submenu.push({
           id: `fx-target-${p.id}`,
-          label: `🐼 ${p.label || '图片'} · ${p.start.toFixed(1)}-${p.end.toFixed(1)}s`,
+          label: t.cmCharLabel(p.label || t.imgWord, p.start.toFixed(1), p.end.toFixed(1)),
           icon: p.id === fc.targetClipId ? <Check size={12} /> : undefined,
           onClick: () => updateClipCommit(c.id, { targetClipId: p.id }),
         }));
       }
       if (scenes.length > 0) {
-        submenu.push({ id: 'sep-scenes', label: '— 场景 —', separator: true });
+        submenu.push({ id: 'sep-scenes', label: t.cmSepScene, separator: true });
         scenes.forEach(s => submenu.push({
           id: `fx-target-${s.id}`,
-          label: `🎬 ${s.label || '场景'} · ${s.start.toFixed(1)}-${s.end.toFixed(1)}s`,
+          label: t.cmSceneLabel(s.label || t.sceneWord, s.start.toFixed(1), s.end.toFixed(1)),
           icon: s.id === fc.targetClipId ? <Check size={12} /> : undefined,
           onClick: () => updateClipCommit(c.id, { targetClipId: s.id }),
         }));
       }
       items.push({ id: 'sep-fx', label: '', separator: true });
-      items.push({ id: 'fx-target', label: '🎯 作用对象', submenu });
+      items.push({ id: 'fx-target', label: t.cmFxTarget, submenu });
     }
     items.push({ id: 'sep3', label: '', separator: true });
-    items.push({ id: 'delete', label: '删除', shortcut: 'Del', danger: true, icon: <Trash2 size={12} />,
+    items.push({ id: 'delete', label: t.cmDelete, shortcut: 'Del', danger: true, icon: <Trash2 size={12} />,
       onClick: () => deleteClip(c.id) });
     return items;
-  }, [playhead, splitAt, duplicateClip, copyClipToClipboard, cutClipToClipboard, pasteClipFromClipboard, moveClipLane, deleteClip, project.lanes, project.clips, project.duration, updateClipCommit, linkCaptionTTS, unlinkCaptionTTS, commit]);
+  }, [playhead, splitAt, duplicateClip, copyClipToClipboard, cutClipToClipboard, pasteClipFromClipboard, moveClipLane, deleteClip, project.lanes, project.clips, project.duration, updateClipCommit, linkCaptionTTS, unlinkCaptionTTS, commit, t, lang]);
   const onClipContextMenu = useCallback((e: React.MouseEvent, c: Clip) => {
     setSelectedId(c.id);
     ctxMenu.open(e, buildClipMenu(c));
   }, [ctxMenu, buildClipMenu]);
   // 空白处右键 (时间轴空白 / 画板空白) — 全局右键覆盖
   const buildEmptyMenu = useCallback((): ContextMenuItem[] => [
-    { id: 'deselect', label: '取消选择', disabled: !selectedId, onClick: () => setSelectedId(null) },
-    { id: 'paste', label: '粘贴到 playhead', shortcut: fmtShortcut('Mod+V'), disabled: !clipboardRef.current, onClick: () => pasteClipFromClipboard() },
+    { id: 'deselect', label: t.cmDeselect, disabled: !selectedId, onClick: () => setSelectedId(null) },
+    { id: 'paste', label: t.cmPaste, shortcut: fmtShortcut('Mod+V'), disabled: !clipboardRef.current, onClick: () => pasteClipFromClipboard() },
     { id: 'sep', label: '', separator: true },
-    { id: 'add-img', label: '加图片轨', onClick: () => addLane('image') },
-    { id: 'add-cap', label: '加字幕轨', onClick: () => addLane('caption') },
-    { id: 'add-fx', label: '加特效轨', onClick: () => addLane('fx') },
-  ], [selectedId, pasteClipFromClipboard, addLane]);
+    { id: 'add-img', label: t.cmAddImg, onClick: () => addLane('image') },
+    { id: 'add-cap', label: t.cmAddCap, onClick: () => addLane('caption') },
+    { id: 'add-fx', label: t.cmAddFx, onClick: () => addLane('fx') },
+  ], [selectedId, pasteClipFromClipboard, addLane, t]);
 
   // Keyboard — 跨平台 (isMetaOrCtrl 自动 ⌘/Ctrl), 参考剪映/CapCut 常用快捷键
   // 注意: 必须放在所有 callback (copyClipToClipboard/ctxMenu 等) 之后, 避免 TDZ
@@ -3549,12 +3784,12 @@ export function AnimateMode() {
             <div className="am-combo-picker-overlay" onClick={() => setCyclePop(null)}>
               <div className="am-combo-picker" onClick={e => e.stopPropagation()}>
                 <div className="am-combo-picker-head">
-                  <span>🎭 变脸 · 选 2-6 张表情依次轮播 · 已选 {cycleSel.length}/6</span>
+                  <span>{t.cycleTitle(cycleSel.length)}</span>
                   <button className="am-popover-close" onClick={() => setCyclePop(null)} type="button"><X size={14} /></button>
                 </div>
                 <div className="am-combo-picker-search material-search-box">
                   <Search size={12} color="#888" />
-                  <input autoFocus type="text" className="material-search-input" placeholder="搜表情…" value={cycleQ} onChange={e => setCycleQ(e.target.value)} />
+                  <input autoFocus type="text" className="material-search-input" placeholder={t.searchFace} value={cycleQ} onChange={e => setCycleQ(e.target.value)} />
                 </div>
                 <div className="am-combo-picker-grid">
                   {list.map(m => {
@@ -3567,14 +3802,14 @@ export function AnimateMode() {
                       </button>
                     );
                   })}
-                  {list.length === 0 && <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>}
+                  {list.length === 0 && <div className="am-combo-picker-empty">{t.noMatchKw}</div>}
                 </div>
                 <div className="am-combo-picker-foot">
-                  <button type="button" className={'am-chip' + (cycleDissolve ? ' is-active' : '')} onClick={() => setCycleDissolve(d => !d)} title="溶解 = 脸之间淡入淡出过渡; 关 = 直接快切(鬼畜)">
-                    {cycleDissolve ? '✓ 溶解过渡' : '○ 硬切快换'}
+                  <button type="button" className={'am-chip' + (cycleDissolve ? ' is-active' : '')} onClick={() => setCycleDissolve(d => !d)} title={t.dissolveTip}>
+                    {cycleDissolve ? t.dissolveOn : t.dissolveOff}
                   </button>
                   <button type="button" className="am-cycle-make" disabled={cycleSel.length < 2} onClick={() => applyFaceCycleVideo(cyclePop.shellId, cyclePop.faceId, selMats, cycleDissolve)}>
-                    生成变脸 · {cycleSel.length} 张
+                    {t.makeCycle(cycleSel.length)}
                   </button>
                 </div>
               </div>
@@ -3699,7 +3934,7 @@ export function AnimateMode() {
       {ctxMenu.render()}
       {/* v23-l mobile: 底栏 5 大 tab — 复刻剪映 (素材/字幕/动效/编辑/导出). 第 5 tab 编辑器仅 selectedId 可点 */}
       {isMobile && view === 'video' && (
-        <div className="am-mobile-bottombar am-mobile-bottombar--7" role="tablist" aria-label="底部工具">
+        <div className="am-mobile-bottombar am-mobile-bottombar--7" role="tablist" aria-label={t.bottomTools}>
           <button
             type="button"
             role="tab"
@@ -3708,7 +3943,7 @@ export function AnimateMode() {
             onClick={() => setMobileSheet(s => s === 'assets' ? null : 'assets')}
           >
             <span className="am-mb-tab-ic">🎨</span>
-            <span className="am-mb-tab-lbl">素材</span>
+            <span className="am-mb-tab-lbl">{t.mbAssets}</span>
           </button>
           <button
             type="button"
@@ -3718,7 +3953,7 @@ export function AnimateMode() {
             onClick={() => setMobileSheet(s => s === 'music' ? null : 'music')}
           >
             <span className="am-mb-tab-ic">🎵</span>
-            <span className="am-mb-tab-lbl">音乐</span>
+            <span className="am-mb-tab-lbl">{t.mbMusic}</span>
           </button>
           <button
             type="button"
@@ -3728,7 +3963,7 @@ export function AnimateMode() {
             onClick={() => setMobileSheet(s => s === 'voice' ? null : 'voice')}
           >
             <span className="am-mb-tab-ic">🎙</span>
-            <span className="am-mb-tab-lbl">配音</span>
+            <span className="am-mb-tab-lbl">{t.mbVoice}</span>
           </button>
           <button
             type="button"
@@ -3738,7 +3973,7 @@ export function AnimateMode() {
             onClick={() => setMobileSheet(s => s === 'caption' ? null : 'caption')}
           >
             <span className="am-mb-tab-ic">💬</span>
-            <span className="am-mb-tab-lbl">字幕</span>
+            <span className="am-mb-tab-lbl">{t.mbCaption}</span>
           </button>
           <button
             type="button"
@@ -3748,7 +3983,7 @@ export function AnimateMode() {
             onClick={() => setMobileSheet(s => s === 'fx' ? null : 'fx')}
           >
             <span className="am-mb-tab-ic">✨</span>
-            <span className="am-mb-tab-lbl">动效</span>
+            <span className="am-mb-tab-lbl">{t.mbFx}</span>
           </button>
           <button
             type="button"
@@ -3761,10 +3996,10 @@ export function AnimateMode() {
               (!selectedId ? ' is-disabled' : '')
             }
             onClick={() => selectedId && setMobileSheet(s => s === 'inspector' ? null : 'inspector')}
-            title={!selectedId ? '先选中片段' : '编辑选中片段'}
+            title={!selectedId ? t.selectFirst : t.editSelected}
           >
             <span className="am-mb-tab-ic">🔧</span>
-            <span className="am-mb-tab-lbl">编辑</span>
+            <span className="am-mb-tab-lbl">{t.mbEdit}</span>
           </button>
           <button
             type="button"
@@ -3772,7 +4007,7 @@ export function AnimateMode() {
             onClick={() => { setIsPlaying(false); setExportModalOpen(true); }}
           >
             <span className="am-mb-tab-ic">⬇️</span>
-            <span className="am-mb-tab-lbl">导出</span>
+            <span className="am-mb-tab-lbl">{t.mbExport}</span>
           </button>
         </div>
       )}
@@ -3797,14 +4032,14 @@ export function AnimateMode() {
             />
             <div className="am-mobile-sheet-head">
               <span>
-                {mobileSheet === 'assets' && '🎨 素材库'}
-                {mobileSheet === 'music' && '🎵 背景音乐'}
-                {mobileSheet === 'voice' && '🎙 配音音色'}
-                {mobileSheet === 'caption' && '💬 字幕'}
-                {mobileSheet === 'fx' && '✨ 动效'}
-                {mobileSheet === 'inspector' && '🔧 编辑'}
+                {mobileSheet === 'assets' && t.sheetAssets}
+                {mobileSheet === 'music' && t.sheetMusic}
+                {mobileSheet === 'voice' && t.sheetVoice}
+                {mobileSheet === 'caption' && t.sheetCaption}
+                {mobileSheet === 'fx' && t.sheetFx}
+                {mobileSheet === 'inspector' && t.sheetEdit}
               </span>
-              <button className="am-mobile-sheet-close" onClick={() => setMobileSheet(null)} aria-label="关闭">
+              <button className="am-mobile-sheet-close" onClick={() => setMobileSheet(null)} aria-label={t.close}>
                 <X size={18} />
               </button>
             </div>
@@ -3878,14 +4113,14 @@ export function AnimateMode() {
             // 加载: 把 tpl.project 替换当前 (走 hydrateProject 防 schema 丢失, 跟 loadDraft / IDB / JSON import 对齐)
             try {
               const hydrated = hydrateProject(tpl.project);
-              if (!hydrated) { toast.error('模板数据格式无效'); return; }
+              if (!hydrated) { toast.error(t.tplInvalid); return; }
               audioEngine.destroyAll();
               commit(() => hydrated.project);
               setSelectedId(null);
               setPlayhead(0);
-              toast.success(`已读入模板 ${tpl.name}`);
+              toast.success(t.loadedTpl(tpl.name));
               setTemplatesModalOpen(false);
-            } catch (e) { toast.error('模板格式无效: ' + (e as Error).message); }
+            } catch (e) { toast.error(t.tplFormatInvalid((e as Error).message)); }
           }}
         />
       )}
@@ -3914,7 +4149,7 @@ export function AnimateMode() {
               });
             }
             commit(p => ({ ...p, clips: [...p.clips, ...newClips] }));
-            toast.success(`已加 ${newClips.length} 个节拍字幕`);
+            toast.success(t.addedBeatCaps(newClips.length));
             setBgmAlignModalOpen(false);
           }}
         />
@@ -3934,6 +4169,70 @@ export function AnimateMode() {
 // ============================================================
 // Toolbar
 // ============================================================
+const TOOLBAR_DICT = {
+  zh: {
+    defaultName: '我的沙雕动画', untitled: '未命名作品', rename: '点击改名',
+    modeLabel: '输出模式',
+    videoMode: '🎬 视频', gifMode: '🎞️ GIF',
+    videoModeTitle: '视频模式 — 含声音 (TTS+BGM) + 长时长 + MP4 导出',
+    gifModeTitle: 'GIF 模式 — 无声 + 短时长 + 直出 GIF (微信/X/TG 适配)',
+    guide: '新手引导', guideTitle: '新手引导 — 3 分钟上手 (随时点这里重看)',
+    clips: '片段',
+    durGifMaxTitle: `GIF 时长上限 ${GIF_MAX_DURATION}s`, durVideoMaxTitle: '视频时长上限 60s',
+    durGifHead: `GIF 时长 · 上限 ${GIF_MAX_DURATION}s`, durVideoHead: '视频时长 · 上限 60s',
+    custom: '自定义:',
+    undoTitle: '撤销 (Ctrl+Z)', redoTitle: '重做 (Ctrl+Y)',
+    newDlgTitle: '新建空白项目', newDlgMsg: '新建会清空当前工作 (草稿已存的不影响). 继续?', newConfirm: '新建',
+    newTitle: '新建空白项目 (会清空当前)', newBtn: '新建',
+    random: '随机', randomTitle: '随机生成',
+    clear: '清空', clearTitle: '清空时间轴 (保留时长)',
+    flattenDlgTitle: '整理时间轴', flattenDlgMsg: '把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.', flattenConfirm: '整理',
+    flattenTitle: '把多轨压回主轨 (剪映主轨模式)', flatten: '整理',
+    save: '保存', saveTitle: '保存为新草稿 (Ctrl+S)',
+    draftsTitle: (n: number) => `管理 ${n} 个草稿`, drafts: (n: number) => `草稿 (${n})`,
+    exportJsonTitle: '导出项目 JSON (.amjson, 跨设备 / 备份)', importJsonTitle: '导入项目 JSON (.amjson)',
+    shortcutsTitle: '完整快捷键列表', shortcuts: '快捷键',
+    previewTitle: '全屏预览', preview: '预览',
+    moreTitle: '更多功能', collapse: '收起 ▲', more: '⋯ 更多',
+    exportTitle: '渲染 + 下载视频文件', exportVideo: '导出视频',
+    devToolsTitle: 'DEV-only 工具 — prod 看不到',
+    tplTitle: '模板库 — 保存 project / 读已存模板', tpl: '模板',
+    alignTitle: 'BGM 字幕对齐器 — 节拍生成字幕', align: '对齐',
+    stateTitle: '状态导出 — TTS/Project/Template 三表', state: '状态',
+    ttsProgressTitle: (done: number, total: number, failed: number) => `配音 gen 进度 · 已完成 ${done}/${total}${failed > 0 ? ` · ❌ ${failed} 失败` : ''}`,
+  },
+  en: {
+    defaultName: 'My Silly Animation', untitled: 'Untitled', rename: 'Click to rename',
+    modeLabel: 'Output mode',
+    videoMode: '🎬 Video', gifMode: '🎞️ GIF',
+    videoModeTitle: 'Video mode — with audio (TTS+BGM) + longer duration + MP4 export',
+    gifModeTitle: 'GIF mode — silent + short + direct GIF (WeChat/X/TG ready)',
+    guide: 'Guide', guideTitle: 'Guide — get started in 3 min (click anytime to revisit)',
+    clips: 'clips',
+    durGifMaxTitle: `GIF max duration ${GIF_MAX_DURATION}s`, durVideoMaxTitle: 'Video max duration 60s',
+    durGifHead: `GIF duration · max ${GIF_MAX_DURATION}s`, durVideoHead: 'Video duration · max 60s',
+    custom: 'Custom:',
+    undoTitle: 'Undo (Ctrl+Z)', redoTitle: 'Redo (Ctrl+Y)',
+    newDlgTitle: 'New blank project', newDlgMsg: 'Creating a new project clears your current work (saved drafts are safe). Continue?', newConfirm: 'New',
+    newTitle: 'New blank project (clears current)', newBtn: 'New',
+    random: 'Random', randomTitle: 'Random generate',
+    clear: 'Clear', clearTitle: 'Clear timeline (keep duration)',
+    flattenDlgTitle: 'Tidy timeline', flattenDlgMsg: 'Push all clips back onto the main track (lane 0), chained in time order. Sub-track content is re-laid at the end.', flattenConfirm: 'Tidy',
+    flattenTitle: 'Push multi-track back to main track', flatten: 'Tidy',
+    save: 'Save', saveTitle: 'Save as new draft (Ctrl+S)',
+    draftsTitle: (n: number) => `Manage ${n} draft(s)`, drafts: (n: number) => `Drafts (${n})`,
+    exportJsonTitle: 'Export project JSON (.amjson, cross-device / backup)', importJsonTitle: 'Import project JSON (.amjson)',
+    shortcutsTitle: 'Full shortcut list', shortcuts: 'Shortcuts',
+    previewTitle: 'Fullscreen preview', preview: 'Preview',
+    moreTitle: 'More', collapse: 'Less ▲', more: '⋯ More',
+    exportTitle: 'Render + download video file', exportVideo: 'Export Video',
+    devToolsTitle: 'DEV-only tools — hidden in prod',
+    tplTitle: 'Template library — save project / load saved template', tpl: 'Templates',
+    alignTitle: 'BGM caption aligner — generate captions from beats', align: 'Align',
+    stateTitle: 'State dump — TTS/Project/Template tables', state: 'State',
+    ttsProgressTitle: (done: number, total: number, failed: number) => `Voice gen progress · done ${done}/${total}${failed > 0 ? ` · ❌ ${failed} failed` : ''}`,
+  },
+} as const;
 function AnimateToolbar({
   duration, clipCount, canUndo, canRedo, draftsCount,
   onUndo, onRedo, onRandomize, onClear, onReset, onFlatten, onSetDuration, onOpenGuide,
@@ -3958,7 +4257,9 @@ function AnimateToolbar({
   mode?: ProjectMode;
   onModeChange?: (m: ProjectMode) => void;
 }) {
-  const [name, setName] = useState('我的沙雕动画');
+  const lang = useUiLang();
+  const t = TOOLBAR_DICT[lang];
+  const [name, setName] = useState<string>(TOOLBAR_DICT.zh.defaultName);
   const [editing, setEditing] = useState(false);
   const [tmp, setTmp] = useState(name);
   const [durOpen, setDurOpen] = useState(false);
@@ -3986,50 +4287,50 @@ function AnimateToolbar({
           <input
             autoFocus value={tmp}
             onChange={(e) => setTmp(e.target.value)}
-            onBlur={() => { setName(tmp.trim() || '未命名作品'); setEditing(false); }}
+            onBlur={() => { setName(tmp.trim() || t.untitled); setEditing(false); }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               if (e.key === 'Escape') { setTmp(name); setEditing(false); }
             }}
           />
         ) : (
-          <span className="am-toolbar-name-text" onClick={() => setEditing(true)} title="点击改名">{name}</span>
+          <span className="am-toolbar-name-text" onClick={() => setEditing(true)} title={t.rename}>{name}</span>
         )}
       </div>
       {/* v23-l: 视频 / GIF 模式切换. GIF 模式无声 (TTS/BGM 隐藏) + 短时长 + 走 GIF encoder */}
       {/* 视频 / GIF 视图切换 (Win7 金色 toggle, 无确认弹窗即时切). GIF 视图 = 循环编辑器 GifMode. */}
       {onModeChange && (
-        <div className="am-tb-mode" role="tablist" aria-label="输出模式" data-tour="mode-toggle">
+        <div className="am-tb-mode" role="tablist" aria-label={t.modeLabel} data-tour="mode-toggle">
           <button
             type="button"
             role="tab"
             aria-selected={mode === 'video'}
             className={'am-tb-mode-btn' + (mode === 'video' ? ' is-active' : '')}
             onClick={() => onModeChange('video')}
-            title="视频模式 — 含声音 (TTS+BGM) + 长时长 + MP4 导出"
-          >🎬 视频</button>
+            title={t.videoModeTitle}
+          >{t.videoMode}</button>
           <button
             type="button"
             role="tab"
             aria-selected={mode === 'gif'}
             className={'am-tb-mode-btn' + (mode === 'gif' ? ' is-active' : '')}
             onClick={() => onModeChange('gif')}
-            title="GIF 模式 — 无声 + 短时长 + 直出 GIF (微信/X/TG 适配)"
-          >🎞️ GIF</button>
+            title={t.gifModeTitle}
+          >{t.gifMode}</button>
         </div>
       )}
       {onOpenGuide && (
-        <button type="button" className="am-tb-btn am-tb-guide" data-tour="guide-button" onClick={onOpenGuide} title="新手引导 — 3 分钟上手 (随时点这里重看)">
-          <span style={{ fontSize: 14 }}>🧭</span> <span>新手引导</span>
+        <button type="button" className="am-tb-btn am-tb-guide" data-tour="guide-button" onClick={onOpenGuide} title={t.guideTitle}>
+          <span style={{ fontSize: 14 }}>🧭</span> <span>{t.guide}</span>
         </button>
       )}
       {mode === 'video' && (<>
       <div className="am-toolbar-stat">
-        <span>{clipCount} 片段</span>
+        <span>{clipCount} {t.clips}</span>
         {ttsGenStats && ttsGenStats.total > 0 && (ttsGenStats.pending > 0 || ttsGenStats.failed > 0) && (
           <span
             className={'am-tb-tts-progress' + (ttsGenStats.failed > 0 ? ' is-fail' : ttsGenStats.pending > 0 ? ' is-pending' : '')}
-            title={`配音 gen 进度 · 已完成 ${ttsGenStats.done}/${ttsGenStats.total}${ttsGenStats.failed > 0 ? ` · ❌ ${ttsGenStats.failed} 失败` : ''}`}
+            title={t.ttsProgressTitle(ttsGenStats.done, ttsGenStats.total, ttsGenStats.failed)}
           >
             🎙 {ttsGenStats.done}/{ttsGenStats.total}
             {ttsGenStats.pending > 0 && <span className="am-tb-tts-progress-dot">⏳</span>}
@@ -4041,7 +4342,7 @@ function AnimateToolbar({
         <button
           className="am-tb-btn am-tb-duration-btn"
           onClick={() => setDurOpen(o => !o)}
-          title={isGif ? `GIF 时长上限 ${GIF_MAX_DURATION}s` : '视频时长上限 60s'}
+          title={isGif ? t.durGifMaxTitle : t.durVideoMaxTitle}
           type="button"
         >
           ⏱ <strong>{duration.toFixed(1)}s</strong>
@@ -4049,7 +4350,7 @@ function AnimateToolbar({
         </button>
         {durOpen && (
           <div className="am-tb-duration-menu win7-panel">
-            <div className="am-tb-duration-head">{isGif ? `GIF 时长 · 上限 ${GIF_MAX_DURATION}s` : '视频时长 · 上限 60s'}</div>
+            <div className="am-tb-duration-head">{isGif ? t.durGifHead : t.durVideoHead}</div>
             <div className="am-tb-duration-grid">
               {DURATION_PRESETS.map(d => (
                 <button
@@ -4063,7 +4364,7 @@ function AnimateToolbar({
               ))}
             </div>
             <div className="am-tb-duration-custom">
-              <span>自定义:</span>
+              <span>{t.custom}</span>
               <input
                 type="number"
                 min={1}
@@ -4080,78 +4381,78 @@ function AnimateToolbar({
         )}
       </div>
       <div className="am-toolbar-spacer" />
-      <button className="am-tb-btn am-tb-btn-icon" onClick={onUndo} disabled={!canUndo} title="撤销 (Ctrl+Z)"><Undo2 size={14} /></button>
-      <button className="am-tb-btn am-tb-btn-icon" onClick={onRedo} disabled={!canRedo} title="重做 (Ctrl+Y)"><Redo2 size={14} /></button>
+      <button className="am-tb-btn am-tb-btn-icon" onClick={onUndo} disabled={!canUndo} title={t.undoTitle}><Undo2 size={14} /></button>
+      <button className="am-tb-btn am-tb-btn-icon" onClick={onRedo} disabled={!canRedo} title={t.redoTitle}><Redo2 size={14} /></button>
       <div className="am-tb-sep" />
       <button
         className="am-tb-btn"
         onClick={async () => {
           const res = await showDialog({
-            title: '新建空白项目',
-            message: '新建会清空当前工作 (草稿已存的不影响). 继续?',
+            title: t.newDlgTitle,
+            message: t.newDlgMsg,
             variant: 'warning',
-            confirmText: '新建',
+            confirmText: t.newConfirm,
           });
           if (res.confirmed) onReset();
         }}
-        title="新建空白项目 (会清空当前)"
-      ><Plus size={13} /> <span>新建</span></button>
-      <button className="am-tb-btn" onClick={onRandomize} title="随机生成"><Shuffle size={13} /> <span>随机</span></button>
-      <button className="am-tb-btn" onClick={onClear} title="清空时间轴 (保留时长)"><Trash2 size={13} /> <span>清空</span></button>
+        title={t.newTitle}
+      ><Plus size={13} /> <span>{t.newBtn}</span></button>
+      <button className="am-tb-btn" onClick={onRandomize} title={t.randomTitle}><Shuffle size={13} /> <span>{t.random}</span></button>
+      <button className="am-tb-btn" onClick={onClear} title={t.clearTitle}><Trash2 size={13} /> <span>{t.clear}</span></button>
       <button
         className="am-tb-btn"
         onClick={async () => {
           const res = await showDialog({
-            title: '整理时间轴',
-            message: '把所有片段压回主轨 (lane 0), 按时序接龙. 副轨内容会重新排到末尾.',
-            confirmText: '整理',
+            title: t.flattenDlgTitle,
+            message: t.flattenDlgMsg,
+            confirmText: t.flattenConfirm,
           });
           if (res.confirmed) onFlatten();
         }}
-        title="把多轨压回主轨 (剪映主轨模式)"
+        title={t.flattenTitle}
         data-mobile-hide
       >
-        ⤓ <span>整理</span>
+        ⤓ <span>{t.flatten}</span>
       </button>
       <div className="am-tb-sep" />
-      <button className="am-tb-btn" onClick={onSaveDraft} title="保存为新草稿 (Ctrl+S)"><Save size={13} /> <span>保存</span></button>
-      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={`管理 ${draftsCount} 个草稿`}>
-        <FolderOpen size={13} /> <span>草稿 ({draftsCount})</span>
+      <button className="am-tb-btn" onClick={onSaveDraft} title={t.saveTitle}><Save size={13} /> <span>{t.save}</span></button>
+      <button className="am-tb-btn" onClick={onToggleDraftPopover} title={t.draftsTitle(draftsCount)}>
+        <FolderOpen size={13} /> <span>{t.drafts(draftsCount)}</span>
       </button>
       {/* v23-k Phase A: 项目 JSON 导入/导出 (跨设备 / 备份 / 分享) */}
       {onExportJSON && (
-        <button className="am-tb-btn am-tb-btn-icon" onClick={onExportJSON} title="导出项目 JSON (.amjson, 跨设备 / 备份)" data-mobile-hide>
+        <button className="am-tb-btn am-tb-btn-icon" onClick={onExportJSON} title={t.exportJsonTitle} data-mobile-hide>
           <Upload size={13} />
         </button>
       )}
       {onImportJSON && (
-        <button className="am-tb-btn am-tb-btn-icon" onClick={onImportJSON} title="导入项目 JSON (.amjson)" data-mobile-hide>
+        <button className="am-tb-btn am-tb-btn-icon" onClick={onImportJSON} title={t.importJsonTitle} data-mobile-hide>
           <FileText size={13} />
         </button>
       )}
       <div className="am-tb-sep" data-mobile-hide />
-      <button className="am-tb-btn" onClick={onOpenShortcuts} title="完整快捷键列表" data-mobile-hide><span style={{ fontSize: 14 }}>⌨️</span> <span>快捷键</span></button>
-      <button className="am-tb-btn" onClick={onOpenPreview} title="全屏预览"><Eye size={13} /> <span>预览</span></button>
+      <button className="am-tb-btn" onClick={onOpenShortcuts} title={t.shortcutsTitle} data-mobile-hide><span style={{ fontSize: 14 }}>⌨️</span> <span>{t.shortcuts}</span></button>
+      <button className="am-tb-btn" onClick={onOpenPreview} title={t.previewTitle}><Eye size={13} /> <span>{t.preview}</span></button>
       {/* 手机端: 折叠次要按钮的「⋯ 更多」开关 (现 CSS 全隐藏 — 主按钮已全常驻 2 行) */}
-      <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title="更多功能">{mobileMore ? '收起 ▲' : '⋯ 更多'}</button>
-      <button className="am-tb-btn am-tb-btn-primary" data-tour="btn-export" onClick={onOpenExport} title="渲染 + 下载视频文件">
-        <Download size={13} /> <span>导出视频</span>
+      <button className="am-tb-btn am-tb-more-toggle" onClick={() => setMobileMore(v => !v)} title={t.moreTitle}>{mobileMore ? t.collapse : t.more}</button>
+      <button className="am-tb-btn am-tb-btn-primary" data-tour="btn-export" onClick={onOpenExport} title={t.exportTitle}>
+        <Download size={13} /> <span>{t.exportVideo}</span>
       </button>
       {import.meta.env.DEV && (onOpenTemplates || onOpenBgmAlign || onOpenStateDump) && (
-        <div className="am-tb-dev-group" title="DEV-only 工具 — prod 看不到">
+        <div className="am-tb-dev-group" title={t.devToolsTitle}>
           {onOpenTemplates && (
-            <button className="am-tb-dev-btn" onClick={onOpenTemplates} title="模板库 — 保存 project / 读已存模板">
-              📋 <span>模板</span>
+            <button className="am-tb-dev-btn" onClick={onOpenTemplates} title={t.tplTitle}>
+              📋 <span>{t.tpl}</span>
             </button>
           )}
           {onOpenBgmAlign && (
-            <button className="am-tb-dev-btn" onClick={onOpenBgmAlign} title="BGM 字幕对齐器 — 节拍生成字幕">
-              🎵 <span>对齐</span>
+            <button className="am-tb-dev-btn" onClick={onOpenBgmAlign} title={t.alignTitle}>
+              🎵 <span>{t.align}</span>
             </button>
           )}
           {onOpenStateDump && (
-            <button className="am-tb-dev-btn" onClick={onOpenStateDump} title="状态导出 — TTS/Project/Template 三表">
-              🛠 <span>状态</span>
+            <button className="am-tb-dev-btn" onClick={onOpenStateDump} title={t.stateTitle}>
+              🛠 <span>{t.state}</span>
             </button>
           )}
         </div>
@@ -4172,17 +4473,19 @@ function MobileInspectorMVP({ clip, onUpdateText, onDelete, onSplit, onDuplicate
   onSplit: () => void;
   onDuplicate: () => void;
 }) {
+  const lang = useUiLang();
+  const t = pickLang(MOBILE_INSPECTOR_DICT, lang);
   const isCaption = clip.trackId === 'caption';
   const isTTS = clip.trackId === 'tts';
   const supportsText = isCaption || isTTS;
   const currentText = supportsText ? ((clip as CaptionClip | TTSClip).text ?? '') : '';
   const typeLabel = (
     {
-      image: '🖼️ 图片',
-      caption: '💬 字幕',
-      fx: '✨ 动效',
-      tts: '🎤 配音',
-      bgm: '🎵 BGM',
+      image: t('tImage'),
+      caption: t('tCaption'),
+      fx: t('tFx'),
+      tts: t('tTts'),
+      bgm: t('tBgm'),
     } as Record<TrackType, string>
   )[clip.trackId];
 
@@ -4196,27 +4499,41 @@ function MobileInspectorMVP({ clip, onUpdateText, onDelete, onSplit, onDuplicate
       </div>
       {supportsText && (
         <div className="am-mobile-inspector-section">
-          <label className="am-field-sublabel">{isCaption ? '字幕文字' : '配音文字'}</label>
+          <label className="am-field-sublabel">{isCaption ? t('captionText') : t('voiceText')}</label>
           <textarea
             className="am-input am-mobile-inspector-textarea"
             value={currentText}
             onChange={(e) => onUpdateText(e.target.value)}
             rows={3}
-            placeholder={isCaption ? '点击编辑字幕' : '点击编辑配音'}
+            placeholder={isCaption ? t('editCaption') : t('editVoice')}
           />
         </div>
       )}
       <div className="am-mobile-inspector-actions">
-        <button className="am-tb-btn" onClick={onSplit} type="button">✂ 分割</button>
-        <button className="am-tb-btn" onClick={onDuplicate} type="button">📋 复制</button>
-        <button className="am-tb-btn am-mobile-inspector-delete" onClick={onDelete} type="button">🗑 删除</button>
+        <button className="am-tb-btn" onClick={onSplit} type="button">{t('split')}</button>
+        <button className="am-tb-btn" onClick={onDuplicate} type="button">{t('duplicate')}</button>
+        <button className="am-tb-btn am-mobile-inspector-delete" onClick={onDelete} type="button">{t('delete')}</button>
       </div>
       <div className="am-mobile-inspector-hint">
-        💡 完整属性 (FX/voice/lane/transform) 请切到 desktop 用右侧 Inspector
+        {t('hint')}
       </div>
     </div>
   );
 }
+const MOBILE_INSPECTOR_DICT = {
+  zh: {
+    tImage: '🖼️ 图片', tCaption: '💬 字幕', tFx: '✨ 动效', tTts: '🎤 配音', tBgm: '🎵 BGM',
+    captionText: '字幕文字', voiceText: '配音文字', editCaption: '点击编辑字幕', editVoice: '点击编辑配音',
+    split: '✂ 分割', duplicate: '📋 复制', delete: '🗑 删除',
+    hint: '💡 完整属性 (FX/voice/lane/transform) 请切到 desktop 用右侧 Inspector',
+  },
+  en: {
+    tImage: '🖼️ Image', tCaption: '💬 Caption', tFx: '✨ Motion', tTts: '🎤 Voice', tBgm: '🎵 BGM',
+    captionText: 'Caption text', voiceText: 'Voice text', editCaption: 'Tap to edit caption', editVoice: 'Tap to edit voice',
+    split: '✂ Split', duplicate: '📋 Copy', delete: '🗑 Delete',
+    hint: '💡 Full properties (FX/voice/lane/transform) — switch to desktop and use the right-side Inspector',
+  },
+} as const;
 
 // ============================================================
 // LEFT PANE — 素材库 (单击 / 双击 / 拖拽 三态都行)
@@ -4231,6 +4548,116 @@ interface CaptionTemplate { id: string; text: string; emoji: string; style: Capt
 // v23-c revert: 不再放一堆 preset row, 让 QuickGen 区域负责样式调试. LeftPane caption subtab 只显 QuickGen
 const CAPTION_LIB: CaptionTemplate[] = [];
 type LibSub = 'combo' | 'panda' | 'face' | 'netsearch' | 'scene' | 'draft' | 'upload';
+
+const LEFTPANE_DICT = {
+  zh: {
+    // seg bar
+    segAsset: '素材', segMusic: '音乐', segVoice: '配音', segCaption: '字幕', segFx: '动效',
+    secAsset: '素材库', secMusic: '背景音乐', secVoice: '配音音色', secCaption: '字幕模板', secFx: '动画特效',
+    uploadImg: '上传图片',
+    // subtabs
+    subCombo: '配套', subPanda: '熊猫', subFace: '表情', subNet: '联网搜', subScene: '场景', subUpload: '上传', subDraft: '草图',
+    searchPlaceholder: (what: string) => `搜${what}...`,
+    searchPanda: '熊猫头', searchFace: '表情', searchScene: '场景',
+    noMatch: '无匹配素材',
+    netHintA: '🌐 搜全网熊猫头梗图 → 点选即存进下方池子 → 再点缩略图加入时间轴 (完整梗图, 原样使用不二次合成)。弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 ',
+    netHintB: ' 标记。',
+    netEmpty: '还没搜过 — 点上面「联网搜图」开始',
+    sceneHintCustom: '场景纯自定义 — 上传你的背景图:',
+    sceneUploadLink: '+ 上传场景',
+    sceneSourcesLabel: '还可以去这些图源找 (CC0 免费) ↓',
+    draftEmptyTtl: '还没有草图', draftEmptyHint: '去 编辑器 或 快速 制作熊猫头, 保存后这里就有了',
+    importAs: '导入为:',
+    kindGeneral: '通用图', kindScene: '场景', kindPanda: '熊猫', kindFace: '表情',
+    kindGeneralTip: '一般图片素材 (画面 / 道具 / 表情包)', kindSceneTip: '作为背景场景 (会出现在 场景 subtab)',
+    kindPandaTip: '作为自定义熊猫 (会出现在 熊猫 subtab)', kindFaceTip: '作为自定义表情 (会出现在 表情 subtab)',
+    uploadZoneTtl: '点击或拖入图片',
+    uploadHint1: (mb: string, dim: number, cnt: number, totMb: string) => `单图 ≤${mb}MB · 尺寸 ≤${dim}px · 总 ${cnt} 张 / ${totMb}MB`,
+    uploadHint2: '仅存浏览器 IndexedDB · 不上传服务器 · 跨刷新保留',
+    clear: '清空',
+    uploadMore: (kind: string) => `继续上传 (作为 ${kind})`,
+    bgmUploadTip: '上传 mp3/wav', bgmCountUnit: ' 首',
+    bgmCustom: '自定义', bgmBuiltin: '内置合成 BGM',
+    myVoice: '我的配音', voiceUploadTip: '上传 mp3/wav 当配音',
+    voiceCustom: '自定义 (上传)', voiceBuiltin: '内置音色 (云端 TTS)',
+    addToTimeline: '加到时间轴 (作为配音)', preview: '试听', delete: '删除',
+    fxAll: '全部',
+    faceCycleTitle: '变脸 — 给一个熊猫头配多张表情, 在它的时段里依次轮播 (溶解 / 快切)',
+    faceCycleTtl: '变脸 · 多表情轮播', faceCycleSub: '给熊猫头配 2-6 张脸, 在它的时段里自动依次切换',
+    fxHint: '单击 / 拖到特效轨 · 选中片段后可绑定',
+    addHint: '单击 / 双击 / 拖拽 都能添加到时间指针',
+    // toasts
+    tCountLimit: (n: number) => `已达数量上限 ${n} 张`,
+    tFileTooBig: (name: string, mb: string) => `${name} 超过 ${mb}MB`,
+    tDimTooBig: (name: string, dim: number) => `${name} 尺寸超 ${dim}px`,
+    tStorageOver: (mb: string) => `总存储已超 ${mb}MB`,
+    tUploaded: (n: number, rej: number) => `已上传 ${n} 张${rej > 0 ? ` (${rej} 张拒绝)` : ''}`,
+    tAllFailed: '全部上传失败',
+    tClearUploadsTitle: '清空上传素材', tClearUploadsMsg: (n: number) => `清空全部 ${n} 张上传素材?`, tClearConfirm: '清空', tCleared: '已清空',
+    tBgmCountLimit: (n: number) => `已达数量上限 ${n} 首`,
+    tBgmTooBig: (name: string, mb: string) => `${name} 超 ${mb}MB`,
+    tBgmStorageOver: (mb: string) => `总存储超 ${mb}MB`,
+    tBgmUploaded: (n: number, rej: number) => `已上传 ${n} 首${rej > 0 ? ` (${rej} 拒绝)` : ''}`,
+    bgmDefaultName: (n: number) => `音乐${n}`, bgmCustomUpload: '自定义上传',
+    tVoiceCountLimit: (n: number) => `已达上限 ${n} 条`,
+    tVoiceTooBig: (name: string, mb: string) => `${name} 超 ${mb}MB`,
+    voiceDefaultName: (n: number) => `配音${n}`,
+    tVoiceUploaded: (n: number, rej: number) => `已上传 ${n} 条配音${rej ? ` (${rej} 拒绝)` : ''} · 点卡片加到时间轴`,
+    uploadDefaultName: (n: number) => `上传${n}`,
+  },
+  en: {
+    segAsset: 'Materials', segMusic: 'Music', segVoice: 'Voice', segCaption: 'Captions', segFx: 'Motion',
+    secAsset: 'Material library', secMusic: 'Background music', secVoice: 'Voice tones', secCaption: 'Caption templates', secFx: 'Animation FX',
+    uploadImg: 'Upload image',
+    subCombo: 'Combo', subPanda: 'Panda', subFace: 'Face', subNet: 'Web Search', subScene: 'Scene', subUpload: 'Upload', subDraft: 'Drafts',
+    searchPlaceholder: (what: string) => `Search ${what}...`,
+    searchPanda: 'panda heads', searchFace: 'faces', searchScene: 'scenes',
+    noMatch: 'No matching materials',
+    netHintA: '🌐 Search the web for panda-head memes → tap to save into the pool below → tap the thumbnail to add to the timeline (full meme, used as-is, no re-compositing). The "Recent" row at the bottom of the popup keeps the last 20 globally; animated GIFs are tagged ',
+    netHintB: '.',
+    netEmpty: 'No searches yet — tap "Web Search" above to start',
+    sceneHintCustom: 'Scenes are fully custom — upload your own background:',
+    sceneUploadLink: '+ Upload scene',
+    sceneSourcesLabel: 'You can also grab images from these sources (CC0 free) ↓',
+    draftEmptyTtl: 'No drafts yet', draftEmptyHint: 'Make a panda head in the Editor or Quick mode; once saved it shows up here',
+    importAs: 'Import as:',
+    kindGeneral: 'General', kindScene: 'Scene', kindPanda: 'Panda', kindFace: 'Face',
+    kindGeneralTip: 'General image material (scene / props / memes)', kindSceneTip: 'Use as background scene (appears in the Scene subtab)',
+    kindPandaTip: 'Use as custom panda (appears in the Panda subtab)', kindFaceTip: 'Use as custom face (appears in the Face subtab)',
+    uploadZoneTtl: 'Click or drop an image',
+    uploadHint1: (mb: string, dim: number, cnt: number, totMb: string) => `Per image ≤${mb}MB · size ≤${dim}px · total ${cnt} / ${totMb}MB`,
+    uploadHint2: 'Stored in browser IndexedDB only · never uploaded to a server · kept across refreshes',
+    clear: 'Clear',
+    uploadMore: (kind: string) => `Upload more (as ${kind})`,
+    bgmUploadTip: 'Upload mp3/wav', bgmCountUnit: '',
+    bgmCustom: 'Custom', bgmBuiltin: 'Built-in synth BGM',
+    myVoice: 'My voices', voiceUploadTip: 'Upload mp3/wav as voice',
+    voiceCustom: 'Custom (uploaded)', voiceBuiltin: 'Built-in tones (cloud TTS)',
+    addToTimeline: 'Add to timeline (as voice)', preview: 'Preview', delete: 'Delete',
+    fxAll: 'All',
+    faceCycleTitle: 'Face Cycle — give one panda head several faces that cycle through during its span (dissolve / hard cut)',
+    faceCycleTtl: 'Face Cycle · multi-face', faceCycleSub: 'Give a panda head 2-6 faces that auto-cycle during its span',
+    fxHint: 'Click / drag to the FX track · bind after selecting a clip',
+    addHint: 'Click / double-click / drag to add at the playhead',
+    tCountLimit: (n: number) => `Reached the count limit of ${n}`,
+    tFileTooBig: (name: string, mb: string) => `${name} exceeds ${mb}MB`,
+    tDimTooBig: (name: string, dim: number) => `${name} exceeds ${dim}px`,
+    tStorageOver: (mb: string) => `Total storage exceeds ${mb}MB`,
+    tUploaded: (n: number, rej: number) => `Uploaded ${n}${rej > 0 ? ` (${rej} rejected)` : ''}`,
+    tAllFailed: 'All uploads failed',
+    tClearUploadsTitle: 'Clear uploaded materials', tClearUploadsMsg: (n: number) => `Clear all ${n} uploaded materials?`, tClearConfirm: 'Clear', tCleared: 'Cleared',
+    tBgmCountLimit: (n: number) => `Reached the count limit of ${n}`,
+    tBgmTooBig: (name: string, mb: string) => `${name} exceeds ${mb}MB`,
+    tBgmStorageOver: (mb: string) => `Total storage exceeds ${mb}MB`,
+    tBgmUploaded: (n: number, rej: number) => `Uploaded ${n} track(s)${rej > 0 ? ` (${rej} rejected)` : ''}`,
+    bgmDefaultName: (n: number) => `Music ${n}`, bgmCustomUpload: 'Custom upload',
+    tVoiceCountLimit: (n: number) => `Reached the limit of ${n}`,
+    tVoiceTooBig: (name: string, mb: string) => `${name} exceeds ${mb}MB`,
+    voiceDefaultName: (n: number) => `Voice ${n}`,
+    tVoiceUploaded: (n: number, rej: number) => `Uploaded ${n} voice clip(s)${rej ? ` (${rej} rejected)` : ''} · tap a card to add to the timeline`,
+    uploadDefaultName: (n: number) => `Upload ${n}`,
+  },
+} as const;
 
 function LeftPane({
   mode = 'video',
@@ -4254,6 +4681,8 @@ function LeftPane({
   projectDuration: number;
 }) {
   const { draftSlots } = useMeme();
+  const lang = useUiLang();
+  const t = LEFTPANE_DICT[lang];
   const isGif = mode === 'gif';
   // GIF 模式: voice/music 不可用. 自动切回 asset tab 如果当前是 voice/music
   const [seg, setSegRaw] = useState<LibSeg>(initialSeg ?? 'asset');
@@ -4278,7 +4707,7 @@ function LeftPane({
   const filter = useCallback((arr: Material[]): Material[] => {
     if (!q) return arr;
     const k = q.toLowerCase();
-    return arr.filter(m => m.labelCn.toLowerCase().includes(k) || m.labelEn.toLowerCase().includes(k) || m.tags.some(t => t.toLowerCase().includes(k)));
+    return arr.filter(m => m.labelCn.toLowerCase().includes(k) || m.labelEn.toLowerCase().includes(k) || m.tags.some(tg => tg.toLowerCase().includes(k)));
   }, [q]);
 
   // v23-b 上传 — 单图 30MB / 总 500MB / 200 张 / 尺寸 4096px (放宽, 只存 IDB)
@@ -4291,11 +4720,11 @@ function LeftPane({
     let usedBytes = currentBytes;
     for (const f of files) {
       if (uploads.length + added >= AM_UPLOAD_MAX_COUNT) {
-        toast.error(`已达数量上限 ${AM_UPLOAD_MAX_COUNT} 张`);
+        toast.error(t.tCountLimit(AM_UPLOAD_MAX_COUNT));
         break;
       }
       if (f.size > AM_UPLOAD_MAX_FILE_BYTES) {
-        toast.error(`${f.name} 超过 ${(AM_UPLOAD_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB`);
+        toast.error(t.tFileTooBig(f.name, (AM_UPLOAD_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)));
         rejected++; continue;
       }
       try {
@@ -4313,16 +4742,16 @@ function LeftPane({
           img.src = dataUrl;
         });
         if (dims.w > AM_UPLOAD_MAX_DIM || dims.h > AM_UPLOAD_MAX_DIM) {
-          toast.error(`${f.name} 尺寸超 ${AM_UPLOAD_MAX_DIM}px`);
+          toast.error(t.tDimTooBig(f.name, AM_UPLOAD_MAX_DIM));
           rejected++; continue;
         }
         if (usedBytes + dataUrl.length > AM_UPLOAD_MAX_BYTES) {
-          toast.error(`总存储已超 ${(AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)}MB`);
+          toast.error(t.tStorageOver((AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)));
           rejected++; break;
         }
         usedBytes += dataUrl.length;
         const id = uid('u');
-        const labelCn = f.name.split('.')[0].slice(0, 10) || `上传${added + 1}`;
+        const labelCn = f.name.split('.')[0].slice(0, 10) || t.uploadDefaultName(added + 1);
         // v23-b: 存 kind, scene subtab / panda subtab / face subtab 据此分流
         const tagsCN = uploadKind === 'scene' ? ['上传', '场景'] : uploadKind === 'panda' ? ['上传', '熊猫'] : uploadKind === 'face' ? ['上传', '表情'] : ['上传'];
         setUploads(prev => [...prev, {
@@ -4335,20 +4764,20 @@ function LeftPane({
         rejected++;
       }
     }
-    if (added > 0) toast.success(`已上传 ${added} 张${rejected > 0 ? ` (${rejected} 张拒绝)` : ''}`);
-    else if (rejected > 0) toast.error('全部上传失败');
+    if (added > 0) toast.success(t.tUploaded(added, rejected));
+    else if (rejected > 0) toast.error(t.tAllFailed);
   };
   const handleDeleteUpload = (id: string) => setUploads(prev => prev.filter(m => m.id !== id));
   const handleClearUploads = async () => {
     const res = await showDialog({
-      title: '清空上传素材',
-      message: `清空全部 ${uploads.length} 张上传素材?`,
+      title: t.tClearUploadsTitle,
+      message: t.tClearUploadsMsg(uploads.length),
       destructive: true,
-      confirmText: '清空',
+      confirmText: t.tClearConfirm,
     });
     if (res.confirmed) {
       setUploads([]);
-      toast.success('已清空');
+      toast.success(t.tCleared);
     }
   };
   const uploadUsedBytes = useMemo(() => uploads.reduce((acc, m) => acc + (m.src?.length || 0), 0), [uploads]);
@@ -4366,15 +4795,15 @@ function LeftPane({
     let added = 0, rejected = 0;
     for (const f of files) {
       if (userBGMs.length + added >= AM_USER_BGM_MAX_COUNT) {
-        toast.error(`已达数量上限 ${AM_USER_BGM_MAX_COUNT} 首`);
+        toast.error(t.tBgmCountLimit(AM_USER_BGM_MAX_COUNT));
         break;
       }
       if (f.size > AM_USER_BGM_MAX_FILE_BYTES) {
-        toast.error(`${f.name} 超 ${(AM_USER_BGM_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB`);
+        toast.error(t.tBgmTooBig(f.name, (AM_USER_BGM_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)));
         rejected++; continue;
       }
       if (usedBytes + f.size > AM_USER_BGM_MAX_TOTAL_BYTES) {
-        toast.error(`总存储超 ${(AM_USER_BGM_MAX_TOTAL_BYTES / 1024 / 1024).toFixed(0)}MB`);
+        toast.error(t.tBgmStorageOver((AM_USER_BGM_MAX_TOTAL_BYTES / 1024 / 1024).toFixed(0)));
         rejected++; break;
       }
       try {
@@ -4385,7 +4814,7 @@ function LeftPane({
           r.readAsDataURL(f);
         });
         usedBytes += f.size;
-        const name = f.name.replace(/\.(mp3|wav|m4a|ogg|aac)$/i, '').slice(0, 18) || `音乐${added + 1}`;
+        const name = f.name.replace(/\.(mp3|wav|m4a|ogg|aac)$/i, '').slice(0, 18) || t.bgmDefaultName(added + 1);
         // 探测真实时长 — 让加到时间轴时 clip.end 跟 audio 实际长度对齐 (不再瞎写 5s)
         let durationSec: number | undefined;
         try {
@@ -4398,7 +4827,7 @@ function LeftPane({
         setUserBGMs(prev => [...prev, {
           id: `user-bgm-${Date.now()}-${added}`,
           name,
-          mood: durationSec ? `${durationSec.toFixed(1)}s` : '自定义上传',
+          mood: durationSec ? `${durationSec.toFixed(1)}s` : t.bgmCustomUpload,
           tempo: 120,
           notes: [],
           kind: 'file',
@@ -4411,8 +4840,8 @@ function LeftPane({
         rejected++;
       }
     }
-    if (added > 0) toast.success(`已上传 ${added} 首${rejected > 0 ? ` (${rejected} 拒绝)` : ''}`);
-    else if (rejected > 0) toast.error('全部上传失败');
+    if (added > 0) toast.success(t.tBgmUploaded(added, rejected));
+    else if (rejected > 0) toast.error(t.tAllFailed);
   };
   const handleDeleteUserBGM = (id: string) => setUserBGMs(prev => prev.filter(b => b.id !== id));
   const bgmUsedBytes = useMemo(() => userBGMs.reduce((s, b) => s + (b.sizeBytes || 0), 0), [userBGMs]);
@@ -4426,8 +4855,8 @@ function LeftPane({
   }, []);
   useEffect(() => {
     if (!voicesLoadedRef.current) return;
-    const t = window.setTimeout(() => { void idbSet(AM_USER_VOICES_IDB_KEY, userVoices).catch(() => {}); }, 300);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => { void idbSet(AM_USER_VOICES_IDB_KEY, userVoices).catch(() => {}); }, 300);
+    return () => window.clearTimeout(timer);
   }, [userVoices]);
   const voiceFileRef = useRef<HTMLInputElement>(null);
   const handleVoiceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -4435,18 +4864,18 @@ function LeftPane({
     if (files.length === 0) return;
     let added = 0, rejected = 0;
     for (const f of files) {
-      if (userVoices.length + added >= AM_USER_VOICE_MAX_COUNT) { toast.error(`已达上限 ${AM_USER_VOICE_MAX_COUNT} 条`); break; }
-      if (f.size > AM_USER_VOICE_MAX_FILE_BYTES) { toast.error(`${f.name} 超 ${(AM_USER_VOICE_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB`); rejected++; continue; }
+      if (userVoices.length + added >= AM_USER_VOICE_MAX_COUNT) { toast.error(t.tVoiceCountLimit(AM_USER_VOICE_MAX_COUNT)); break; }
+      if (f.size > AM_USER_VOICE_MAX_FILE_BYTES) { toast.error(t.tVoiceTooBig(f.name, (AM_USER_VOICE_MAX_FILE_BYTES / 1024 / 1024).toFixed(0))); rejected++; continue; }
       try {
         const dataUrl = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
         let durationSec = 2; try { durationSec = await getAudioDuration(dataUrl); } catch { /* 探测失败兜底 */ }
-        const name = f.name.replace(/\.(mp3|wav|m4a|ogg|aac)$/i, '').slice(0, 16) || `配音${added + 1}`;
+        const name = f.name.replace(/\.(mp3|wav|m4a|ogg|aac)$/i, '').slice(0, 16) || t.voiceDefaultName(added + 1);
         setUserVoices(prev => [{ id: `uv-${Date.now()}-${added}`, name, src: dataUrl, durationSec }, ...prev].slice(0, AM_USER_VOICE_MAX_COUNT));
         added++;
       } catch { rejected++; }
     }
-    if (added > 0) toast.success(`已上传 ${added} 条配音${rejected ? ` (${rejected} 拒绝)` : ''} · 点卡片加到时间轴`);
-    else if (rejected > 0) toast.error('全部上传失败');
+    if (added > 0) toast.success(t.tVoiceUploaded(added, rejected));
+    else if (rejected > 0) toast.error(t.tAllFailed);
   };
   const handleDeleteUserVoice = (id: string) => setUserVoices(prev => prev.filter(v => v.id !== id));
 
@@ -4458,7 +4887,7 @@ function LeftPane({
         className="material-search-input"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder={`搜${sub === 'panda' ? '熊猫头' : sub === 'face' ? '表情' : '场景'}...`}
+        placeholder={t.searchPlaceholder(sub === 'panda' ? t.searchPanda : sub === 'face' ? t.searchFace : t.searchScene)}
       />
       {q && <button className="material-search-clear" onClick={() => setQ('')}><X size={12} /></button>}
     </div>
@@ -4467,12 +4896,12 @@ function LeftPane({
   return (
     <aside className="desktop-sidebar-left am-pane-left">
       <div className="am-seg-bar win7-panel">
-        <SegBtn active={seg === 'asset'} icon={<ImageIcon size={14} />} label="素材" onClick={() => { setSeg('asset'); setSub('combo'); }} />
+        <SegBtn active={seg === 'asset'} icon={<ImageIcon size={14} />} label={t.segAsset} onClick={() => { setSeg('asset'); setSub('combo'); }} />
         {/* GIF 模式无声 — 音乐 + 配音 隐藏 */}
-        {!isGif && <SegBtn active={seg === 'music'} icon={<Music size={14} />} label="音乐" onClick={() => setSeg('music')} />}
-        {!isGif && <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label="配音" onClick={() => setSeg('voice')} tour="panel-voice" />}
-        <SegBtn active={seg === 'caption'} icon={<MessageSquare size={14} />} label="字幕" onClick={() => setSeg('caption')} tour="panel-caption" />
-        <SegBtn active={seg === 'fx'} icon={<Sparkles size={14} />} label="动效" onClick={() => setSeg('fx')} tour="panel-motion" />
+        {!isGif && <SegBtn active={seg === 'music'} icon={<Music size={14} />} label={t.segMusic} onClick={() => setSeg('music')} />}
+        {!isGif && <SegBtn active={seg === 'voice'} icon={<Mic size={14} />} label={t.segVoice} onClick={() => setSeg('voice')} tour="panel-voice" />}
+        <SegBtn active={seg === 'caption'} icon={<MessageSquare size={14} />} label={t.segCaption} onClick={() => setSeg('caption')} tour="panel-caption" />
+        <SegBtn active={seg === 'fx'} icon={<Sparkles size={14} />} label={t.segFx} onClick={() => setSeg('fx')} tour="panel-motion" />
       </div>
 
       <div className="sidebar-section win7-panel am-left-section">
@@ -4481,10 +4910,10 @@ function LeftPane({
             {seg === 'asset' ? '🎨' : seg === 'music' ? '🎵' : seg === 'voice' ? '🎙' : seg === 'caption' ? '💬' : '✨'}
           </span>
           <span className="sidebar-label">
-            {seg === 'asset' ? '素材库' : seg === 'music' ? '背景音乐' : seg === 'voice' ? '配音音色' : seg === 'caption' ? '字幕模板' : '动画特效'}
+            {seg === 'asset' ? t.secAsset : seg === 'music' ? t.secMusic : seg === 'voice' ? t.secVoice : seg === 'caption' ? t.secCaption : t.secFx}
           </span>
           {seg === 'asset' && (
-            <button className="am-mini-upload" title="上传图片" onClick={() => { setSub('upload'); fileRef.current?.click(); }}>
+            <button className="am-mini-upload" title={t.uploadImg} onClick={() => { setSub('upload'); fileRef.current?.click(); }}>
               <Upload size={12} />
             </button>
           )}
@@ -4500,7 +4929,7 @@ function LeftPane({
                 onClick={() => setSub(k)}
                 data-tour={k === 'combo' ? 'panel-combo' : undefined}
               >
-                {k === 'combo' ? '配套' : k === 'panda' ? '熊猫' : k === 'face' ? '表情' : k === 'netsearch' ? '联网搜' : k === 'scene' ? '场景' : k === 'draft' ? `草图${draftSlots.length ? ` ${draftSlots.length}` : ''}` : '上传'}
+                {k === 'combo' ? t.subCombo : k === 'panda' ? t.subPanda : k === 'face' ? t.subFace : k === 'netsearch' ? t.subNet : k === 'scene' ? t.subScene : k === 'draft' ? `${t.subDraft}${draftSlots.length ? ` ${draftSlots.length}` : ''}` : t.subUpload}
               </button>
             ))}
           </div>
@@ -4521,7 +4950,7 @@ function LeftPane({
                 {/* v23-b: 内置 panda 池 + 用户上传 kind=panda (联网搜的完整梗图改放「联网搜」分页, 这里只放可合成的熊猫底图) */}
                 {filter(uploads.filter(u => u.kind === 'panda' && !u.id.startsWith('network-'))).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
                 {filter(ALL_PANDAS).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} />)}
-                {filter(ALL_PANDAS).length === 0 && <p className="am-empty-line">无匹配素材</p>}
+                {filter(ALL_PANDAS).length === 0 && <p className="am-empty-line">{t.noMatch}</p>}
               </div>
             </>
           )}
@@ -4532,7 +4961,7 @@ function LeftPane({
                 {/* v23-b: 内置 face 池 + 用户上传 kind=face + 智能抠脸沉淀 */}
                 {filter(uploads.filter(u => u.kind === 'face')).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
                 {filter(ALL_FACES).map(m => <MaterialCardClip key={m.id} item={m} kind="face" onQuickAdd={onQuickAdd} />)}
-                {filter(ALL_FACES).length === 0 && <p className="am-empty-line">无匹配素材</p>}
+                {filter(ALL_FACES).length === 0 && <p className="am-empty-line">{t.noMatch}</p>}
               </div>
             </>
           )}
@@ -4540,11 +4969,11 @@ function LeftPane({
             <div className="am-netsearch-tab">
               <MaterialSourceButtons kind="panda" onAdd={(m) => setUploads(prev => [{ ...m, kind: 'panda' }, ...prev.filter(u => u.id !== m.id)].slice(0, AM_UPLOAD_MAX_COUNT))} />
               <div className="am-scene-hint" style={{ marginTop: 8, lineHeight: 1.6 }}>
-                🌐 搜全网熊猫头梗图 → 点选即存进下方池子 → 再点缩略图加入时间轴 (完整梗图, 原样使用不二次合成)。弹窗底部「最近用过」全局保存最近 20 个; GIF 动图有 <b>GIF</b> 标记。
+                {t.netHintA}<b>GIF</b>{t.netHintB}
               </div>
               <div className="sidebar-grid" style={{ marginTop: 8 }}>
                 {filter(uploads.filter(u => u.id.startsWith('network-'))).map(m => <MaterialCardClip key={m.id} item={m} kind="panda" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
-                {uploads.filter(u => u.id.startsWith('network-')).length === 0 && <p className="am-empty-line">还没搜过 — 点上面「联网搜图」开始</p>}
+                {uploads.filter(u => u.id.startsWith('network-')).length === 0 && <p className="am-empty-line">{t.netEmpty}</p>}
               </div>
             </div>
           )}
@@ -4552,14 +4981,14 @@ function LeftPane({
             <>
               {/* 场景纯用户自定义 (原 Picsum 内置随机图跟标签对不上, 已移除) */}
               <div className="am-scene-hint">
-                <ImagePlus size={11} strokeWidth={2.2} /> 场景纯自定义 — 上传你的背景图:
-                <button type="button" className="am-scene-upload-link" onClick={() => { setUploadKind('scene'); setSub('upload'); }}>+ 上传场景</button>
+                <ImagePlus size={11} strokeWidth={2.2} /> {t.sceneHintCustom}
+                <button type="button" className="am-scene-upload-link" onClick={() => { setUploadKind('scene'); setSub('upload'); }}>{t.sceneUploadLink}</button>
               </div>
               <div className="sidebar-grid">
                 {filter(uploads.filter(u => u.kind === 'scene')).map(m => <MaterialCardClip key={m.id} item={m} kind="scene" onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUpload(m.id)} />)}
               </div>
               <div className="am-scene-sources" style={{ marginTop: 10 }}>
-                <div className="am-scene-sources-label">还可以去这些图源找 (CC0 免费) ↓</div>
+                <div className="am-scene-sources-label">{t.sceneSourcesLabel}</div>
                 <a className="am-scene-source-link" href="https://unsplash.com/s/photos/landscape" target="_blank" rel="noopener noreferrer">Unsplash</a>
                 <a className="am-scene-source-link" href="https://pixabay.com/zh/images/search/%E5%9C%BA%E6%99%AF/" target="_blank" rel="noopener noreferrer">Pixabay</a>
                 <a className="am-scene-source-link" href="https://www.pexels.com/search/scene/" target="_blank" rel="noopener noreferrer">Pexels</a>
@@ -4571,8 +5000,8 @@ function LeftPane({
               {draftSlots.length === 0 ? (
                 <div className="am-draft-empty">
                   <FolderOpen size={28} strokeWidth={1.5} />
-                  <div className="am-draft-empty-ttl">还没有草图</div>
-                  <div className="am-draft-empty-hint">去 编辑器 或 快速 制作熊猫头, 保存后这里就有了</div>
+                  <div className="am-draft-empty-ttl">{t.draftEmptyTtl}</div>
+                  <div className="am-draft-empty-hint">{t.draftEmptyHint}</div>
                 </div>
               ) : (
                 <div className="sidebar-grid">
@@ -4592,12 +5021,12 @@ function LeftPane({
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple style={{ display: 'none' }} onChange={handleFile} />
               {/* v23-b: 上传分类选择 — 决定上传后归到哪个 subtab */}
               <div className="am-upload-kind-row">
-                <span className="am-upload-kind-label">导入为:</span>
+                <span className="am-upload-kind-label">{t.importAs}</span>
                 {([
-                  { k: 'general' as const, lbl: '通用图', tip: '一般图片素材 (画面 / 道具 / 表情包)' },
-                  { k: 'scene' as const,   lbl: '场景',   tip: '作为背景场景 (会出现在 场景 subtab)' },
-                  { k: 'panda' as const,   lbl: '熊猫',   tip: '作为自定义熊猫 (会出现在 熊猫 subtab)' },
-                  { k: 'face' as const,    lbl: '表情',   tip: '作为自定义表情 (会出现在 表情 subtab)' },
+                  { k: 'general' as const, lbl: t.kindGeneral, tip: t.kindGeneralTip },
+                  { k: 'scene' as const,   lbl: t.kindScene,   tip: t.kindSceneTip },
+                  { k: 'panda' as const,   lbl: t.kindPanda,   tip: t.kindPandaTip },
+                  { k: 'face' as const,    lbl: t.kindFace,    tip: t.kindFaceTip },
                 ]).map(opt => (
                   <button
                     key={opt.k}
@@ -4613,20 +5042,20 @@ function LeftPane({
               {uploads.length === 0 ? (
                 <div className="am-upload-zone" onClick={() => fileRef.current?.click()}>
                   <Upload size={22} strokeWidth={1.6} />
-                  <div className="am-upload-ttl">点击或拖入图片</div>
-                  <div className="am-upload-hint">单图 ≤{(AM_UPLOAD_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB · 尺寸 ≤{AM_UPLOAD_MAX_DIM}px · 总 {AM_UPLOAD_MAX_COUNT} 张 / {(AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)}MB</div>
-                  <div className="am-upload-hint">仅存浏览器 IndexedDB · 不上传服务器 · 跨刷新保留</div>
+                  <div className="am-upload-ttl">{t.uploadZoneTtl}</div>
+                  <div className="am-upload-hint">{t.uploadHint1((AM_UPLOAD_MAX_FILE_BYTES / 1024 / 1024).toFixed(0), AM_UPLOAD_MAX_DIM, AM_UPLOAD_MAX_COUNT, (AM_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0))}</div>
+                  <div className="am-upload-hint">{t.uploadHint2}</div>
                 </div>
               ) : (
                 <>
                   <div className="am-upload-quota">
                     <span><Folder size={11} strokeWidth={2.2} /> {uploads.length}/{AM_UPLOAD_MAX_COUNT} · {uploadUsedMB}/{uploadMaxMB}MB</span>
-                    <button className="am-upload-clear-btn" onClick={handleClearUploads} type="button" title="清空">
+                    <button className="am-upload-clear-btn" onClick={handleClearUploads} type="button" title={t.clear}>
                       <Trash2 size={10} />
                     </button>
                   </div>
                   <button className="am-upload-more" onClick={() => fileRef.current?.click()}>
-                    <Upload size={12} /> <span>继续上传 (作为 {uploadKind === 'general' ? '通用图' : uploadKind === 'scene' ? '场景' : uploadKind === 'panda' ? '熊猫' : '表情'})</span>
+                    <Upload size={12} /> <span>{t.uploadMore(uploadKind === 'general' ? t.kindGeneral : uploadKind === 'scene' ? t.kindScene : uploadKind === 'panda' ? t.kindPanda : t.kindFace)}</span>
                   </button>
                   <div className="sidebar-grid">
                     {uploads.map(m => (
@@ -4642,18 +5071,18 @@ function LeftPane({
             <div className="am-row-list">
               <input ref={audioFileRef} type="file" accept="audio/*" multiple style={{ display: 'none' }} onChange={handleAudioFile} />
               <div className="am-upload-quota">
-                <span>📦 {userBGMs.length}/{AM_USER_BGM_MAX_COUNT} 首 · {(bgmUsedBytes / 1024 / 1024).toFixed(1)}/{(AM_USER_BGM_MAX_TOTAL_BYTES / 1024 / 1024).toFixed(0)}MB</span>
-                <button className="am-upload-clear-btn" onClick={() => audioFileRef.current?.click()} type="button" title="上传 mp3/wav">
+                <span>📦 {userBGMs.length}/{AM_USER_BGM_MAX_COUNT}{t.bgmCountUnit} · {(bgmUsedBytes / 1024 / 1024).toFixed(1)}/{(AM_USER_BGM_MAX_TOTAL_BYTES / 1024 / 1024).toFixed(0)}MB</span>
+                <button className="am-upload-clear-btn" onClick={() => audioFileRef.current?.click()} type="button" title={t.bgmUploadTip}>
                   <Upload size={10} />
                 </button>
               </div>
               {userBGMs.length > 0 && (
                 <>
-                  <div className="am-list-section-head">自定义</div>
+                  <div className="am-list-section-head">{t.bgmCustom}</div>
                   {userBGMs.map(b => <BGMRow key={b.id} item={b} onQuickAdd={onQuickAdd} onDelete={() => handleDeleteUserBGM(b.id)} />)}
                 </>
               )}
-              <div className="am-list-section-head">内置合成 BGM</div>
+              <div className="am-list-section-head">{t.bgmBuiltin}</div>
               {BGM_LIB.map(b => <BGMRow key={b.id} item={b} onQuickAdd={onQuickAdd} />)}
             </div>
           )}
@@ -4664,24 +5093,24 @@ function LeftPane({
               {/* 自定义配音上传 (mp3/wav) — 上传自己的声音/真 Neural mp3 直接当配音 */}
               <input ref={voiceFileRef} type="file" accept="audio/*" multiple style={{ display: 'none' }} onChange={handleVoiceFile} />
               <div className="am-upload-quota">
-                <span>🎤 我的配音 {userVoices.length}/{AM_USER_VOICE_MAX_COUNT}</span>
-                <button className="am-upload-clear-btn" onClick={() => voiceFileRef.current?.click()} type="button" title="上传 mp3/wav 当配音"><Upload size={10} /></button>
+                <span>🎤 {t.myVoice} {userVoices.length}/{AM_USER_VOICE_MAX_COUNT}</span>
+                <button className="am-upload-clear-btn" onClick={() => voiceFileRef.current?.click()} type="button" title={t.voiceUploadTip}><Upload size={10} /></button>
               </div>
               {userVoices.length > 0 && (
                 <>
-                  <div className="am-list-section-head">自定义 (上传)</div>
+                  <div className="am-list-section-head">{t.voiceCustom}</div>
                   {userVoices.map(uv => (
                     <div key={uv.id} className="am-uservoice-row">
-                      <button className="am-uservoice-add" onClick={() => onQuickAdd({ type: 'tts', voice: VOICE_LIB[0].id, text: uv.name, audioSrc: uv.src, audioDuration: uv.durationSec })} title="加到时间轴 (作为配音)">
+                      <button className="am-uservoice-add" onClick={() => onQuickAdd({ type: 'tts', voice: VOICE_LIB[0].id, text: uv.name, audioSrc: uv.src, audioDuration: uv.durationSec })} title={t.addToTimeline}>
                         <Mic size={12} /> <span className="am-uservoice-name">{uv.name}</span> <span className="am-uservoice-dur">{uv.durationSec.toFixed(1)}s</span>
                       </button>
-                      <button className="am-uservoice-play" onClick={() => audioEngine.playTTSAudio(uv.src, 1.0)} type="button" title="试听">▶</button>
-                      <button className="am-uservoice-del" onClick={() => handleDeleteUserVoice(uv.id)} type="button" title="删除"><Trash2 size={11} /></button>
+                      <button className="am-uservoice-play" onClick={() => audioEngine.playTTSAudio(uv.src, 1.0)} type="button" title={t.preview}>▶</button>
+                      <button className="am-uservoice-del" onClick={() => handleDeleteUserVoice(uv.id)} type="button" title={t.delete}><Trash2 size={11} /></button>
                     </div>
                   ))}
                 </>
               )}
-              <div className="am-list-section-head">内置音色 (云端 TTS)</div>
+              <div className="am-list-section-head">{t.voiceBuiltin}</div>
               {VOICE_LIB.map(v => <VoiceRow key={v.id} item={v} onQuickAdd={onQuickAdd} />)}
               {/* v23-k: TTS 批量导入 — paste 多段台词 → 一次性多个 TTS clip + 可选随同字幕 */}
               <TTSBatchImport
@@ -4716,7 +5145,7 @@ function LeftPane({
                   type="button"
                   className={'am-fx-group-tab' + (fxGroup === 'all' ? ' is-active' : '')}
                   onClick={() => setFxGroup('all')}
-                >全部</button>
+                >{t.fxAll}</button>
                 {(['enter', 'emphasis', 'rhythm', 'exit', 'camera', 'move'] as FxGroup[]).map(g => {
                   const GIcon = FX_GROUP_META[g].icon;
                   return (
@@ -4727,24 +5156,24 @@ function LeftPane({
                       onClick={() => setFxGroup(g)}
                     >
                       <GIcon size={12} strokeWidth={2} />
-                      <span>{FX_GROUP_META[g].label}</span>
+                      <span>{lang === 'en' ? FX_GROUP_LABEL_EN[g] : FX_GROUP_META[g].label}</span>
                     </button>
                   );
                 })}
               </div>
               <button type="button" className="am-facecycle-btn" onClick={onFaceCycle}
-                title="变脸 — 给一个熊猫头配多张表情, 在它的时段里依次轮播 (溶解 / 快切)">
+                title={t.faceCycleTitle}>
                 <span className="am-facecycle-emoji">🎭</span>
-                <span className="am-facecycle-txt"><b>变脸 · 多表情轮播</b><small>给熊猫头配 2-6 张脸, 在它的时段里自动依次切换</small></span>
+                <span className="am-facecycle-txt"><b>{t.faceCycleTtl}</b><small>{t.faceCycleSub}</small></span>
               </button>
-              <p className="am-empty-line am-empty-hint">单击 / 拖到特效轨 · 选中片段后可绑定</p>
+              <p className="am-empty-line am-empty-hint">{t.fxHint}</p>
               {FX_LIB.filter(fx => fxGroup === 'all' || fx.group === fxGroup).map(fx => <FXRow key={fx.id} item={fx} onQuickAdd={onQuickAdd} />)}
             </div>
           )}
         </div>
       </div>
 
-      <div className="sidebar-hint">单击 / 双击 / 拖拽 都能添加到时间指针</div>
+      <div className="sidebar-hint">{t.addHint}</div>
     </aside>
   );
 }
@@ -4783,13 +5212,15 @@ function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {
   playhead: number;
   projectDuration: number;
 }) {
+  const lang = useUiLang();
+  const t = pickLang(TTS_BATCH_DICT, lang);
   const [text, setText] = useState('');
   const [voice, setVoice] = useState<string>(VOICE_LIB[0].id);
   // v23-k: 默认 true — 沙雕动画几乎一定要字幕跟配音同步
   const [withCaption, setWithCaption] = useState(true);
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const doImport = () => {
-    if (lines.length === 0) { toast.error('粘贴一段台词, 每行一条配音'); return; }
+    if (lines.length === 0) { toast.error(t('emptyErr')); return; }
     const ttsVoice = resolveVoiceId(voice);
     const clips: Clip[] = [];
     let cursor = Math.max(0, playhead);
@@ -4814,25 +5245,25 @@ function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {
       cursor = segEnd + gap;
     }
     onAddClipsBatch(clips);
-    toast.success(`✓ ${lines.length} 段台词 → ${withCaption ? '配音 + 字幕 配套生成, 已双向链接' : '配音 已加, auto-gen 中'}`);
+    toast.success(`✓ ${lines.length} ${t('linesSuffix')} → ${withCaption ? t('toastPair') : t('toastVoiceOnly')}`);
     setText('');
   };
   return (
     <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📋 批量导入台词稿</div>
+      <div className="am-cap-extra-head">{t('head')}</div>
       {/* v23-k: 二选一 大 chip 顶部 (默认配音+字幕一起加) */}
-      <div className="am-pair-mode-row" role="radiogroup" aria-label="生成模式">
+      <div className="am-pair-mode-row" role="radiogroup" aria-label={t('genMode')}>
         <button
           type="button"
           role="radio"
           aria-checked={withCaption}
           className={'am-pair-mode' + (withCaption ? ' is-active' : '')}
           onClick={() => setWithCaption(true)}
-          title="每行台词同时建 1 个配音 + 1 个字幕 · 双向链接"
+          title={t('pairTitle')}
         >
           <span className="am-pair-mode-ic">✨</span>
-          <span className="am-pair-mode-main">配音 + 字幕 一起加</span>
-          <span className="am-pair-mode-sub">推荐 · 双向链接</span>
+          <span className="am-pair-mode-main">{t('pairMain')}</span>
+          <span className="am-pair-mode-sub">{t('pairSub')}</span>
         </button>
         <button
           type="button"
@@ -4840,25 +5271,25 @@ function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {
           aria-checked={!withCaption}
           className={'am-pair-mode' + (!withCaption ? ' is-active' : '')}
           onClick={() => setWithCaption(false)}
-          title="仅配音轨"
+          title={t('voiceOnlyTitle')}
         >
           <span className="am-pair-mode-ic">🎙</span>
-          <span className="am-pair-mode-main">只加配音</span>
-          <span className="am-pair-mode-sub">按朗读时长接龙</span>
+          <span className="am-pair-mode-main">{t('voiceOnlyMain')}</span>
+          <span className="am-pair-mode-sub">{t('voiceOnlySub')}</span>
         </button>
       </div>
       <textarea
         className="am-input am-textarea am-cap-batch-input"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'家人们听我说\n这事儿挺离谱\n但我装得很淡定\n好家伙'}
+        placeholder={t('placeholder')}
         rows={5}
       />
       <div className="am-tts-batch-voice-row">
-        <label className="am-tts-batch-voice-label">音色:</label>
+        <label className="am-tts-batch-voice-label">{t('voiceLabel')}</label>
         <select className="am-input am-tts-batch-voice-select" value={voice} onChange={(e) => setVoice(e.target.value)}>
           {VOICE_LIB.map(v => (
-            <option key={v.id} value={v.id}>{v.name} ({v.lang === 'zh-CN' ? '中' : v.lang === 'en-US' ? 'US' : 'UK'})</option>
+            <option key={v.id} value={v.id}>{voiceName(v.id, v.name, lang)} ({voiceLangTag(v.lang, lang)})</option>
           ))}
         </select>
       </div>
@@ -4868,13 +5299,39 @@ function TTSBatchImport({ onAddClipsBatch, playhead, projectDuration }: {
         onClick={doImport}
         disabled={lines.length === 0}
       >
-        ✚ 加 {lines.length > 0 ? `${lines.length} 段` : ''} {withCaption ? '→ 配音+字幕' : '→ 配音'}
+        ✚ {t('addBtn')} {lines.length > 0 ? `${lines.length} ${t('linesSuffixShort')}` : ''} {withCaption ? t('arrowPair') : t('arrowVoice')}
       </button>
     </div>
   );
 }
+const TTS_BATCH_DICT = {
+  zh: {
+    emptyErr: '粘贴一段台词, 每行一条配音',
+    linesSuffix: '段台词', linesSuffixShort: '段',
+    toastPair: '配音 + 字幕 配套生成, 已双向链接', toastVoiceOnly: '配音 已加, auto-gen 中',
+    head: '📋 批量导入台词稿', genMode: '生成模式',
+    pairTitle: '每行台词同时建 1 个配音 + 1 个字幕 · 双向链接', pairMain: '配音 + 字幕 一起加', pairSub: '推荐 · 双向链接',
+    voiceOnlyTitle: '仅配音轨', voiceOnlyMain: '只加配音', voiceOnlySub: '按朗读时长接龙',
+    placeholder: '家人们听我说\n这事儿挺离谱\n但我装得很淡定\n好家伙',
+    voiceLabel: '音色:',
+    addBtn: '加', arrowPair: '→ 配音+字幕', arrowVoice: '→ 配音',
+  },
+  en: {
+    emptyErr: 'Paste some lines — one voice clip per line',
+    linesSuffix: 'lines', linesSuffixShort: 'lines',
+    toastPair: 'voice + captions generated as a pair, two-way linked', toastVoiceOnly: 'voice added, auto-gen running',
+    head: '📋 Batch import script', genMode: 'Generate mode',
+    pairTitle: 'Each line creates 1 voice + 1 caption · two-way linked', pairMain: 'Add voice + captions', pairSub: 'Recommended · linked',
+    voiceOnlyTitle: 'Voice track only', voiceOnlyMain: 'Voice only', voiceOnlySub: 'Chained by read length',
+    placeholder: 'Listen up folks\nthis is wild\nbut I stay chill\noh boy',
+    voiceLabel: 'Tone:',
+    addBtn: 'Add', arrowPair: '→ voice+captions', arrowVoice: '→ voice',
+  },
+} as const;
 
 function FXRow({ item, onQuickAdd }: { item: typeof FX_LIB[number]; onQuickAdd: (p: DragPayload) => void }) {
+  const lang = useUiLang();
+  const nm = fxName(item.id, item.name, lang);
   const payload: DragPayload = { type: 'fx', fx: item.id, defaultDuration: item.defaultDuration };
   const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     e.dataTransfer.setData('application/x-meme', JSON.stringify(payload));
@@ -4887,12 +5344,12 @@ function FXRow({ item, onQuickAdd }: { item: typeof FX_LIB[number]; onQuickAdd: 
       onDragStart={onDragStart}
       onClick={() => onQuickAdd(payload)}
       onDoubleClick={() => onQuickAdd(payload)}
-      title={`单击加入 / 拖到特效轨: ${item.name}`}
+      title={(lang === 'en' ? 'Click to add / drag to FX track: ' : '单击加入 / 拖到特效轨: ') + nm}
     >
       <div className="am-list-row-emoji am-list-row-fx-icon"><item.icon size={20} strokeWidth={1.8} /></div>
       <div className="am-list-row-meta">
-        <div className="am-list-row-name">{item.name}</div>
-        <div className="am-list-row-sub">{item.desc} · {item.defaultDuration}s</div>
+        <div className="am-list-row-name">{nm}</div>
+        <div className="am-list-row-sub">{fxDesc(item.id, item.desc, lang)} · {item.defaultDuration}s</div>
       </div>
     </div>
   );
@@ -4903,6 +5360,8 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
   onQuickAdd: (p: DragPayload) => void;
   onDelete?: () => void;
 }) {
+  const lang = useUiLang();
+  const dispName = bgmName(item.id, item.name, lang);
   // 内置 file 类 BGM (e.g. bgm-jigou): 没 durationSec → 运行时探测一次 cache (lazy useState init 已读 cache, useEffect 仅 async fetch)
   const [probedDur, setProbedDur] = useState<number | undefined>(item.durationSec ?? _bgmDurationCache.get(item.id));
   useEffect(() => {
@@ -4935,7 +5394,9 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
       if (item.kind === 'file' && item.src) { audioEngine.startUserBGM(item.src, 0.7); /* 循环, 等用户手动停 */ }
       else { audioEngine.startBGM(item, 0.6, 6); setTimeout(onDone, 6000); }
     });
-    toast(item.kind === 'file' ? `试听 ${item.name}` : `试听 ${item.name} 6 秒`);
+    toast(item.kind === 'file'
+      ? (lang === 'en' ? `Preview ${dispName}` : `试听 ${dispName}`)
+      : (lang === 'en' ? `Preview ${dispName} for 6s` : `试听 ${dispName} 6 秒`));
   };
   return (
     <div
@@ -4944,21 +5405,21 @@ function BGMRow({ item, onQuickAdd, onDelete }: {
       onDragStart={onDragStart}
       onClick={(e) => { if ((e.target as HTMLElement).closest('.am-list-play, .am-list-row-del')) return; onQuickAdd(payload); }}
       onDoubleClick={() => onQuickAdd(payload)}
-      title={`单击添加 / 拖到音乐轨: ${item.name}`}
+      title={(lang === 'en' ? 'Click to add / drag to music track: ' : '单击添加 / 拖到音乐轨: ') + dispName}
     >
       <div className="am-list-row-ic"><Music size={13} /></div>
       <div className="am-list-row-meta">
         <div className="am-list-row-name">
-          {item.name}
-          {item.kind === 'file' && <span className="am-bgm-tag-file">上传</span>}
+          {dispName}
+          {item.kind === 'file' && <span className="am-bgm-tag-file">{lang === 'en' ? 'Upload' : '上传'}</span>}
         </div>
-        <div className="am-list-row-sub">{item.mood} · {item.tempo > 0 ? `${item.tempo} BPM` : 'mp3'}</div>
+        <div className="am-list-row-sub">{bgmMood(item.id, item.mood, lang)} · {item.tempo > 0 ? `${item.tempo} BPM` : 'mp3'}</div>
       </div>
-      <button className={'am-list-play' + (previewing ? ' is-playing' : '')} onClick={handlePreview} title={previewing ? '停止试听' : '试听'}>
+      <button className={'am-list-play' + (previewing ? ' is-playing' : '')} onClick={handlePreview} title={previewing ? (lang === 'en' ? 'Stop preview' : '停止试听') : (lang === 'en' ? 'Preview' : '试听')}>
         {previewing ? <Pause size={10} /> : <Play size={10} />}
       </button>
       {onDelete && (
-        <button className="am-list-row-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="删除">
+        <button className="am-list-row-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title={lang === 'en' ? 'Delete' : '删除'}>
           <X size={10} />
         </button>
       )}
@@ -4979,25 +5440,27 @@ function VoiceDiagBtn() {
       }
     }).catch(() => {});
   }, []);
+  const lang = useUiLang();
+  const t = pickLang(VOICE_DIAG_DICT, lang);
   const save = (url: string) => {
     setTTSProxyURL(url);
     void idbSet(AM_TTS_PROXY_IDB_KEY, url).catch(() => {});
-    toast.success(url ? '已保存代理 · 试听走真 Neural' : '已清空 · 退回浏览器 SS');
+    toast.success(url ? t('savedProxy') : t('clearedProxy'));
   };
   const test = async () => {
     if (testing || !proxyInput.trim()) return;
     setTesting(true);
     setTTSProxyURL(proxyInput.trim());
-    const tid = toast.loading('测试代理 · 拿 Yunjian 男声样本…');
+    const tid = toast.loading(t('testing'));
     try {
       const start = performance.now();
       const dataUrl = await fetchTTSFromProxy('我是真的男声', 'zh-CN-YunjianNeural', 0, 0);
       audioEngine.playTTSAudio(dataUrl, 1.0);
       toast.dismiss(tid);
-      toast.success(`✅ 代理通 · ${Math.round(performance.now() - start)}ms · 应听到 Yunjian 真男声`);
+      toast.success(`${t('proxyOk')} · ${Math.round(performance.now() - start)}ms · ${t('proxyOkTail')}`);
     } catch (e) {
       toast.dismiss(tid);
-      toast.error(`❌ 代理失败: ${(e as Error).message}`);
+      toast.error(`${t('proxyFail')}: ${(e as Error).message}`);
     } finally {
       setTesting(false);
     }
@@ -5005,9 +5468,9 @@ function VoiceDiagBtn() {
   // 生产端: 不展示自部署代理配置 (太技术), 改成引导提示 (上传自己的 mp3 等)
   const showMoreVoices = async () => {
     await showDialog({
-      title: '想要更多配音音色?',
-      message: '浏览器自带配音只有 1 个女声。想要更多 / 更像抖音的配音:\n\n①「上传配音」(下面): 上传你自己的 mp3 / wav 直接当配音 — 最简单, 会保存、可反复用。\n② 去 TTSMaker.cn 网页一键生成真 Neural mp3 (含男声 / 萝莉 / 晓晓), 下载后上传。',
-      confirmText: '知道了',
+      title: t('moreVoicesTitle'),
+      message: t('moreVoicesMsg'),
+      confirmText: t('gotIt'),
     });
   };
   return (
@@ -5018,39 +5481,49 @@ function VoiceDiagBtn() {
           href={TTSMAKER_URL}
           target="_blank"
           rel="noopener noreferrer"
-          title="网页一键生成真 Neural mp3 (含 Yunjian 男声), 下载后用「上传配音」上传"
+          title={t('ttsmakerTitle')}
         >
-          🌐 TTSMaker.cn 生成 mp3 ↗
+          {t('ttsmaker')}
         </a>
         <button
           className={'am-voice-diag-cfg' + (import.meta.env.DEV && _userTTSProxyURL ? ' is-set' : '')}
           onClick={() => { if (import.meta.env.DEV) setCfgOpen(true); else void showMoreVoices(); }}
           type="button"
-          title="想要更多配音音色 (上传自己的 mp3 等)"
+          title={t('moreVoicesBtnTitle')}
         >
-          {import.meta.env.DEV ? '⚙️' : '💡 更多'}
+          {import.meta.env.DEV ? '⚙️' : t('more')}
         </button>
       </div>
       {import.meta.env.DEV && cfgOpen && (
         <div className="am-popover-backdrop" onClick={() => setCfgOpen(false)}>
           <div className="am-popover am-tts-cfg win7-panel" onClick={(e) => e.stopPropagation()}>
             <div className="am-popover-head">
-              <span>⚙️ TTS 代理 (真 Neural)</span>
+              <span>{t('proxyPanelTitle')}</span>
               <button className="am-popover-close" onClick={() => setCfgOpen(false)} type="button"><X size={14} /></button>
             </div>
             <div className="am-popover-body">
               <p className="am-tts-cfg-tip">
-                想要抖音同款<b>真男声 / 萝莉 / 晓晓真 Neural</b>? 自部署一个开源 edge-tts 代理 (永久免费), 填到下面即可。浏览器原生只有 1 个女声。
+                {lang === 'en'
+                  ? <>Want TikTok-style <b>real male / loli / Xiaoxiao Neural</b> voices? Self-host an open-source edge-tts proxy (free forever) and paste it below. The browser only has 1 female voice natively.</>
+                  : <>想要抖音同款<b>真男声 / 萝莉 / 晓晓真 Neural</b>? 自部署一个开源 edge-tts 代理 (永久免费), 填到下面即可。浏览器原生只有 1 个女声。</>}
               </p>
               <ul className="am-tts-cfg-tip">
-                <li><b>① 一键部署 (最简单)</b>: 打开 <a href="https://github.com/wangwangit/tts" target="_blank" rel="noopener noreferrer">wangwangit/tts</a> → 按 README 一键部署到 Cloudflare Workers, 点几下就出 URL。</li>
-                <li><b>② 或自建服务器</b>: <a href="https://github.com/travisvn/openai-edge-tts" target="_blank" rel="noopener noreferrer">openai-edge-tts</a> (Docker)。</li>
-                <li><b>③ 把得到的地址</b>粘到下面 (示例 <code>https://your.workers.dev</code>) → 点 🔍 测听 验证 → 保存。OpenAI POST 和 GET ?text= 两种 worker 格式都支持。</li>
+                {lang === 'en' ? (<>
+                  <li><b>① One-click deploy (easiest)</b>: open <a href="https://github.com/wangwangit/tts" target="_blank" rel="noopener noreferrer">wangwangit/tts</a> → follow the README to one-click deploy to Cloudflare Workers; a URL pops out in a few clicks.</li>
+                  <li><b>② Or self-host</b>: <a href="https://github.com/travisvn/openai-edge-tts" target="_blank" rel="noopener noreferrer">openai-edge-tts</a> (Docker).</li>
+                  <li><b>③ Paste the URL</b> below (e.g. <code>https://your.workers.dev</code>) → click 🔍 Test → Save. Both the OpenAI POST and GET ?text= worker formats are supported.</li>
+                </>) : (<>
+                  <li><b>① 一键部署 (最简单)</b>: 打开 <a href="https://github.com/wangwangit/tts" target="_blank" rel="noopener noreferrer">wangwangit/tts</a> → 按 README 一键部署到 Cloudflare Workers, 点几下就出 URL。</li>
+                  <li><b>② 或自建服务器</b>: <a href="https://github.com/travisvn/openai-edge-tts" target="_blank" rel="noopener noreferrer">openai-edge-tts</a> (Docker)。</li>
+                  <li><b>③ 把得到的地址</b>粘到下面 (示例 <code>https://your.workers.dev</code>) → 点 🔍 测听 验证 → 保存。OpenAI POST 和 GET ?text= 两种 worker 格式都支持。</li>
+                </>)}
               </ul>
               <p className="am-tts-cfg-tip" style={{ opacity: 0.55, fontSize: '11px', marginTop: '4px' }}>
-                (为啥要自部署: 微软官方 <code>speech.platform.bing.com</code> 已全球 403 下线, 不带 key 的直连都失败。)
+                {lang === 'en'
+                  ? <>(Why self-host: Microsoft's official <code>speech.platform.bing.com</code> now returns 403 worldwide; key-less direct connections all fail.)</>
+                  : <>(为啥要自部署: 微软官方 <code>speech.platform.bing.com</code> 已全球 403 下线, 不带 key 的直连都失败。)</>}
               </p>
-              <Field label="TTS HTTP 代理 URL">
+              <Field label={t('proxyUrlLabel')}>
                 <input
                   type="text"
                   className="am-input"
@@ -5060,17 +5533,17 @@ function VoiceDiagBtn() {
                 />
               </Field>
               <div className="am-row" style={{ gap: 8, marginTop: 10 }}>
-                <button className="am-tb-btn" onClick={() => { setProxyInput(''); save(''); }} type="button">清空</button>
+                <button className="am-tb-btn" onClick={() => { setProxyInput(''); save(''); }} type="button">{t('clear')}</button>
                 <button className="am-tb-btn" onClick={test} disabled={testing || !proxyInput.trim()} type="button">
-                  {testing ? '测试中…' : '🔍 测听'}
+                  {testing ? t('testingShort') : t('testBtn')}
                 </button>
                 <div className="am-toolbar-spacer" />
-                <button className="am-tb-btn" onClick={() => setCfgOpen(false)} type="button">取消</button>
+                <button className="am-tb-btn" onClick={() => setCfgOpen(false)} type="button">{t('cancel')}</button>
                 <button
                   className="am-tb-btn am-tb-btn-primary"
                   onClick={() => { save(proxyInput.trim()); setCfgOpen(false); }}
                   type="button"
-                >保存</button>
+                >{t('save')}</button>
               </div>
             </div>
           </div>
@@ -5079,8 +5552,37 @@ function VoiceDiagBtn() {
     </>
   );
 }
+const VOICE_DIAG_DICT = {
+  zh: {
+    savedProxy: '已保存代理 · 试听走真 Neural', clearedProxy: '已清空 · 退回浏览器 SS',
+    testing: '测试代理 · 拿 Yunjian 男声样本…',
+    proxyOk: '✅ 代理通', proxyOkTail: '应听到 Yunjian 真男声', proxyFail: '❌ 代理失败',
+    moreVoicesTitle: '想要更多配音音色?',
+    moreVoicesMsg: '浏览器自带配音只有 1 个女声。想要更多 / 更像抖音的配音:\n\n①「上传配音」(下面): 上传你自己的 mp3 / wav 直接当配音 — 最简单, 会保存、可反复用。\n② 去 TTSMaker.cn 网页一键生成真 Neural mp3 (含男声 / 萝莉 / 晓晓), 下载后上传。',
+    gotIt: '知道了',
+    ttsmakerTitle: '网页一键生成真 Neural mp3 (含 Yunjian 男声), 下载后用「上传配音」上传',
+    ttsmaker: '🌐 TTSMaker.cn 生成 mp3 ↗',
+    moreVoicesBtnTitle: '想要更多配音音色 (上传自己的 mp3 等)', more: '💡 更多',
+    proxyPanelTitle: '⚙️ TTS 代理 (真 Neural)', proxyUrlLabel: 'TTS HTTP 代理 URL',
+    clear: '清空', testBtn: '🔍 测听', testingShort: '测试中…', cancel: '取消', save: '保存',
+  },
+  en: {
+    savedProxy: 'Proxy saved · previews use real Neural', clearedProxy: 'Cleared · back to browser SS',
+    testing: 'Testing proxy · fetching Yunjian male sample…',
+    proxyOk: '✅ Proxy works', proxyOkTail: 'you should hear the real Yunjian male voice', proxyFail: '❌ Proxy failed',
+    moreVoicesTitle: 'Want more voices?',
+    moreVoicesMsg: 'The browser only has 1 built-in female voice. For more / more TikTok-like voices:\n\n① "Upload voice" (below): upload your own mp3 / wav to use directly as a voice — easiest, saved, reusable.\n② Go to TTSMaker.cn to one-click generate a real Neural mp3 (male / loli / Xiaoxiao), download, then upload.',
+    gotIt: 'Got it',
+    ttsmakerTitle: 'One-click generate a real Neural mp3 online (incl. Yunjian male); download then upload via "Upload voice"',
+    ttsmaker: '🌐 Generate mp3 on TTSMaker.cn ↗',
+    moreVoicesBtnTitle: 'Want more voices (upload your own mp3, etc.)', more: '💡 More',
+    proxyPanelTitle: '⚙️ TTS proxy (real Neural)', proxyUrlLabel: 'TTS HTTP proxy URL',
+    clear: 'Clear', testBtn: '🔍 Test', testingShort: 'Testing…', cancel: 'Cancel', save: 'Save',
+  },
+} as const;
 
 function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: DragPayload) => void }) {
+  const lang = useUiLang();
   const pk = usePreviewKey();
   const pkey = 'voice:' + item.id;
   const previewing = pk === pkey;
@@ -5102,18 +5604,18 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
       onDragStart={onDragStart}
       onClick={(e) => { if ((e.target as HTMLElement).closest('.am-list-play')) return; onQuickAdd(payload); }}
       onDoubleClick={() => onQuickAdd(payload)}
-      title={`单击添加 / 拖到配音轨: ${item.name}`}
+      title={(lang === 'en' ? 'Click to add / drag to voice track: ' : '单击添加 / 拖到配音轨: ') + voiceName(item.id, item.name, lang)}
     >
       <div className="am-list-row-emoji am-list-row-voice-icon">
         {item.icon ? <item.icon size={20} strokeWidth={1.8} /> : <span>{item.emoji}</span>}
       </div>
       <div className="am-list-row-meta">
         <div className="am-list-row-name">
-          {item.name}
+          {voiceName(item.id, item.name, lang)}
           <span className="am-voice-gender">{item.gender === 'male' ? '♂' : '♀'}</span>
-          <span className="am-voice-lang">{item.lang === 'zh-CN' ? '中' : item.lang === 'en-US' ? 'US' : 'UK'}</span>
+          <span className="am-voice-lang">{voiceLangTag(item.lang, lang)}</span>
         </div>
-        <div className="am-list-row-sub">{item.desc}</div>
+        <div className="am-list-row-sub">{lang === 'en' ? (VOICE_DESC_EN[item.id] ?? item.desc) : item.desc}</div>
       </div>
       <button
         className="am-list-play"
@@ -5147,12 +5649,14 @@ function VoiceRow({ item, onQuickAdd }: { item: VoicePreset; onQuickAdd: (p: Dra
               if (!isCurrent()) return;
               setVoLoading(false);
               // 3. 云端都挂 → SS 兜底
-              toast.error(`云端试听失败 (${(err as Error).message.slice(0, 40)}), 退化浏览器 SS`);
+              toast.error(lang === 'en'
+                ? `Cloud preview failed (${(err as Error).message.slice(0, 40)}), falling back to browser SS`
+                : `云端试听失败 (${(err as Error).message.slice(0, 40)}), 退化浏览器 SS`);
               const u = audioEngine.previewVoice(item); if (u) u.addEventListener('end', onDone); else onDone();
             }
           });
         }}
-        title={previewing ? '停止试听' : `试听 (${item.preferredEngine || 'youdao'} 云端) · 跟时间轴 audio 一致`}
+        title={previewing ? (lang === 'en' ? 'Stop preview' : '停止试听') : (lang === 'en' ? `Preview (${item.preferredEngine || 'youdao'} cloud) · matches timeline audio` : `试听 (${item.preferredEngine || 'youdao'} 云端) · 跟时间轴 audio 一致`)}
       >
         {voLoading ? <Loader2 size={10} style={{ animation: 'am-spin 0.8s linear infinite' }} /> : previewing ? <Pause size={10} /> : <Play size={10} />}
       </button>
@@ -5171,6 +5675,7 @@ function SceneMiniPreview({ clip, canvasSize, onTransformLive, onBeginDrag, onEn
   onBeginDrag: () => void;
   onEndDrag: () => void;
 }) {
+  const lang = useUiLang();
   const tr = clip.transform ?? DEFAULT_TRANSFORM;
   const scale = tr.scale;
   // mini 尺寸 (110px 宽, 16:9)
@@ -5222,10 +5727,10 @@ function SceneMiniPreview({ clip, canvasSize, onTransformLive, onBeginDrag, onEn
           className="am-scene-mini-viewport"
           style={{ left: vpLeft, top: vpTop, width: vpW, height: vpH }}
           onPointerDown={startDrag}
-          title="拖动调整镜头位置"
+          title={lang === 'en' ? 'Drag to adjust camera position' : '拖动调整镜头位置'}
         />
       </div>
-      <div className="am-scene-mini-label">{scale.toFixed(1)}x · 镜头</div>
+      <div className="am-scene-mini-label">{scale.toFixed(1)}x · {lang === 'en' ? 'Camera' : '镜头'}</div>
     </div>
   );
 }
@@ -5233,6 +5738,38 @@ function SceneMiniPreview({ clip, canvasSize, onTransformLive, onBeginDrag, onEn
 // ============================================================
 // PREVIEW PANE — stage-img 居中布局 + 选中框紧贴 + 接 drop
 // ============================================================
+const PREVIEW_PANE_DICT = {
+  zh: {
+    preview: '预览',
+    layersTitle: (n: number) => `同时刻 ${n} 个画面图层`, layers: '图层', dragMove: '拖动调整位置',
+    emptyText: '从左边拖个素材进来', emptySub: '单击 / 双击 / 拖动 都行',
+    genGifTitle: '一键生成 4 段 GIF (随机熊猫+字幕, 无声音)',
+    genVideoTitle: '一键生成 4 段沙雕作品 (随机熊猫+台词+配音+BGM)',
+    genBtn: '一键生成', draftsTitle: '打开草稿管理 (载入之前的作品)', drafts: '草稿',
+    shortcutsTitle: '完整快捷键列表', shortcuts: '快捷键',
+    dragRotate: '拖动旋转 (Shift 锁 15°)', dragScale: '拖动缩放', dragFont: '拖动改字号',
+    markerA: '起点 A · 拖到画面初始位置', markerB: '终点 B · 拖到画面终止位置',
+    emptyCaption: '空字幕',
+    laneTag: (n: number) => `画面 × ${n}`,
+    toStart: '跳到开头', playPause: '播放/暂停 (Space)', forward1s: '前进 1s',
+    transportKbd: 'Space 播放 · S 切分 · ←→ 微调 · Ctrl+S 存草稿',
+  },
+  en: {
+    preview: 'Preview',
+    layersTitle: (n: number) => `${n} image layer(s) at this moment`, layers: 'layers', dragMove: 'Drag to reposition',
+    emptyText: 'Drag a material in from the left', emptySub: 'Click / double-click / drag all work',
+    genGifTitle: 'One-click generate 4 GIF clips (random panda + captions, silent)',
+    genVideoTitle: 'One-click generate 4 silly clips (random panda + lines + voice + BGM)',
+    genBtn: 'Generate', draftsTitle: 'Open draft manager (load a previous project)', drafts: 'Drafts',
+    shortcutsTitle: 'Full shortcut list', shortcuts: 'Shortcuts',
+    dragRotate: 'Drag to rotate (Shift locks 15°)', dragScale: 'Drag to scale', dragFont: 'Drag to resize text',
+    markerA: 'Start A · drag to the initial position', markerB: 'End B · drag to the final position',
+    emptyCaption: 'Empty caption',
+    laneTag: (n: number) => `Image × ${n}`,
+    toStart: 'Jump to start', playPause: 'Play/Pause (Space)', forward1s: 'Forward 1s',
+    transportKbd: 'Space play · S split · ←→ nudge · Ctrl+S save draft',
+  },
+} as const;
 function PreviewPane({
   clips, lanes, time, duration, isPlaying, selectedId,
   onSelect, onPlayPause, onSeek, onTransformLive, onCaptionTextLive, onUpdateClipLive, onUpdateClipCommit, onBeginDrag, onEndDrag, onQuickAdd,
@@ -5264,6 +5801,8 @@ function PreviewPane({
   aspect: AspectId;
   setAspect: (a: AspectId) => void;
 }) {
+  const lang = useUiLang();
+  const t = PREVIEW_PANE_DICT[lang];
   const isGifMode = mode === 'gif';
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
@@ -5522,12 +6061,12 @@ function PreviewPane({
   return (
     <section className="am-preview-pane">
       <div className="am-preview-head">
-        <span className="am-preview-title">预览</span>
-        <span className="am-preview-layers" title={`同时刻 ${activeImageClips.length} 个画面图层`}>
-          🪟 {activeImageClips.length} 图层
+        <span className="am-preview-title">{t.preview}</span>
+        <span className="am-preview-layers" title={t.layersTitle(activeImageClips.length)}>
+          🪟 {activeImageClips.length} {t.layers}
         </span>
         {selectedImageOnStage && (
-          <span className="am-preview-edit-tip"><Move size={11} /> 拖动调整位置</span>
+          <span className="am-preview-edit-tip"><Move size={11} /> {t.dragMove}</span>
         )}
         <div className="am-toolbar-spacer" />
         <div className="am-aspect-tabs">
@@ -5554,8 +6093,8 @@ function PreviewPane({
           {clips.filter(c => c.trackId === 'image').length === 0 && (
             <div className="am-preview-empty">
               <div className="am-preview-emoji">🐼</div>
-              <div className="am-preview-empty-text">从左边拖个素材进来</div>
-              <div className="am-preview-empty-sub">单击 / 双击 / 拖动 都行</div>
+              <div className="am-preview-empty-text">{t.emptyText}</div>
+              <div className="am-preview-empty-sub">{t.emptySub}</div>
               {(onRandomize || onOpenShortcuts || onToggleDraftPopover) && (
                 <div className="am-preview-empty-cta">
                   {onRandomize && (
@@ -5563,21 +6102,19 @@ function PreviewPane({
                       type="button"
                       className="am-preview-empty-btn am-preview-empty-btn-primary"
                       onClick={onRandomize}
-                      title={isGifMode
-                        ? '一键生成 4 段 GIF (随机熊猫+字幕, 无声音)'
-                        : '一键生成 4 段沙雕作品 (随机熊猫+台词+配音+BGM)'}
+                      title={isGifMode ? t.genGifTitle : t.genVideoTitle}
                     >
-                      <Shuffle size={13} strokeWidth={2.2} /> 🎲 一键生成{isGifMode ? ' (GIF)' : ''}
+                      <Shuffle size={13} strokeWidth={2.2} /> 🎲 {t.genBtn}{isGifMode ? ' (GIF)' : ''}
                     </button>
                   )}
                   {onToggleDraftPopover && (
-                    <button type="button" className="am-preview-empty-btn" onClick={onToggleDraftPopover} title="打开草稿管理 (载入之前的作品)">
-                      <FolderOpen size={13} strokeWidth={2.2} /> 草稿
+                    <button type="button" className="am-preview-empty-btn" onClick={onToggleDraftPopover} title={t.draftsTitle}>
+                      <FolderOpen size={13} strokeWidth={2.2} /> {t.drafts}
                     </button>
                   )}
                   {onOpenShortcuts && (
-                    <button type="button" className="am-preview-empty-btn" onClick={onOpenShortcuts} title="完整快捷键列表">
-                      <Keyboard size={13} strokeWidth={2.2} /> 快捷键
+                    <button type="button" className="am-preview-empty-btn" onClick={onOpenShortcuts} title={t.shortcutsTitle}>
+                      <Keyboard size={13} strokeWidth={2.2} /> {t.shortcuts}
                     </button>
                   )}
                 </div>
@@ -5635,8 +6172,8 @@ function PreviewPane({
                         <>
                           <div className="am-stage-frame" />
                           <div className="am-stage-rotstem" />
-                          <div className="am-stage-handle am-stage-handle-rot" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title="拖动旋转 (Shift 锁 15°)"><RotateCw size={9} strokeWidth={2.6} /></div>
-                          <div className="am-stage-handle am-stage-handle-se" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }} title="拖动缩放" />
+                          <div className="am-stage-handle am-stage-handle-rot" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }} title={t.dragRotate}><RotateCw size={9} strokeWidth={2.6} /></div>
+                          <div className="am-stage-handle am-stage-handle-se" onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }} title={t.dragScale} />
                         </>
                       )}
                     </div>
@@ -5731,12 +6268,12 @@ function PreviewPane({
                     <div
                       className="am-stage-handle am-stage-handle-rot"
                       onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'rotate'); }}
-                      title="拖动旋转 (Shift 锁 15°)"
+                      title={t.dragRotate}
                     ><RotateCw size={9} strokeWidth={2.6} /></div>
                     <div
                       className="am-stage-handle am-stage-handle-se"
                       onPointerDown={(e) => { e.stopPropagation(); startStageDrag(e, c, 'scale'); }}
-                      title="拖动缩放"
+                      title={t.dragScale}
                     />
                   </>
                 )}
@@ -5785,17 +6322,17 @@ function PreviewPane({
                   className="am-move-marker am-move-marker-a"
                   style={{ left: `${ax}%`, top: `${ay}%` }}
                   onPointerDown={(e) => startFXMoveMarkerDrag(e, selFx, 'start')}
-                  title="起点 A · 拖到画面初始位置"
+                  title={t.markerA}
                 >A</div>
                 <div
                   className="am-move-marker am-move-marker-b"
                   style={{ left: `${bx}%`, top: `${by}%` }}
                   onPointerDown={(e) => startFXMoveMarkerDrag(e, selFx, 'end')}
-                  title="终点 B · 拖到画面终止位置"
+                  title={t.markerB}
                 >B</div>
                 {sameSpot && (
                   <div className="am-move-hint-bubble" style={{ left: `${ax}%`, top: `${ay}%` }}>
-                    起=终 · 拖 <strong>B</strong> 设终点位置
+                    {lang === 'en' ? <>Start=End · drag <strong>B</strong> to set the end position</> : <>起=终 · 拖 <strong>B</strong> 设终点位置</>}
                   </div>
                 )}
               </div>
@@ -5852,31 +6389,31 @@ function PreviewPane({
                     style={{ fontSize: Math.min(cFontSize, 48), color: cColor }}
                   />
                 ) : (
-                  ent.visibleText || (c.text ? '' : '空字幕')
+                  ent.visibleText || (c.text ? '' : t.emptyCaption)
                 )}
                 {isSel && !isEditing && (
                   <div className="am-stage-handle am-stage-handle-se am-cap-handle-se"
-                    onPointerDown={(e) => { e.stopPropagation(); startCaptionResize(e, c); }} title="拖动改字号" />
+                    onPointerDown={(e) => { e.stopPropagation(); startCaptionResize(e, c); }} title={t.dragFont} />
                 )}
               </div>
             );
           })}
-          {lanes.image > 1 && <div className="am-preview-lane-tag">画面 × {lanes.image}</div>}
+          {lanes.image > 1 && <div className="am-preview-lane-tag">{t.laneTag(lanes.image)}</div>}
         </div>
       </div>
 
       <div className="am-transport">
-        <button className="am-step-btn" onClick={() => onSeek(0)} title="跳到开头"><SkipBack size={14} /></button>
-        <button className="am-play-btn" onClick={onPlayPause} title="播放/暂停 (Space)">
+        <button className="am-step-btn" onClick={() => onSeek(0)} title={t.toStart}><SkipBack size={14} /></button>
+        <button className="am-play-btn" onClick={onPlayPause} title={t.playPause}>
           {isPlaying ? <Pause size={16} /> : <Play size={16} />}
         </button>
-        <button className="am-step-btn" onClick={() => onSeek(Math.min(time + 1, duration))} title="前进 1s"><SkipForward size={14} /></button>
+        <button className="am-step-btn" onClick={() => onSeek(Math.min(time + 1, duration))} title={t.forward1s}><SkipForward size={14} /></button>
         <div className="am-transport-time">
           <span>{formatTC(time)}</span>
           <span className="am-transport-total">/ {formatTC(duration)}</span>
         </div>
         <div className="am-toolbar-spacer" />
-        <div className="am-transport-kbd">Space 播放 · S 切分 · ←→ 微调 · Ctrl+S 存草稿</div>
+        <div className="am-transport-kbd">{t.transportKbd}</div>
       </div>
     </section>
   );
@@ -5910,6 +6447,8 @@ function RightPane({
   onClipContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
   onBindToggle: (faceId: string) => void;
 }) {
+  const lang = useUiLang();
+  const t = RIGHT_PANE_DICT[lang];
   return (
     <aside className="desktop-sidebar-right am-pane-right">
       <LayerPanel
@@ -5924,18 +6463,18 @@ function RightPane({
       <div className="sidebar-section win7-panel am-right-section">
         <div className="sidebar-section-header">
           <span className="sidebar-icon">⚙️</span>
-          <span className="sidebar-label">属性面板</span>
-          {clip && <span className="am-track-tag">{TRACK_META[clip.trackId].name} {clip.lane + 1}</span>}
+          <span className="sidebar-label">{t.propsPanel}</span>
+          {clip && <span className="am-track-tag">{trackName(clip.trackId, lang)} {clip.lane + 1}</span>}
         </div>
         {!clip ? (
           <div className="am-inspector-empty">
             <Settings size={26} strokeWidth={1.5} />
-            <div className="am-inspector-empty-ttl">选中时间轴或预览片段</div>
-            <div className="am-inspector-empty-hint">在此调整属性 · 右键片段看完整菜单</div>
+            <div className="am-inspector-empty-ttl">{t.emptyTtl}</div>
+            <div className="am-inspector-empty-hint">{t.emptyHint}</div>
             <div className="am-shortcut-hint am-shortcut-hint-minimal">
-              <div><kbd>Space</kbd> 播放 · <kbd>S</kbd> 切分 · <kbd>Del</kbd> 删除</div>
-              <div><kbd>{fmtShortcut('Mod+Z')}</kbd> 撤销 · <kbd>{fmtShortcut('Mod+S')}</kbd> 存稿</div>
-              <div className="am-shortcut-hint-more">⌨️ 完整快捷键 → 顶部"快捷键"按钮</div>
+              <div><kbd>Space</kbd> {t.kbdPlay} · <kbd>S</kbd> {t.kbdSplit} · <kbd>Del</kbd> {t.kbdDelete}</div>
+              <div><kbd>{fmtShortcut('Mod+Z')}</kbd> {t.kbdUndo} · <kbd>{fmtShortcut('Mod+S')}</kbd> {t.kbdSave}</div>
+              <div className="am-shortcut-hint-more">{t.kbdMore}</div>
             </div>
           </div>
         ) : (
@@ -5947,7 +6486,7 @@ function RightPane({
                   : <Music size={14} />}
               </div>
               <div className="am-clip-card-meta">
-                <div className="am-clip-card-name">{clipDisplayName(clip)}</div>
+                <div className="am-clip-card-name">{clipDisplayName(clip, lang)}</div>
                 <div className="am-clip-card-sub">
                   {clip.start.toFixed(2)}s → {clip.end.toFixed(2)}s · {(clip.end - clip.start).toFixed(2)}s
                 </div>
@@ -5955,30 +6494,30 @@ function RightPane({
             </div>
 
             <div className="am-quick-actions">
-              <button className="am-quick-btn" onClick={onSplit} title="切分 (S)" disabled={playhead <= clip.start + 0.1 || playhead >= clip.end - 0.1}>
-                <Scissors size={12} /> <span>切分</span>
+              <button className="am-quick-btn" onClick={onSplit} title={t.splitTitle} disabled={playhead <= clip.start + 0.1 || playhead >= clip.end - 0.1}>
+                <Scissors size={12} /> <span>{t.split}</span>
               </button>
-              <button className="am-quick-btn" onClick={onDuplicate} title="复制 (Ctrl+D)"><CopyIcon size={12} /> <span>复制</span></button>
-              <button className="am-quick-btn" onClick={() => onMoveLane(-1)} title="移到上一轨" disabled={clip.lane === 0}>
-                <ChevronUp size={12} /> <span>上轨</span>
+              <button className="am-quick-btn" onClick={onDuplicate} title={t.dupTitle}><CopyIcon size={12} /> <span>{t.dup}</span></button>
+              <button className="am-quick-btn" onClick={() => onMoveLane(-1)} title={t.moveUpTitle} disabled={clip.lane === 0}>
+                <ChevronUp size={12} /> <span>{t.laneUp}</span>
               </button>
-              <button className="am-quick-btn" onClick={() => onMoveLane(1)} title="移到下一轨 (越界自动新建)">
-                <ChevronDown size={12} /> <span>下轨</span>
+              <button className="am-quick-btn" onClick={() => onMoveLane(1)} title={t.moveDownTitle}>
+                <ChevronDown size={12} /> <span>{t.laneDown}</span>
               </button>
             </div>
 
-            <Field label="时间">
+            <Field label={t.time}>
               <div className="am-row">
-                <NumberInput label="开始" value={clip.start} step={0.1}
+                <NumberInput label={t.start} value={clip.start} step={0.1}
                   onChange={(v) => onUpdate({ start: clamp(v, 0, clip.end - 0.2) })} />
-                <NumberInput label="结束" value={clip.end} step={0.1}
+                <NumberInput label={t.end} value={clip.end} step={0.1}
                   onChange={(v) => onUpdate({ end: clamp(v, clip.start + 0.2, project.duration) })} />
               </div>
             </Field>
             {/* v23-b: 图层 (lane) — 用户直接改 image/caption/fx/tts/bgm 各自的 lane index */}
-            <Field label={`图层 · ${TRACK_META[clip.trackId].name} ${clip.lane + 1}`}>
+            <Field label={`${t.layer} · ${trackName(clip.trackId, lang)} ${clip.lane + 1}`}>
               <div className="am-lane-row">
-                <button className="am-lane-btn" onClick={() => onMoveLane(-1)} disabled={clip.lane === 0} title="移到上一轨">
+                <button className="am-lane-btn" onClick={() => onMoveLane(-1)} disabled={clip.lane === 0} title={t.moveUpTitle}>
                   <ChevronUp size={12} />
                 </button>
                 <select
@@ -5991,14 +6530,14 @@ function RightPane({
                   }}
                 >
                   {Array.from({ length: project.lanes[clip.trackId] + 1 }).map((_, i) => (
-                    <option key={i} value={i}>{TRACK_META[clip.trackId].name} {i + 1}{i === project.lanes[clip.trackId] ? ' (新建轨)' : ''}</option>
+                    <option key={i} value={i}>{trackName(clip.trackId, lang)} {i + 1}{i === project.lanes[clip.trackId] ? t.newTrackSuffix : ''}</option>
                   ))}
                 </select>
-                <button className="am-lane-btn" onClick={() => onMoveLane(1)} title="移到下一轨 (越界自动新建)">
+                <button className="am-lane-btn" onClick={() => onMoveLane(1)} title={t.moveDownTitle}>
                   <ChevronDown size={12} />
                 </button>
               </div>
-              <div className="am-field-sublabel">高 lane 盖低 lane · 越界下移自动建新轨</div>
+              <div className="am-field-sublabel">{t.laneHint}</div>
             </Field>
 
             {clip.trackId === 'image'   && <ImageProps   clip={clip} onUpdate={onUpdate} onTransform={onTransform} onBindToggle={onBindToggle} />}
@@ -6008,7 +6547,7 @@ function RightPane({
             {clip.trackId === 'bgm'     && <BGMProps     clip={clip} onUpdate={onUpdate} />}
 
             <button className="am-delete-btn" onClick={onDelete}>
-              <Trash2 size={13} /> <span>删除片段</span>
+              <Trash2 size={13} /> <span>{t.deleteClip}</span>
             </button>
           </div>
         )}
@@ -6016,6 +6555,30 @@ function RightPane({
     </aside>
   );
 }
+const RIGHT_PANE_DICT = {
+  zh: {
+    propsPanel: '属性面板',
+    emptyTtl: '选中时间轴或预览片段', emptyHint: '在此调整属性 · 右键片段看完整菜单',
+    kbdPlay: '播放', kbdSplit: '切分', kbdDelete: '删除', kbdUndo: '撤销', kbdSave: '存稿',
+    kbdMore: '⌨️ 完整快捷键 → 顶部"快捷键"按钮',
+    splitTitle: '切分 (S)', split: '切分', dupTitle: '复制 (Ctrl+D)', dup: '复制',
+    moveUpTitle: '移到上一轨', laneUp: '上轨', moveDownTitle: '移到下一轨 (越界自动新建)', laneDown: '下轨',
+    time: '时间', start: '开始', end: '结束',
+    layer: '图层', newTrackSuffix: ' (新建轨)', laneHint: '高 lane 盖低 lane · 越界下移自动建新轨',
+    deleteClip: '删除片段',
+  },
+  en: {
+    propsPanel: 'Properties',
+    emptyTtl: 'Select a clip in the timeline or preview', emptyHint: 'Adjust properties here · right-click a clip for the full menu',
+    kbdPlay: 'play', kbdSplit: 'split', kbdDelete: 'delete', kbdUndo: 'undo', kbdSave: 'save draft',
+    kbdMore: '⌨️ Full shortcuts → "Shortcuts" button at the top',
+    splitTitle: 'Split (S)', split: 'Split', dupTitle: 'Duplicate (Ctrl+D)', dup: 'Copy',
+    moveUpTitle: 'Move to previous track', laneUp: 'Up', moveDownTitle: 'Move to next track (auto-add if overflow)', laneDown: 'Down',
+    time: 'Time', start: 'Start', end: 'End',
+    layer: 'Layer', newTrackSuffix: ' (new track)', laneHint: 'Higher lanes cover lower · overflow down auto-adds a track',
+    deleteClip: 'Delete clip',
+  },
+} as const;
 
 // LayerPanel — 剪映模式
 // 默认只显当前 playhead 时刻 active 的 clips (跟剪映"当前帧图层"一致),
@@ -6031,6 +6594,8 @@ function LayerPanel({
   onReorder: (draggedId: string, targetId: string) => void;
   onClipContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
 }) {
+  const lang = useUiLang();
+  const t = LAYER_PANEL_DICT[lang];
   const [collapsed, setCollapsed] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const dragIdRef = useRef<string | null>(null);
@@ -6046,20 +6611,20 @@ function LayerPanel({
     [visualClips, playhead],
   );
   const displayClips = showAll ? visualClips : activeClips;
-  const headLabel = showAll ? `全部 ${visualClips.length}` : `当前 ${activeClips.length} / ${visualClips.length}`;
+  const headLabel = showAll ? `${t.all} ${visualClips.length}` : `${t.current} ${activeClips.length} / ${visualClips.length}`;
 
   return (
     <div className="sidebar-section win7-panel am-layer-section">
       <div className="sidebar-section-header" onClick={() => setCollapsed(c => !c)} style={{ cursor: 'pointer' }}>
         <span className="sidebar-icon">🎞</span>
-        <span className="sidebar-label">图层 ({headLabel})</span>
+        <span className="sidebar-label">{t.layers} ({headLabel})</span>
         <button
           className={`am-layer-mode-btn${showAll ? ' is-on' : ''}`}
           onClick={(e) => { e.stopPropagation(); setShowAll(v => !v); }}
-          title={showAll ? '切到只看当前帧' : '查看所有片段'}
+          title={showAll ? t.toCurrentTitle : t.viewAllTitle}
           type="button"
         >
-          {showAll ? '当前' : '全部'}
+          {showAll ? t.current : t.all}
         </button>
         <span className="am-layer-toggle">{collapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}</span>
       </div>
@@ -6068,8 +6633,8 @@ function LayerPanel({
           {displayClips.length === 0 ? (
             <div className="am-layer-empty">
               {clips.length === 0
-                ? '没有片段'
-                : <>当前时刻无图层<br /><span style={{ fontSize: 10, opacity: 0.7 }}>点 "全部" 查看所有片段</span></>}
+                ? t.noClips
+                : <>{t.noLayersNow}<br /><span style={{ fontSize: 10, opacity: 0.7 }}>{t.tapAllHint}</span></>}
             </div>
           ) : (
             TRACK_ORDER.map(type => {
@@ -6080,7 +6645,7 @@ function LayerPanel({
                 <div key={type} className="am-layer-group">
                   <div className={`am-layer-group-head am-layer-group-${type}`}>
                     <span className="am-layer-group-emoji"><TMIcon size={12} strokeWidth={2.2} /></span>
-                    <span className="am-layer-group-name">{TRACK_META[type].name}</span>
+                    <span className="am-layer-group-name">{trackName(type, lang)}</span>
                     <span className="am-layer-group-count">{typeClips.length}</span>
                   </div>
                   {typeClips.map(c => {
@@ -6123,12 +6688,12 @@ function LayerPanel({
                           <span className="am-layer-icon"><TMIcon size={14} strokeWidth={2} /></span>
                         )}
                         <div className="am-layer-meta">
-                          <div className="am-layer-name">{clipDisplayName(c)}</div>
+                          <div className="am-layer-name">{clipDisplayName(c, lang)}</div>
                           <div className="am-layer-sub">
                             {c.trackId === 'image' && (() => {
                               const ic = c as ImageClip;
                               const role = ic.role ?? (ic.boundTo ? 'face' : ic.blend === 'multiply' ? 'shell' : ic.kind === 'scene' ? 'scene' : '');
-                              return role === 'shell' ? '熊猫头壳 · ' : role === 'face' ? '🔗 跟随壳 · ' : role === 'scene' ? '背景 · ' : '';
+                              return role === 'shell' ? t.roleShell : role === 'face' ? t.roleFace : role === 'scene' ? t.roleScene : '';
                             })()}
                             {c.start.toFixed(1)}→{c.end.toFixed(1)}s · L{c.lane + 1}
                           </div>
@@ -6136,7 +6701,7 @@ function LayerPanel({
                         <button
                           className="am-layer-del"
                           onClick={(e) => { e.stopPropagation(); onDelete(c.id); }}
-                          title="删除"
+                          title={t.delete}
                         >
                           <X size={10} />
                         </button>
@@ -6153,12 +6718,29 @@ function LayerPanel({
   );
 }
 
-function clipDisplayName(c: Clip): string {
-  if (c.trackId === 'image') return c.label || '图片';
-  if (c.trackId === 'caption') return (c.text || '空字幕').slice(0, 20);
-  if (c.trackId === 'fx') return FX_LABEL[c.fx] || '特效';
-  if (c.trackId === 'tts') return (c.text || '空配音').slice(0, 20);
-  return c.name || '背景音乐';
+const LAYER_PANEL_DICT = {
+  zh: {
+    all: '全部', current: '当前', layers: '图层',
+    toCurrentTitle: '切到只看当前帧', viewAllTitle: '查看所有片段',
+    noClips: '没有片段', noLayersNow: '当前时刻无图层', tapAllHint: '点 "全部" 查看所有片段',
+    roleShell: '熊猫头壳 · ', roleFace: '🔗 跟随壳 · ', roleScene: '背景 · ',
+    delete: '删除',
+  },
+  en: {
+    all: 'All', current: 'Now', layers: 'Layers',
+    toCurrentTitle: 'Show current frame only', viewAllTitle: 'View all clips',
+    noClips: 'No clips', noLayersNow: 'No layers at this moment', tapAllHint: 'Tap "All" to view every clip',
+    roleShell: 'Panda shell · ', roleFace: '🔗 Follows shell · ', roleScene: 'Background · ',
+    delete: 'Delete',
+  },
+} as const;
+function clipDisplayName(c: Clip, lang: UiLang = 'zh'): string {
+  const en = lang === 'en';
+  if (c.trackId === 'image') return c.label || (en ? 'Image' : '图片');
+  if (c.trackId === 'caption') return (c.text || (en ? 'Empty caption' : '空字幕')).slice(0, 20);
+  if (c.trackId === 'fx') return fxLabel(c.fx, lang) || (en ? 'FX' : '特效');
+  if (c.trackId === 'tts') return (c.text || (en ? 'Empty voice' : '空配音')).slice(0, 20);
+  return c.name || (en ? 'Background music' : '背景音乐');
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -6195,6 +6777,208 @@ function findCounterpartClip(clips: Clip[], src: { start: number; end: number },
   return best;
 }
 
+// 共享 Inspector 属性面板字典 (CaptionProps / ImageProps / FXProps / FXGuideCard / TTSProps / BGMProps).
+// 这些函数内已用 `t` 指代 clip.transform, 故 dict 引用一律用 `L`.
+const INSPECTOR_DICT = {
+  zh: {
+    // CaptionProps
+    styleMeme: 'Meme', stylePanel: '白板', styleBar: '黑条',
+    styleMemeTip: '白字黑描边 (经典款, 跟编辑器一致)', stylePanelTip: '白底黑框, 配音 / 旁白感', styleBarTip: '黑底白字, 电影字幕条感',
+    sizeS: '小', sizeM: '中', sizeL: '大', sizeXL: '特大',
+    noTTSClip: '当前没有配音 clip · 先拖一个 TTS 上时间轴 (LeftPane 配音 subtab)',
+    noFitTTS: '找不到合适的配音 clip 对齐',
+    linkedCapTTS: (txt: string, s: string, e: string) => `✓ 字幕 ⇌ 配音 双向链接 · 文字 "${txt}" · 时段 ${s}→${e}s`,
+    unlinkedCapTTS: '已解除 字幕 ⇌ 配音 链接',
+    linkedVoice: '已链接配音', linkSyncHintCap: '改字幕时段 / 文字 → 配音自动跟随同步', unlink: '解除',
+    noTTSShort: '当前没有配音 clip · 先拖一个 TTS 上时间轴',
+    linkVoiceTipN: (n: number) => `字幕 ⇌ 配音 双向链接 (时段同步 + 文字同步, ${n} 个候选)`,
+    linkVoice: '链接配音', noVoiceYet: '⚠️ 还没有配音', alignSyncHint: '一键时段对齐 + 双向同步',
+    captionText: '字幕文字', captionPlaceholder: '输入字幕…(画板内双击字幕也能直接编辑)', captionDragHint: '画板内拖动字幕调位置 · 双击进入编辑',
+    style: '样式',
+    posLabel: (x: string, y: string) => `位置 · X ${x}% / Y ${y}%`,
+    fontLabel: (s: string) => `字号 · ${s}`, fontAuto: '自动 (随文字)',
+    autoFontTip: '自适应字号 — 短文案超大撑边, 长文案缩字分行 (免手动调)', auto: '自', autoFull: '自动',
+    color: '颜色', colorHint: '默认色跟样式联动 (Meme/黑条 = 白字 · 白板 = 黑字)',
+    entranceLabel: (fx: string) => `入场动效 · ${fx}`,
+    entNone: '无', entFade: '淡入', entPop: '弹入', entSlam: '砸字', entType: '打字机',
+    entNoneTip: '硬切显示', entFadeTip: '透明→清晰 0.4s', entPopTip: 'scale 0.5→1 弹性', entSlamTip: '大→小 砸入感', entTypeTip: '字一个个出 (按字 0.06s)',
+    entranceHint: '字幕出现时的动画 · 编辑模式不应用 (双击进入编辑)',
+    // ImageProps
+    sceneBgHint: '🎬 场景背景 · 自动 cover 全屏 · 推荐配运镜 FX (FX 轨)',
+    scaleLabel: (s: string, wide: boolean) => `缩放 · ${s}x${wide ? ' · 超宽场景 (右上 mini 调位置)' : ''}`,
+    sceneWideHint: '💡 scene 超 1.2x · 画板右上有 mini 预览, 拖 viewport 调镜头位置',
+    rotLabel: (d: number) => `旋转 · ${d}°`, resetRot: '重置旋转',
+    flip: '翻转', flipH: '水平翻转',
+    followShell: '跟随熊猫头',
+    boundTip: '已绑定 — 移动/旋转/缩放熊猫头壳时表情自动跟随. 点击解绑',
+    unboundTip: '绑定到熊猫头壳 — 表情自动跟随壳的移动/旋转/缩放, 不用手动对齐',
+    boundActive: '已跟随 · 点击解绑', boundHintOn: '表情已绑壳 · 调壳脸跟着动 (给壳加特效脸也跟随)', boundHintOff: '绑到熊猫头壳后, 移动/旋转/缩放壳, 脸自动跟随',
+    labelField: '标签', clipLabelPlaceholder: '片段标签...',
+    // FXProps
+    fxEnter: '入场', fxEmphasis: '强调', fxExit: '出场', fxCamera: '运镜', fxMove: '移动',
+    targetGlobal: '🌐 全局 (所有同时刻图叠加)',
+    targetScene: '🎬 场景', targetChar: '🐼 角色', targetImg: '图片', targetSceneTag: ' (场景)',
+    fxTarget: '作用对象', targetGlobalShort: '🌐 全局', targetGlobalTip: '所有同时刻 image 都叠加 (全局)',
+    targetTip: '💡 默认绑定到顶层非场景 image · 右键 timeline FX clip 也能快换',
+    moveGuide: '移动动画 · 引导',
+    moveSpeedHint: 'X', // placeholder unused
+    startA: '起点 A', endB: '终点 B', startAPos: '起点 A 位置', endBPos: '终点 B 位置',
+    scaleWord: '缩放',
+    swapAB: 'A ↔ B 互换', swapABTip: 'A ↔ B 互换 (一秒反向)', setBeqA: 'B = A', setBeqATip: '把终点设为起点 (不动)', setAeqB: 'A = B', setAeqBTip: '把起点设为终点 (不动)',
+    fxType: '特效类型',
+    // FXGuideCard
+    guideSuffix: ' · 引导',
+    strengthLabel: (s: string) => `强度 · ${s}x`,
+    timelineDragHint: '💡 timeline 拖把手 = 调动效时长',
+    panStrengthLabel: (s: string) => `平移强度 · ${s}x`,
+    panDirHint: (dir: string) => `💡 镜头 ${dir} 平移 · 强度越大移得越多`,
+    panL: '从右到左', panR: '从左到右', panU: '从下到上', panD: '从上到下',
+    zoomFromToLabel: (f: string, tt: string) => `起始缩放 ${f}x → 结束 ${tt}x`,
+    zoomFrom: '从', zoomTo: '到',
+    zoomLight: '轻推 1→1.25', zoomMid: '中推 1→1.5', zoomHard: '猛推 1→2', zoomRev: '↔ 反向',
+    zoomLerpHint: '💡 起→终 lerp · 起=终 → 不动',
+    kenLabel: (s: string) => `推近 + 平移强度 · ${s}x`, kenHint: '💡 经典纪录片感: 缓慢推近同时轻微横向平移',
+    zoomInFromLabel: (f: string) => `起始缩放 · ${f}x → 1.00x`, zoomInHint: '💡 越小越夸张 (0.1x = 从几乎看不见弹到原大小)',
+    enterStrengthLabel: (kind: string, s: string) => `${kind}强度 · ${s}x`, kindBounce: '弹跳', kindSlide: '滑入',
+    slideLHint: '从屏幕左外滑入, 强度 = 起始距离', slideRHint: '从屏幕右外滑入', bounceHint: '弹跳高度倍数',
+    spinLabel: (n: number) => `转圈数 · ${n} 圈`, spinTurnsSuffix: '圈', spinHint: '💡 旋转圈数 · 越多越眼花',
+    fadeInHint: '画面在 clip 时长内从透明变清晰', fadeOutHint: '画面在 clip 时长内从清晰变透明', fadeDurSuffix: ' · 时长 = clip 时长 (拖把手调)',
+    // TTSProps
+    voiceWord: '配音', recWord: '录音',
+    audioReal: (label: string, d: string, r: string) => `✅ ${label} · 真音轨 ${d}s (rate ${r}) · 时间轴已对齐`,
+    audioRealNoProbe: (label: string) => `✅ ${label} · 真音轨 (时长探测失败, end 保持)`,
+    micFail: '麦克风获取失败 (浏览器权限?)',
+    recDeleted: '已删除录音, 导出会烧字幕代替',
+    audioMax15: '单 audio 文件最多 15MB', uploadFail: '上传失败', uploadLabel: (name: string) => `上传 ${name}`,
+    noCapClip: '当前没有字幕 clip · 先拖一个 caption 上时间轴 (LeftPane 字幕 subtab)',
+    noFitCap: '找不到合适的字幕 clip 对齐',
+    linkedCapDone: (txt: string, s: string, e: string) => `✓ 配音 ⇌ 字幕 双向链接 · 文字 "${txt}" · 时段 ${s}→${e}s`,
+    unlinkedCapDone: '已解除 配音 ⇌ 字幕 链接',
+    linkedCaption: '已链接字幕', linkSyncHintTTS: '字幕改动时配音自动跟随 (时段 + 文字)',
+    noCapShort: '当前没有字幕 clip · 先拖一个 caption 上时间轴',
+    linkCapTipN: (n: number) => `配音 ⇌ 字幕 双向链接 (时段 + 文字, ${n} 个候选)`,
+    linkCaption: '链接字幕', noCaptionYet: '⚠️ 还没有字幕', alignSyncHintTTS: '一键时段+台词同步',
+    lines: '台词', linesPlaceholderZh: '要说什么…', linesPlaceholderEn: 'What to say…',
+    estRead: '预计读', estCur: '当前', estMismatch: ' · 不匹配', estAlignTitle: '把片段长度调到预计朗读时间', estAlign: '🎯 对齐',
+    voiceTone: '音色',
+    rateLabel: (r: string) => `倍速 · ${r}x`,
+    rateNormal: '正常语速 · 改变后试听 / 重生成 audio 才生效',
+    rateUp: (pct: string, r: string) => `加速 ${pct}% · 实际朗读时长 = 原始 / ${r}`,
+    rateDown: (pct: string) => `减速 ${pct}%`,
+    stop: '停止', preview: '试听',
+    sampleZh: '这是一段试听', sampleEn: 'This is a preview', cloudPreviewFail: '云端试听失败, 退化浏览器 SS',
+    audioField: '配音音频 · 生成 / 导入 (导出 MP4 带声)',
+    fillLineFirst: '先填台词',
+    genRetry: '🔄 重试生成…', genLoading: '生成配音中…',
+    engProxy: '真 Azure 语音', engBaidu: 'baidu', engYoudao: '有道',
+    genFail: (msg: string) => `配音生成失败: ${msg}`,
+    cloudGenTitle: '云端 TTS (youdao 失败自动试 baidu) · 自动按 audio 时长对齐时间轴',
+    genRetryBtn: '🔄 重试生成 (上次失败)', cloudGenBtn: '🌐 云端生成 (推荐)',
+    proxyLoading: (name: string) => `代理 ${name}…`, neuralLabel: (name: string) => `Neural ${name}`, proxyFail: (msg: string) => `代理失败: ${msg}`,
+    proxyNeural: '🎯 代理 Neural', uploadMp3: '📂 上传 mp3', micRec: '🎙 麦录', ttsmakerAlt: '网页另一选项', ttsmakerLink: '🌐 TTSMaker ↗',
+    stopRec: '⏹ 停止录音', reupload: '📂 重新上传', del: '删',
+    audioSetHint: '✅ 已设音轨 · 导出 MP4 真带声 (不烧字幕). 备份/换设备 → 顶栏「导出项目 JSON」会连音频一起导出, 导入即恢复',
+    audioImportHint: '导入自己的配音: ① 点 🌐 TTSMaker (或任意 TTS / 录音) 生成并下载 mp3 → ② 点 📂 上传 mp3 附加到此片段. 「云端生成」= 一键 youdao 自动出声 (女声)',
+    // BGMProps
+    track: '曲目', volumeLabel: (v: number) => `音量 · ${v}`, preview8s: '试听 8 秒',
+  },
+  en: {
+    styleMeme: 'Meme', stylePanel: 'Panel', styleBar: 'Bar',
+    styleMemeTip: 'White text + black outline (classic, matches the editor)', stylePanelTip: 'White panel, black border, narration feel', styleBarTip: 'Black bar, white text, movie-subtitle feel',
+    sizeS: 'S', sizeM: 'M', sizeL: 'L', sizeXL: 'XL',
+    noTTSClip: 'No voice clip yet · drag a TTS onto the timeline first (LeftPane Voice subtab)',
+    noFitTTS: 'No suitable voice clip to align with',
+    linkedCapTTS: (txt: string, s: string, e: string) => `✓ Caption ⇌ voice linked · text "${txt}" · ${s}→${e}s`,
+    unlinkedCapTTS: 'Unlinked caption ⇌ voice',
+    linkedVoice: 'Linked to voice', linkSyncHintCap: 'Change caption timing / text → voice auto-follows', unlink: 'Unlink',
+    noTTSShort: 'No voice clip yet · drag a TTS onto the timeline first',
+    linkVoiceTipN: (n: number) => `Caption ⇌ voice two-way link (sync timing + text, ${n} candidates)`,
+    linkVoice: 'Link voice', noVoiceYet: '⚠️ No voice yet', alignSyncHint: 'One-click align + two-way sync',
+    captionText: 'Caption text', captionPlaceholder: 'Type a caption… (double-click it on the canvas to edit)', captionDragHint: 'Drag the caption on the canvas to reposition · double-click to edit',
+    style: 'Style',
+    posLabel: (x: string, y: string) => `Position · X ${x}% / Y ${y}%`,
+    fontLabel: (s: string) => `Font size · ${s}`, fontAuto: 'Auto (fits text)',
+    autoFontTip: 'Adaptive font — short text fills the edges, long text shrinks & wraps (no manual tweaking)', auto: 'A', autoFull: 'Auto',
+    color: 'Color', colorHint: 'Default color follows the style (Meme/Bar = white · Panel = black)',
+    entranceLabel: (fx: string) => `Entrance · ${fx}`,
+    entNone: 'None', entFade: 'Fade', entPop: 'Pop', entSlam: 'Slam', entType: 'Typewriter',
+    entNoneTip: 'Hard cut', entFadeTip: 'Transparent→clear 0.4s', entPopTip: 'scale 0.5→1 elastic', entSlamTip: 'Big→small slam-in', entTypeTip: 'Letters appear one by one (0.06s each)',
+    entranceHint: 'Animation when the caption appears · not applied in edit mode (double-click to edit)',
+    sceneBgHint: '🎬 Scene background · auto-covers fullscreen · pair with camera FX (FX track)',
+    scaleLabel: (s: string, wide: boolean) => `Scale · ${s}x${wide ? ' · ultra-wide scene (use top-right mini to position)' : ''}`,
+    sceneWideHint: '💡 Scene over 1.2x · a mini preview is at the top-right; drag the viewport to position the camera',
+    rotLabel: (d: number) => `Rotate · ${d}°`, resetRot: 'Reset rotation',
+    flip: 'Flip', flipH: 'Flip horizontal',
+    followShell: 'Follow shell',
+    boundTip: 'Bound — face auto-follows when you move/rotate/scale the panda shell. Click to unbind',
+    unboundTip: 'Bind to the panda shell — face auto-follows the shell\'s move/rotate/scale, no manual alignment',
+    boundActive: 'Following · click to unbind', boundHintOn: 'Face bound to shell · adjust shell and the face follows (FX on the shell too)', boundHintOff: 'After binding to the shell, move/rotate/scale it and the face follows',
+    labelField: 'Label', clipLabelPlaceholder: 'Clip label...',
+    fxEnter: 'Entrance', fxEmphasis: 'Emphasis', fxExit: 'Exit', fxCamera: 'Camera', fxMove: 'Move',
+    targetGlobal: '🌐 Global (all layers at this moment)',
+    targetScene: '🎬 Scene', targetChar: '🐼 Character', targetImg: 'Image', targetSceneTag: ' (scene)',
+    fxTarget: 'Target', targetGlobalShort: '🌐 Global', targetGlobalTip: 'Applies to all images at this moment (global)',
+    targetTip: '💡 Defaults to the top non-scene image · right-click a timeline FX clip to swap quickly',
+    moveGuide: 'Move animation · guide',
+    moveSpeedHint: 'X',
+    startA: 'Start A', endB: 'End B', startAPos: 'Start A position', endBPos: 'End B position',
+    scaleWord: 'Scale',
+    swapAB: 'A ↔ B swap', swapABTip: 'Swap A ↔ B (instant reverse)', setBeqA: 'B = A', setBeqATip: 'Set end = start (no move)', setAeqB: 'A = B', setAeqBTip: 'Set start = end (no move)',
+    fxType: 'FX type',
+    guideSuffix: ' · guide',
+    strengthLabel: (s: string) => `Strength · ${s}x`,
+    timelineDragHint: '💡 Drag the timeline handle = adjust FX duration',
+    panStrengthLabel: (s: string) => `Pan strength · ${s}x`,
+    panDirHint: (dir: string) => `💡 Camera pans ${dir} · higher strength moves further`,
+    panL: 'right → left', panR: 'left → right', panU: 'bottom → top', panD: 'top → bottom',
+    zoomFromToLabel: (f: string, tt: string) => `Start scale ${f}x → end ${tt}x`,
+    zoomFrom: 'From', zoomTo: 'To',
+    zoomLight: 'Light 1→1.25', zoomMid: 'Mid 1→1.5', zoomHard: 'Hard 1→2', zoomRev: '↔ Reverse',
+    zoomLerpHint: '💡 Start→end lerp · start=end → no motion',
+    kenLabel: (s: string) => `Zoom-in + pan strength · ${s}x`, kenHint: '💡 Classic documentary feel: slow zoom-in with a slight horizontal pan',
+    zoomInFromLabel: (f: string) => `Start scale · ${f}x → 1.00x`, zoomInHint: '💡 Smaller = more dramatic (0.1x = pops up from nearly invisible)',
+    enterStrengthLabel: (kind: string, s: string) => `${kind} strength · ${s}x`, kindBounce: 'Bounce', kindSlide: 'Slide',
+    slideLHint: 'Slides in from off-screen left, strength = start distance', slideRHint: 'Slides in from off-screen right', bounceHint: 'Bounce height multiplier',
+    spinLabel: (n: number) => `Turns · ${n}`, spinTurnsSuffix: '', spinHint: '💡 Number of spins · more = dizzier',
+    fadeInHint: 'Image fades from transparent to clear over the clip', fadeOutHint: 'Image fades from clear to transparent over the clip', fadeDurSuffix: ' · duration = clip length (drag the handle)',
+    voiceWord: 'voice', recWord: 'recording',
+    audioReal: (label: string, d: string, r: string) => `✅ ${label} · real track ${d}s (rate ${r}) · timeline aligned`,
+    audioRealNoProbe: (label: string) => `✅ ${label} · real track (duration probe failed, end kept)`,
+    micFail: 'Mic access failed (browser permission?)',
+    recDeleted: 'Recording deleted; export will burn captions instead',
+    audioMax15: 'A single audio file is at most 15MB', uploadFail: 'Upload failed', uploadLabel: (name: string) => `Upload ${name}`,
+    noCapClip: 'No caption clip yet · drag a caption onto the timeline first (LeftPane Captions subtab)',
+    noFitCap: 'No suitable caption clip to align with',
+    linkedCapDone: (txt: string, s: string, e: string) => `✓ Voice ⇌ caption linked · text "${txt}" · ${s}→${e}s`,
+    unlinkedCapDone: 'Unlinked voice ⇌ caption',
+    linkedCaption: 'Linked to caption', linkSyncHintTTS: 'Voice auto-follows caption changes (timing + text)',
+    noCapShort: 'No caption clip yet · drag a caption onto the timeline first',
+    linkCapTipN: (n: number) => `Voice ⇌ caption two-way link (timing + text, ${n} candidates)`,
+    linkCaption: 'Link caption', noCaptionYet: '⚠️ No caption yet', alignSyncHintTTS: 'One-click timing + line sync',
+    lines: 'Line', linesPlaceholderZh: 'What to say…', linesPlaceholderEn: 'What to say…',
+    estRead: 'Est. read', estCur: 'current', estMismatch: ' · mismatch', estAlignTitle: 'Set clip length to the estimated read time', estAlign: '🎯 Align',
+    voiceTone: 'Tone',
+    rateLabel: (r: string) => `Speed · ${r}x`,
+    rateNormal: 'Normal speed · takes effect after preview / regenerating audio',
+    rateUp: (pct: string, r: string) => `Sped up ${pct}% · actual read time = original / ${r}`,
+    rateDown: (pct: string) => `Slowed ${pct}%`,
+    stop: 'Stop', preview: 'Preview',
+    sampleZh: '这是一段试听', sampleEn: 'This is a preview', cloudPreviewFail: 'Cloud preview failed, falling back to browser SS',
+    audioField: 'Voice audio · generate / import (MP4 export has sound)',
+    fillLineFirst: 'Fill in a line first',
+    genRetry: '🔄 Retrying…', genLoading: 'Generating voice…',
+    engProxy: 'real Azure voice', engBaidu: 'baidu', engYoudao: 'Youdao',
+    genFail: (msg: string) => `Voice generation failed: ${msg}`,
+    cloudGenTitle: 'Cloud TTS (auto-tries baidu if youdao fails) · auto-aligns timeline to audio length',
+    genRetryBtn: '🔄 Retry (failed last time)', cloudGenBtn: '🌐 Cloud generate (recommended)',
+    proxyLoading: (name: string) => `Proxy ${name}…`, neuralLabel: (name: string) => `Neural ${name}`, proxyFail: (msg: string) => `Proxy failed: ${msg}`,
+    proxyNeural: '🎯 Proxy Neural', uploadMp3: '📂 Upload mp3', micRec: '🎙 Record', ttsmakerAlt: 'Another web option', ttsmakerLink: '🌐 TTSMaker ↗',
+    stopRec: '⏹ Stop recording', reupload: '📂 Re-upload', del: 'Del',
+    audioSetHint: '✅ Track set · MP4 export has real sound (no burned captions). Backup/new device → "Export project JSON" in the toolbar includes the audio; import to restore',
+    audioImportHint: 'Import your own voice: ① click 🌐 TTSMaker (or any TTS / recording) to generate & download an mp3 → ② click 📂 Upload mp3 to attach it. "Cloud generate" = one-click youdao auto voice (female)',
+    track: 'Track', volumeLabel: (v: number) => `Volume · ${v}`, preview8s: 'Preview 8s',
+  },
+} as const;
 function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, onUnlinkCaptionTTS }: {
   clip: CaptionClip;
   onUpdate: (p: Record<string, unknown>) => void;
@@ -6203,6 +6987,8 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
   onLinkCaptionTTS: (capId: string, ttsId: string) => void;
   onUnlinkCaptionTTS: (id: string) => void;
 }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const t = clip.transform ?? DEFAULT_CAPTION_TRANSFORM;
   const curStyle: CaptionStyle = clip.style ?? DEFAULT_CAPTION_STYLE;
   const curSize = clip.fontSize ?? 32;
@@ -6211,35 +6997,35 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
   const defaultColor = curStyle === 'panel' ? '#000000' : '#ffffff';
   const curColor = clip.color ?? defaultColor;
   const STYLE_OPTIONS: { id: CaptionStyle; label: string; tip: string }[] = [
-    { id: 'meme', label: 'Meme', tip: '白字黑描边 (经典款, 跟编辑器一致)' },
-    { id: 'panel', label: '白板', tip: '白底黑框, 配音 / 旁白感' },
-    { id: 'bar', label: '黑条', tip: '黑底白字, 电影字幕条感' },
+    { id: 'meme', label: L.styleMeme, tip: L.styleMemeTip },
+    { id: 'panel', label: L.stylePanel, tip: L.stylePanelTip },
+    { id: 'bar', label: L.styleBar, tip: L.styleBarTip },
   ];
   const SIZE_PRESETS = [
-    { v: 22, lbl: '小' },
-    { v: 32, lbl: '中' },
-    { v: 48, lbl: '大' },
-    { v: 64, lbl: '特大' },
+    { v: 22, lbl: L.sizeS },
+    { v: 32, lbl: L.sizeM },
+    { v: 48, lbl: L.sizeL },
+    { v: 64, lbl: L.sizeXL },
   ];
   // v23-e: 对齐 = 时间对齐 + 建立双向 link (caption.start/end 改时, tts 自动跟随)
   const ttsCandidates = project.clips.filter(c => c.trackId === 'tts');
   const linkedTTS = clip.linkedTTSId ? project.clips.find(c => c.id === clip.linkedTTSId && c.trackId === 'tts') as TTSClip | undefined : undefined;
   const alignToTTS = () => {
     if (ttsCandidates.length === 0) {
-      toast.error('当前没有配音 clip · 先拖一个 TTS 上时间轴 (LeftPane 配音 subtab)', { duration: 5000 });
+      toast.error(L.noTTSClip, { duration: 5000 });
       return;
     }
     const counterpart = findCounterpartClip(project.clips, { start: clip.start, end: clip.end }, 'tts') as TTSClip | null;
-    if (!counterpart) { toast.error('找不到合适的配音 clip 对齐'); return; }
+    if (!counterpart) { toast.error(L.noFitTTS); return; }
     // v23-k: 字幕时段 + 文本 同步到配音 + 建 link (跟 alignToCaption 对称)
     const ttsText = counterpart.text || '';
     onUpdate({ start: counterpart.start, end: counterpart.end, text: ttsText, linkedTTSId: counterpart.id });
     onLinkCaptionTTS(clip.id, counterpart.id);
-    toast.success(`✓ 字幕 ⇌ 配音 双向链接 · 文字 "${ttsText.slice(0, 12)}" · 时段 ${counterpart.start.toFixed(2)}→${counterpart.end.toFixed(2)}s`, { duration: 4000 });
+    toast.success(L.linkedCapTTS(ttsText.slice(0, 12), counterpart.start.toFixed(2), counterpart.end.toFixed(2)), { duration: 4000 });
   };
   const onUnlink = () => {
     onUnlinkCaptionTTS(clip.id);
-    toast('已解除 字幕 ⇌ 配音 链接');
+    toast(L.unlinkedCapTTS);
   };
   return (
     <>
@@ -6248,12 +7034,12 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
         <div className="am-link-status am-link-status-active">
           <div className="am-link-status-line">
             <Check size={13} strokeWidth={2.4} />
-            <span className="am-link-status-label">已链接配音</span>
-            <span className="am-link-status-target" title={`TTS clip: ${linkedTTS.id}`}>"{(linkedTTS.text || '空').slice(0, 12)}"</span>
+            <span className="am-link-status-label">{L.linkedVoice}</span>
+            <span className="am-link-status-target" title={`TTS clip: ${linkedTTS.id}`}>"{(linkedTTS.text || (lang === 'en' ? 'empty' : '空')).slice(0, 12)}"</span>
           </div>
           <div className="am-link-status-line">
-            <span className="am-link-status-hint">改字幕时段 / 文字 → 配音自动跟随同步</span>
-            <button type="button" className="am-link-unlink-btn" onClick={onUnlink}>解除</button>
+            <span className="am-link-status-hint">{L.linkSyncHintCap}</span>
+            <button type="button" className="am-link-unlink-btn" onClick={onUnlink}>{L.unlink}</button>
           </div>
         </div>
       ) : (
@@ -6263,26 +7049,26 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
             className="am-align-quick-btn"
             onClick={alignToTTS}
             disabled={ttsCandidates.length === 0}
-            title={ttsCandidates.length === 0 ? '当前没有配音 clip · 先拖一个 TTS 上时间轴' : `字幕 ⇌ 配音 双向链接 (时段同步 + 文字同步, ${ttsCandidates.length} 个候选)`}
+            title={ttsCandidates.length === 0 ? L.noTTSShort : L.linkVoiceTipN(ttsCandidates.length)}
           >
             <ArrowLeftRight size={14} strokeWidth={2.2} />
-            <span>链接配音{ttsCandidates.length > 0 ? ` (${ttsCandidates.length})` : ''}</span>
+            <span>{L.linkVoice}{ttsCandidates.length > 0 ? ` (${ttsCandidates.length})` : ''}</span>
           </button>
-          <div className="am-align-quick-hint">{ttsCandidates.length === 0 ? '⚠️ 还没有配音' : '一键时段对齐 + 双向同步'}</div>
+          <div className="am-align-quick-hint">{ttsCandidates.length === 0 ? L.noVoiceYet : L.alignSyncHint}</div>
         </div>
       )}
-      <Field label="字幕文字">
+      <Field label={L.captionText}>
         <textarea
           className="am-input am-textarea"
           value={clip.text || ''}
           onChange={(e) => onUpdate({ text: e.target.value })}
-          placeholder="输入字幕…(画板内双击字幕也能直接编辑)"
+          placeholder={L.captionPlaceholder}
           maxLength={80}
         />
-        <div className="am-field-sublabel">画板内拖动字幕调位置 · 双击进入编辑</div>
+        <div className="am-field-sublabel">{L.captionDragHint}</div>
       </Field>
 
-      <Field label="样式">
+      <Field label={L.style}>
         <div className="am-style-chips">
           {STYLE_OPTIONS.map(s => (
             <button
@@ -6299,23 +7085,23 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
         </div>
       </Field>
 
-      <Field label={`位置 · X ${t.x.toFixed(0)}% / Y ${t.y.toFixed(0)}%`}>
+      <Field label={L.posLabel(t.x.toFixed(0), t.y.toFixed(0))}>
         <div className="am-row">
           <NumberInput label="X%" value={t.x} step={1} min={-50} max={50} onChange={(v) => onTransform({ x: clamp(v, -50, 50) })} />
           <NumberInput label="Y%" value={t.y} step={1} min={-50} max={50} onChange={(v) => onTransform({ y: clamp(v, -50, 50) })} />
         </div>
       </Field>
 
-      <Field label={`字号 · ${isAutoSize ? '自动 (随文字)' : curSize + 'px'}`}>
+      <Field label={L.fontLabel(isAutoSize ? L.fontAuto : curSize + 'px')}>
         <div className="am-size-preset-row">
           <button
             type="button"
             className={`am-size-preset${isAutoSize ? ' is-active' : ''}`}
             onClick={() => onUpdate({ fontSize: undefined })}
-            title="自适应字号 — 短文案超大撑边, 长文案缩字分行 (免手动调)"
+            title={L.autoFontTip}
           >
-            <span className="am-size-preset-num" style={{ fontSize: 12 }}>自</span>
-            <span className="am-size-preset-lbl">自动</span>
+            <span className="am-size-preset-num" style={{ fontSize: 12 }}>{L.auto}</span>
+            <span className="am-size-preset-lbl">{L.autoFull}</span>
           </button>
           {SIZE_PRESETS.map(p => (
             <button
@@ -6338,7 +7124,7 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
         />
       </Field>
 
-      <Field label="颜色">
+      <Field label={L.color}>
         <div className="am-chips">
           {['#ffffff', '#000000', '#FF5E00', '#1f84df', '#00CC66', '#cb2a2a', '#ffbf22'].map(c => (
             <button
@@ -6353,18 +7139,18 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
             </button>
           ))}
         </div>
-        <div className="am-field-sublabel">默认色跟样式联动 (Meme/黑条 = 白字 · 白板 = 黑字)</div>
+        <div className="am-field-sublabel">{L.colorHint}</div>
       </Field>
 
       {/* v23-k Phase A: 入场动效 — 沙雕动画核心 */}
-      <Field label={`入场动效 · ${clip.entranceFx ?? 'none'}`}>
+      <Field label={L.entranceLabel(clip.entranceFx ?? 'none')}>
         <div className="am-chips am-caption-entrance-chips">
           {([
-            { id: 'none' as const, name: '无', tip: '硬切显示' },
-            { id: 'fade' as const, name: '淡入', tip: '透明→清晰 0.4s' },
-            { id: 'pop' as const, name: '弹入', tip: 'scale 0.5→1 弹性' },
-            { id: 'slam' as const, name: '砸字', tip: '大→小 砸入感' },
-            { id: 'typewriter' as const, name: '打字机', tip: '字一个个出 (按字 0.06s)' },
+            { id: 'none' as const, name: L.entNone, tip: L.entNoneTip },
+            { id: 'fade' as const, name: L.entFade, tip: L.entFadeTip },
+            { id: 'pop' as const, name: L.entPop, tip: L.entPopTip },
+            { id: 'slam' as const, name: L.entSlam, tip: L.entSlamTip },
+            { id: 'typewriter' as const, name: L.entType, tip: L.entTypeTip },
           ]).map(opt => (
             <button
               key={opt.id}
@@ -6377,7 +7163,7 @@ function CaptionProps({ clip, onUpdate, onTransform, project, onLinkCaptionTTS, 
             </button>
           ))}
         </div>
-        <div className="am-field-sublabel">字幕出现时的动画 · 编辑模式不应用 (双击进入编辑)</div>
+        <div className="am-field-sublabel">{L.entranceHint}</div>
       </Field>
     </>
   );
@@ -6389,6 +7175,8 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
   onTransform: (t: Partial<Transform>) => void;
   onBindToggle: (faceId: string) => void;
 }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const t = clip.transform ?? DEFAULT_TRANSFORM;
   const isScene = clip.kind === 'scene';
   const bound = !!clip.boundTo;
@@ -6397,17 +7185,17 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
     <>
       {isScene && (
         <div className="am-field-sublabel" style={{ marginBottom: 8, padding: '6px 8px', background: '#eef5ff', borderRadius: 4 }}>
-          🎬 场景背景 · 自动 cover 全屏 · 推荐配运镜 FX (FX 轨)
+          {L.sceneBgHint}
         </div>
       )}
       {/* v23-h: 移动动画完全迁到 FX 时间轴 — 用户从 LeftPane "动效" → 移动 拖到 fx 轨建 FX clip */}
-      <Field label={`位置 · X ${t.x.toFixed(0)}% / Y ${t.y.toFixed(0)}%`}>
+      <Field label={L.posLabel(t.x.toFixed(0), t.y.toFixed(0))}>
         <div className="am-row">
           <NumberInput label="X%" value={t.x} step={1} min={-60} max={60} onChange={(v) => onTransform({ x: clamp(v, -60, 60) })} />
           <NumberInput label="Y%" value={t.y} step={1} min={-60} max={60} onChange={(v) => onTransform({ y: clamp(v, -60, 60) })} />
         </div>
       </Field>
-      <Field label={`缩放 · ${t.scale.toFixed(2)}x${isScene && t.scale > 1.2 ? ' · 超宽场景 (右上 mini 调位置)' : ''}`}>
+      <Field label={L.scaleLabel(t.scale.toFixed(2), isScene && t.scale > 1.2)}>
         <input
           type="range" min="0.2" max={isScene ? 6 : 4} step="0.05"
           value={t.scale}
@@ -6415,10 +7203,10 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
           className="am-range"
         />
         {isScene && t.scale > 1.2 && (
-          <div className="am-field-sublabel">💡 scene 超 1.2x · 画板右上有 mini 预览, 拖 viewport 调镜头位置</div>
+          <div className="am-field-sublabel">{L.sceneWideHint}</div>
         )}
       </Field>
-      <Field label={`旋转 · ${Math.round(t.rotation)}°`}>
+      <Field label={L.rotLabel(Math.round(t.rotation))}>
         <div className="am-row am-row-tight">
           <input
             type="range" min="-180" max="180" step="1"
@@ -6426,30 +7214,30 @@ function ImageProps({ clip, onUpdate, onTransform, onBindToggle }: {
             onChange={(e) => onTransform({ rotation: parseFloat(e.target.value) })}
             className="am-range"
           />
-          <button className="am-quick-btn am-quick-btn-mini" onClick={() => onTransform({ rotation: 0 })} title="重置旋转"><RotateCw size={11} /></button>
+          <button className="am-quick-btn am-quick-btn-mini" onClick={() => onTransform({ rotation: 0 })} title={L.resetRot}><RotateCw size={11} /></button>
         </div>
       </Field>
-      <Field label="翻转">
+      <Field label={L.flip}>
         <button className={'am-chip' + (t.flipX ? ' is-active' : '')} onClick={() => onTransform({ flipX: !t.flipX })} type="button">
-          <FlipHorizontal size={12} /> 水平翻转
+          <FlipHorizontal size={12} /> {L.flipH}
         </button>
       </Field>
       {/* 脸跟壳 绑定/解绑 — 跟 GIF 同款 (scene / 熊猫头壳本身不显) */}
       {!isScene && !isShell && (
-        <Field label="跟随熊猫头">
+        <Field label={L.followShell}>
           <button type="button" className={'am-chip' + (bound ? ' is-active' : '')}
-            title={bound ? '已绑定 — 移动/旋转/缩放熊猫头壳时表情自动跟随. 点击解绑' : '绑定到熊猫头壳 — 表情自动跟随壳的移动/旋转/缩放, 不用手动对齐'}
+            title={bound ? L.boundTip : L.unboundTip}
             onClick={() => onBindToggle(clip.id)}>
-            {bound ? <Link2 size={12} /> : <Link2Off size={12} />} {bound ? '已跟随 · 点击解绑' : '跟随熊猫头'}
+            {bound ? <Link2 size={12} /> : <Link2Off size={12} />} {bound ? L.boundActive : L.followShell}
           </button>
-          <div className="am-field-sublabel">{bound ? '表情已绑壳 · 调壳脸跟着动 (给壳加特效脸也跟随)' : '绑到熊猫头壳后, 移动/旋转/缩放壳, 脸自动跟随'}</div>
+          <div className="am-field-sublabel">{bound ? L.boundHintOn : L.boundHintOff}</div>
         </Field>
       )}
       {/* 律动/鬼畜动效不在这里 — 已融入左栏「动效」库 (拖到时间轴特效行, 跟其它 FX 一样作用到图层) */}
       {/* v23-f: 删除 "自带特效" Field (chips 入场/强调/出场/运镜) — 改用独立 FX 时间轴, 防混淆 */}
       {/* 想给 image 加 fade-in / shake / pan / zoom 等? 拖 LeftPane "动画特效" 到 FX 时间轴, 然后在 FXProps Inspector 选 "作用对象" 绑定到这个 image */}
-      <Field label="标签">
-        <input className="am-input" value={clip.label || ''} onChange={(e) => onUpdate({ label: e.target.value })} placeholder="片段标签..." />
+      <Field label={L.labelField}>
+        <input className="am-input" value={clip.label || ''} onChange={(e) => onUpdate({ label: e.target.value })} placeholder={L.clipLabelPlaceholder} />
       </Field>
     </>
   );
@@ -6460,14 +7248,16 @@ function FXProps({ clip, project, onUpdate }: {
   project: ProjectState;
   onUpdate: (p: Record<string, unknown>) => void;
 }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const imageClips = project.clips.filter((c): c is ImageClip => c.trackId === 'image');
   // v23-h: 5 group, move 也是 FX clip (不再走 image.fx)
   const groups: { label: string; group: FxGroup }[] = [
-    { label: '入场', group: 'enter' },
-    { label: '强调', group: 'emphasis' },
-    { label: '出场', group: 'exit' },
-    { label: '运镜', group: 'camera' },
-    { label: '移动', group: 'move' },
+    { label: L.fxEnter, group: 'enter' },
+    { label: L.fxEmphasis, group: 'emphasis' },
+    { label: L.fxExit, group: 'exit' },
+    { label: L.fxCamera, group: 'camera' },
+    { label: L.fxMove, group: 'move' },
   ];
   const isMove = clip.fx === 'move';
   const startT = clip.startTransform ?? DEFAULT_TRANSFORM;
@@ -6496,15 +7286,15 @@ function FXProps({ clip, project, onUpdate }: {
   // v23-k: 作用对象 helpers — chip 风格替代 select, 提到 FXProps 顶部
   const currentTarget = clip.targetClipId ? imageClips.find(ic => ic.id === clip.targetClipId) : undefined;
   const targetSummary = !clip.targetClipId
-    ? '🌐 全局 (所有同时刻图叠加)'
-    : `${currentTarget?.kind === 'scene' ? '🎬 场景' : '🐼 角色'} · ${currentTarget?.label || '图片'}`;
+    ? L.targetGlobal
+    : `${currentTarget?.kind === 'scene' ? L.targetScene : L.targetChar} · ${currentTarget?.label || L.targetImg}`;
   return (
     <>
       {/* v23-k: 作用对象 — 顶部显著卡片 (用户立刻看到 FX 作用于谁, chip 直接换) */}
       <div className="am-fx-target-card">
         <div className="am-fx-target-head">
           <Layers size={13} strokeWidth={2.2} />
-          <span>作用对象</span>
+          <span>{L.fxTarget}</span>
           <span className="am-fx-target-summary">{targetSummary}</span>
         </div>
         <div className="am-fx-target-chips">
@@ -6512,9 +7302,9 @@ function FXProps({ clip, project, onUpdate }: {
             type="button"
             className={'am-fx-target-chip' + (!clip.targetClipId ? ' is-active' : '')}
             onClick={() => onUpdate({ targetClipId: undefined })}
-            title="所有同时刻 image 都叠加 (全局)"
+            title={L.targetGlobalTip}
           >
-            🌐 全局
+            {L.targetGlobalShort}
           </button>
           {imageClips.map(ic => (
             <button
@@ -6522,31 +7312,31 @@ function FXProps({ clip, project, onUpdate }: {
               type="button"
               className={'am-fx-target-chip' + (clip.targetClipId === ic.id ? ' is-active' : '') + (ic.kind === 'scene' ? ' am-fx-target-chip-scene' : '')}
               onClick={() => onUpdate({ targetClipId: ic.id })}
-              title={`${ic.label || '图片'} · ${ic.start.toFixed(1)}-${ic.end.toFixed(1)}s${ic.kind === 'scene' ? ' (场景)' : ''}`}
+              title={`${ic.label || L.targetImg} · ${ic.start.toFixed(1)}-${ic.end.toFixed(1)}s${ic.kind === 'scene' ? L.targetSceneTag : ''}`}
             >
-              {ic.kind === 'scene' ? '🎬' : '🐼'} {(ic.label || '图').slice(0, 6)}
+              {ic.kind === 'scene' ? '🎬' : '🐼'} {(ic.label || (lang === 'en' ? 'img' : '图')).slice(0, 6)}
             </button>
           ))}
         </div>
-        <div className="am-fx-target-tip">💡 默认绑定到顶层非场景 image · 右键 timeline FX clip 也能快换</div>
+        <div className="am-fx-target-tip">{L.targetTip}</div>
       </div>
       {/* v23-h: 移动特效引导卡 — 放最顶部 (用户点 timeline 上的 move clip 立刻看到) */}
       {isMove && (
         <div className="am-fx-move-guide">
           <div className="am-fx-move-guide-head">
             <Move size={14} strokeWidth={2.2} />
-            <span>移动动画 · 引导</span>
+            <span>{L.moveGuide}</span>
           </div>
           <div className="am-fx-move-guide-body">
-            画面会从 <strong>起点 A</strong> 缓慢移到 <strong>终点 B</strong>.<br/>
-            <strong>速度 = 这个 FX clip 的时长</strong> (timeline 上拖把手调).<br/>
-            <strong>在画板上直接拖蓝色 A 和橙色 B 圆圈</strong>设位置 — 最快.
+            {lang === 'en'
+              ? <>The image slowly moves from <strong>Start A</strong> to <strong>End B</strong>.<br/><strong>Speed = this FX clip's duration</strong> (drag the timeline handle).<br/><strong>Drag the blue A and orange B circles right on the canvas</strong> to set positions — fastest.</>
+              : <>画面会从 <strong>起点 A</strong> 缓慢移到 <strong>终点 B</strong>.<br/><strong>速度 = 这个 FX clip 的时长</strong> (timeline 上拖把手调).<br/><strong>在画板上直接拖蓝色 A 和橙色 B 圆圈</strong>设位置 — 最快.</>}
           </div>
           {/* 双卡 visual */}
           <div className="am-move-frames">
             <div className="am-move-frame am-move-frame-start">
               <div className="am-move-frame-head">
-                <span className="am-move-frame-badge">起点 A</span>
+                <span className="am-move-frame-badge">{L.startA}</span>
                 <span className="am-move-frame-meta">X {startT.x.toFixed(0)} · Y {startT.y.toFixed(0)} · {startT.scale.toFixed(2)}x</span>
               </div>
               <div className="am-move-frame-thumb">
@@ -6559,7 +7349,7 @@ function FXProps({ clip, project, onUpdate }: {
             </div>
             <div className="am-move-frame am-move-frame-end">
               <div className="am-move-frame-head">
-                <span className="am-move-frame-badge am-move-frame-badge-end">终点 B</span>
+                <span className="am-move-frame-badge am-move-frame-badge-end">{L.endB}</span>
                 <span className="am-move-frame-meta">X {endT.x.toFixed(0)} · Y {endT.y.toFixed(0)} · {endT.scale.toFixed(2)}x</span>
               </div>
               <div className="am-move-frame-thumb">
@@ -6580,37 +7370,37 @@ function FXProps({ clip, project, onUpdate }: {
           </div>
           {/* 双控件 */}
           <div className="am-move-ctrl-section">
-            <div className="am-move-ctrl-label am-move-ctrl-label-start">起点 A 位置</div>
+            <div className="am-move-ctrl-label am-move-ctrl-label-start">{L.startAPos}</div>
             <div className="am-row">
               <NumberInput label="X%" value={startT.x} step={1} min={-60} max={60} onChange={(v) => onUpdate({ startTransform: { ...startT, x: clamp(v, -60, 60) } })} />
               <NumberInput label="Y%" value={startT.y} step={1} min={-60} max={60} onChange={(v) => onUpdate({ startTransform: { ...startT, y: clamp(v, -60, 60) } })} />
-              <NumberInput label="缩放" value={startT.scale} step={0.05} min={0.2} max={4} onChange={(v) => onUpdate({ startTransform: { ...startT, scale: clamp(v, 0.2, 4) } })} />
+              <NumberInput label={L.scaleWord} value={startT.scale} step={0.05} min={0.2} max={4} onChange={(v) => onUpdate({ startTransform: { ...startT, scale: clamp(v, 0.2, 4) } })} />
             </div>
           </div>
           <div className="am-move-ctrl-section">
-            <div className="am-move-ctrl-label am-move-ctrl-label-end">终点 B 位置</div>
+            <div className="am-move-ctrl-label am-move-ctrl-label-end">{L.endBPos}</div>
             <div className="am-row">
               <NumberInput label="X%" value={endT.x} step={1} min={-60} max={60} onChange={(v) => onUpdate({ endTransform: { ...endT, x: clamp(v, -60, 60) } })} />
               <NumberInput label="Y%" value={endT.y} step={1} min={-60} max={60} onChange={(v) => onUpdate({ endTransform: { ...endT, y: clamp(v, -60, 60) } })} />
-              <NumberInput label="缩放" value={endT.scale} step={0.05} min={0.2} max={4} onChange={(v) => onUpdate({ endTransform: { ...endT, scale: clamp(v, 0.2, 4) } })} />
+              <NumberInput label={L.scaleWord} value={endT.scale} step={0.05} min={0.2} max={4} onChange={(v) => onUpdate({ endTransform: { ...endT, scale: clamp(v, 0.2, 4) } })} />
             </div>
           </div>
           {/* 一键操作 */}
           <div className="am-move-quick-ops">
-            <button className="am-move-quick-op" onClick={swapStartEnd} type="button" title="A ↔ B 互换 (一秒反向)">
-              <ArrowLeftRight size={11} strokeWidth={2.2} /> A ↔ B 互换
+            <button className="am-move-quick-op" onClick={swapStartEnd} type="button" title={L.swapABTip}>
+              <ArrowLeftRight size={11} strokeWidth={2.2} /> {L.swapAB}
             </button>
-            <button className="am-move-quick-op" onClick={() => setEqual('B=A')} type="button" title="把终点设为起点 (不动)">B = A</button>
-            <button className="am-move-quick-op" onClick={() => setEqual('A=B')} type="button" title="把起点设为终点 (不动)">A = B</button>
+            <button className="am-move-quick-op" onClick={() => setEqual('B=A')} type="button" title={L.setBeqATip}>{L.setBeqA}</button>
+            <button className="am-move-quick-op" onClick={() => setEqual('A=B')} type="button" title={L.setAeqBTip}>{L.setAeqB}</button>
           </div>
           <div className="am-move-tip">
-            💡 拖画板上的 A/B 圆圈最直觉 · timeline 拖把手调动画时长 (= 速度)
+            {lang === 'en' ? '💡 Dragging the A/B circles on the canvas is most intuitive · drag the timeline handle to set animation duration (= speed)' : '💡 拖画板上的 A/B 圆圈最直觉 · timeline 拖把手调动画时长 (= 速度)'}
           </div>
         </div>
       )}
       {/* v23-j (phase 2): 其他 FX 引导卡 — 按 fx.id 切换 */}
       {!isMove && <FXGuideCard clip={clip} onUpdate={onUpdate} />}
-      <Field label="特效类型">
+      <Field label={L.fxType}>
         {groups.map(g => (
           <Fragment key={g.group}>
             <div className="am-fx-group-label">{g.label}</div>
@@ -6621,10 +7411,10 @@ function FXProps({ clip, project, onUpdate }: {
                   type="button"
                   className={'am-chip am-fx-chip' + (clip.fx === f.id ? ' is-active' : '')}
                   onClick={() => switchFx(f.id)}
-                  title={f.desc}
+                  title={fxDesc(f.id, f.desc, lang)}
                 >
                   <span className="am-fx-chip-emoji"><f.icon size={13} strokeWidth={2} /></span>
-                  <span>{f.name}</span>
+                  <span>{fxName(f.id, f.name, lang)}</span>
                 </button>
               ))}
             </div>
@@ -6638,6 +7428,8 @@ function FXProps({ clip, project, onUpdate }: {
 
 // v23-j (phase 2): 各 FX 引导卡 — 按 fx.id 切换 sub-component
 function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<string, unknown>) => void }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const fx = clip.fx;
   const info = FX_LIB.find(f => f.id === fx);
   if (!info || fx === 'none' || fx === 'move') return null;
@@ -6654,26 +7446,26 @@ function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<st
     <div className="am-fx-guide">
       <div className="am-fx-guide-head">
         <Icon size={14} strokeWidth={2.2} />
-        <span>{info.name} · 引导</span>
+        <span>{fxName(info.id, info.name, lang)}{L.guideSuffix}</span>
       </div>
-      <div className="am-fx-guide-desc">{info.desc}</div>
+      <div className="am-fx-guide-desc">{fxDesc(info.id, info.desc, lang)}</div>
       {/* 强度类 — shake/flash/pulse/glitch — 单 strength */}
       {strengthGroup.includes(fx) && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">强度 · {strength.toFixed(2)}x</div>
+          <div className="am-fx-guide-label">{L.strengthLabel(strength.toFixed(2))}</div>
           <div className="am-fx-guide-presets">
             {[0.5, 1, 1.5, 2, 3].map(v => (
               <button key={v} className={'am-fx-guide-preset' + (Math.abs(strength - v) < 0.01 ? ' is-active' : '')} onClick={() => onUpdate({ strength: v })} type="button">{v}x</button>
             ))}
           </div>
           <input type="range" min="0" max="3" step="0.05" value={strength} onChange={(e) => onUpdate({ strength: parseFloat(e.target.value) })} className="am-range" />
-          <div className="am-fx-guide-tip">💡 timeline 拖把手 = 调动效时长</div>
+          <div className="am-fx-guide-tip">{L.timelineDragHint}</div>
         </div>
       )}
       {/* pan 镜头平移 — 强度 + 方向 visual */}
       {panGroup.includes(fx) && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">平移强度 · {strength.toFixed(2)}x</div>
+          <div className="am-fx-guide-label">{L.panStrengthLabel(strength.toFixed(2))}</div>
           <div className="am-fx-guide-pan-visual">
             <div className="am-fx-guide-pan-frame">
               <div className={`am-fx-guide-pan-arrow am-fx-guide-pan-arrow-${fx}`} />
@@ -6685,77 +7477,77 @@ function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<st
             ))}
           </div>
           <input type="range" min="0.2" max="3" step="0.05" value={strength} onChange={(e) => onUpdate({ strength: parseFloat(e.target.value) })} className="am-range" />
-          <div className="am-fx-guide-tip">💡 镜头 {fx === 'pan-l' ? '从右到左' : fx === 'pan-r' ? '从左到右' : fx === 'pan-u' ? '从下到上' : '从上到下'} 平移 · 强度越大移得越多</div>
+          <div className="am-fx-guide-tip">{L.panDirHint(fx === 'pan-l' ? L.panL : fx === 'pan-r' ? L.panR : fx === 'pan-u' ? L.panU : L.panD)}</div>
         </div>
       )}
       {/* zoom-in/out — from/to scale */}
       {(fx === 'zoom-in' || fx === 'zoom-out') && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">起始缩放 {zoomFrom.toFixed(2)}x → 结束 {zoomTo.toFixed(2)}x</div>
+          <div className="am-fx-guide-label">{L.zoomFromToLabel(zoomFrom.toFixed(2), zoomTo.toFixed(2))}</div>
           <div className="am-row">
-            <NumberInput label="从" value={zoomFrom} step={0.05} min={0.3} max={3} onChange={(v) => onUpdate({ zoomFrom: clamp(v, 0.3, 3) })} />
-            <NumberInput label="到" value={zoomTo} step={0.05} min={0.3} max={3} onChange={(v) => onUpdate({ zoomTo: clamp(v, 0.3, 3) })} />
+            <NumberInput label={L.zoomFrom} value={zoomFrom} step={0.05} min={0.3} max={3} onChange={(v) => onUpdate({ zoomFrom: clamp(v, 0.3, 3) })} />
+            <NumberInput label={L.zoomTo} value={zoomTo} step={0.05} min={0.3} max={3} onChange={(v) => onUpdate({ zoomTo: clamp(v, 0.3, 3) })} />
           </div>
           <div className="am-fx-guide-presets">
-            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 1.25 })} type="button">轻推 1→1.25</button>
-            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 1.5 })} type="button">中推 1→1.5</button>
-            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 2.0 })} type="button">猛推 1→2</button>
-            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: zoomTo, zoomTo: zoomFrom })} type="button">↔ 反向</button>
+            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 1.25 })} type="button">{L.zoomLight}</button>
+            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 1.5 })} type="button">{L.zoomMid}</button>
+            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: 1.0, zoomTo: 2.0 })} type="button">{L.zoomHard}</button>
+            <button className="am-fx-guide-preset" onClick={() => onUpdate({ zoomFrom: zoomTo, zoomTo: zoomFrom })} type="button">{L.zoomRev}</button>
           </div>
-          <div className="am-fx-guide-tip">💡 起→终 lerp · 起=终 → 不动</div>
+          <div className="am-fx-guide-tip">{L.zoomLerpHint}</div>
         </div>
       )}
       {/* ken-burns — 强度 */}
       {fx === 'ken-burns' && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">推近 + 平移强度 · {strength.toFixed(2)}x</div>
+          <div className="am-fx-guide-label">{L.kenLabel(strength.toFixed(2))}</div>
           <div className="am-fx-guide-presets">
             {[0.5, 1, 1.5, 2].map(v => (
               <button key={v} className={'am-fx-guide-preset' + (Math.abs(strength - v) < 0.01 ? ' is-active' : '')} onClick={() => onUpdate({ strength: v })} type="button">{v}x</button>
             ))}
           </div>
           <input type="range" min="0.2" max="3" step="0.05" value={strength} onChange={(e) => onUpdate({ strength: parseFloat(e.target.value) })} className="am-range" />
-          <div className="am-fx-guide-tip">💡 经典纪录片感: 缓慢推近同时轻微横向平移</div>
+          <div className="am-fx-guide-tip">{L.kenHint}</div>
         </div>
       )}
       {/* zoom (入场弹大) — from scale */}
       {fx === 'zoom' && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">起始缩放 · {zoomFrom.toFixed(2)}x → 1.00x</div>
+          <div className="am-fx-guide-label">{L.zoomInFromLabel(zoomFrom.toFixed(2))}</div>
           <input type="range" min="0.1" max="0.9" step="0.05" value={zoomFrom} onChange={(e) => onUpdate({ zoomFrom: parseFloat(e.target.value) })} className="am-range" />
           <div className="am-fx-guide-presets">
             {[0.1, 0.3, 0.5, 0.7].map(v => (
               <button key={v} className={'am-fx-guide-preset' + (Math.abs(zoomFrom - v) < 0.01 ? ' is-active' : '')} onClick={() => onUpdate({ zoomFrom: v })} type="button">{v}x</button>
             ))}
           </div>
-          <div className="am-fx-guide-tip">💡 越小越夸张 (0.1x = 从几乎看不见弹到原大小)</div>
+          <div className="am-fx-guide-tip">{L.zoomInHint}</div>
         </div>
       )}
       {/* 入场强度类 — slide-l/r/bounce */}
       {enterStrengthGroup.includes(fx) && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">{fx === 'bounce' ? '弹跳' : '滑入'}强度 · {strength.toFixed(2)}x</div>
+          <div className="am-fx-guide-label">{L.enterStrengthLabel(fx === 'bounce' ? L.kindBounce : L.kindSlide, strength.toFixed(2))}</div>
           <input type="range" min="0.3" max="2" step="0.05" value={strength} onChange={(e) => onUpdate({ strength: parseFloat(e.target.value) })} className="am-range" />
-          <div className="am-fx-guide-tip">💡 {fx === 'slide-l' ? '从屏幕左外滑入, 强度 = 起始距离' : fx === 'slide-r' ? '从屏幕右外滑入' : '弹跳高度倍数'}</div>
+          <div className="am-fx-guide-tip">💡 {fx === 'slide-l' ? L.slideLHint : fx === 'slide-r' ? L.slideRHint : L.bounceHint}</div>
         </div>
       )}
       {/* spin — 圈数 */}
       {fx === 'spin' && (
         <div className="am-fx-guide-row">
-          <div className="am-fx-guide-label">转圈数 · {spinTurns} 圈</div>
+          <div className="am-fx-guide-label">{L.spinLabel(spinTurns)}</div>
           <div className="am-fx-guide-presets">
             {[0.5, 1, 2, 3].map(v => (
-              <button key={v} className={'am-fx-guide-preset' + (Math.abs(spinTurns - v) < 0.01 ? ' is-active' : '')} onClick={() => onUpdate({ spinTurns: v })} type="button">{v}圈</button>
+              <button key={v} className={'am-fx-guide-preset' + (Math.abs(spinTurns - v) < 0.01 ? ' is-active' : '')} onClick={() => onUpdate({ spinTurns: v })} type="button">{v}{L.spinTurnsSuffix}</button>
             ))}
           </div>
-          <div className="am-fx-guide-tip">💡 旋转圈数 · 越多越眼花</div>
+          <div className="am-fx-guide-tip">{L.spinHint}</div>
         </div>
       )}
       {/* fade — 仅说明 */}
       {(fx === 'fade-in' || fx === 'fade-out') && (
         <div className="am-fx-guide-row">
           <div className="am-fx-guide-tip" style={{ marginTop: 0 }}>
-            💡 {fx === 'fade-in' ? '画面在 clip 时长内从透明变清晰' : '画面在 clip 时长内从清晰变透明'} · 时长 = clip 时长 (拖把手调)
+            💡 {fx === 'fade-in' ? L.fadeInHint : L.fadeOutHint}{L.fadeDurSuffix}
           </div>
         </div>
       )}
@@ -6764,6 +7556,8 @@ function FXGuideCard({ clip, onUpdate }: { clip: FXClip; onUpdate: (p: Record<st
 }
 
 function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTTS }: { clip: TTSClip; onUpdate: (p: Record<string, unknown>) => void; project: ProjectState; onLinkCaptionTTS: (capId: string, ttsId: string) => void; onUnlinkCaptionTTS: (id: string) => void }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const v = VOICE_BY_ID[resolveVoiceId(clip.voice)];
   const pk = usePreviewKey();
   // v23-e: estimate 用 clip 级 rate (用户调 1.5x 倍速时, 预计时长 / 1.5)
@@ -6781,7 +7575,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
   // 关键: 写 audioSrc 时**自动测真实时长 → 调 clip.end = start + duration**
   // 让时间轴 clip 长度 1:1 跟实际 audio 一致 (剪映/CapCut 标准)
   // → 导出时音视频同步, 不会"配音先于/后于"
-  const applyAudioSrc = async (dataUrl: string, label = '配音') => {
+  const applyAudioSrc = async (dataUrl: string, label: string = L.voiceWord) => {
     try {
       const duration = await getAudioDuration(dataUrl);
       // wallDuration = audio 原始时长 / playbackRate (rate>1 加速 → 实际墙钟更短)
@@ -6790,12 +7584,12 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
       const wallDuration = duration / rate;
       const newEnd = clip.start + wallDuration;
       onUpdate({ audioSrc: dataUrl, end: newEnd, genFailed: false });
-      toast.success(`✅ ${label} · 真音轨 ${wallDuration.toFixed(1)}s (rate ${rate.toFixed(2)}) · 时间轴已对齐`);
+      toast.success(L.audioReal(label, wallDuration.toFixed(1), rate.toFixed(2)));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn('[audioSrc] duration probe failed:', e);
       onUpdate({ audioSrc: dataUrl, genFailed: false });
-      toast.success(`✅ ${label} · 真音轨 (时长探测失败, end 保持)`);
+      toast.success(L.audioRealNoProbe(label));
     }
   };
 
@@ -6812,7 +7606,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         const blob = new Blob(chunks, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.onload = () => {
-          void applyAudioSrc(String(reader.result || ''), '录音');
+          void applyAudioSrc(String(reader.result || ''), L.recWord);
         };
         reader.readAsDataURL(blob);
         stream.getTracks().forEach(t => t.stop());
@@ -6822,7 +7616,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
       mediaRecRef.current = mr;
       setRecording(true);
     } catch (e) {
-      toast.error('麦克风获取失败 (浏览器权限?)');
+      toast.error(L.micFail);
       console.warn(e);
     }
   };
@@ -6834,7 +7628,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
   };
   const clearRecord = () => {
     onUpdate({ audioSrc: undefined });
-    toast('已删除录音, 导出会烧字幕代替');
+    toast(L.recDeleted);
   };
   // 跳出框架方案: 用户从外部 TTS (剪映/讯飞/百度/有道) 生成 mp3 → 上传 → applyAudioSrc 自动 align
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -6844,7 +7638,7 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
     if (!f) return;
     // v23-b: TTS clip 单音频 → 提到 15MB (容纳长台词无损 mp3)
     if (f.size > 15 * 1024 * 1024) {
-      toast.error('单 audio 文件最多 15MB');
+      toast.error(L.audioMax15);
       return;
     }
     try {
@@ -6854,9 +7648,9 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         r.onerror = () => reject(new Error('read failed'));
         r.readAsDataURL(f);
       });
-      await applyAudioSrc(dataUrl, `上传 ${f.name}`);
+      await applyAudioSrc(dataUrl, L.uploadLabel(f.name));
     } catch {
-      toast.error('上传失败');
+      toast.error(L.uploadFail);
     }
   };
   useEffect(() => () => {
@@ -6867,20 +7661,20 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
   const linkedCap = clip.linkedCaptionId ? project.clips.find(c => c.id === clip.linkedCaptionId && c.trackId === 'caption') as CaptionClip | undefined : undefined;
   const alignToCaption = () => {
     if (capCandidates.length === 0) {
-      toast.error('当前没有字幕 clip · 先拖一个 caption 上时间轴 (LeftPane 字幕 subtab)', { duration: 5000 });
+      toast.error(L.noCapClip, { duration: 5000 });
       return;
     }
     const counterpart = findCounterpartClip(project.clips, { start: clip.start, end: clip.end }, 'caption');
-    if (!counterpart) { toast.error('找不到合适的字幕 clip 对齐'); return; }
+    if (!counterpart) { toast.error(L.noFitCap); return; }
     // v23-e: 配音时段对齐到字幕 + 同步 text + 建 link
     const capText = (counterpart as CaptionClip).text || '';
     onUpdate({ start: counterpart.start, end: counterpart.end, text: capText, audioSrc: undefined, audioEngine: undefined, genFailed: false, linkedCaptionId: counterpart.id });
     onLinkCaptionTTS(counterpart.id, clip.id);
-    toast.success(`✓ 配音 ⇌ 字幕 双向链接 · 文字 "${capText.slice(0, 12)}" · 时段 ${counterpart.start.toFixed(2)}→${counterpart.end.toFixed(2)}s`, { duration: 4000 });
+    toast.success(L.linkedCapDone(capText.slice(0, 12), counterpart.start.toFixed(2), counterpart.end.toFixed(2)), { duration: 4000 });
   };
   const onUnlink = () => {
     onUnlinkCaptionTTS(clip.id);
-    toast('已解除 配音 ⇌ 字幕 链接');
+    toast(L.unlinkedCapDone);
   };
   return (
     <>
@@ -6888,12 +7682,12 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
         <div className="am-link-status am-link-status-active">
           <div className="am-link-status-line">
             <Check size={13} strokeWidth={2.4} />
-            <span className="am-link-status-label">已链接字幕</span>
-            <span className="am-link-status-target" title={`Caption clip: ${linkedCap.id}`}>"{(linkedCap.text || '空').slice(0, 12)}"</span>
+            <span className="am-link-status-label">{L.linkedCaption}</span>
+            <span className="am-link-status-target" title={`Caption clip: ${linkedCap.id}`}>"{(linkedCap.text || (lang === 'en' ? 'empty' : '空')).slice(0, 12)}"</span>
           </div>
           <div className="am-link-status-line">
-            <span className="am-link-status-hint">字幕改动时配音自动跟随 (时段 + 文字)</span>
-            <button type="button" className="am-link-unlink-btn" onClick={onUnlink}>解除</button>
+            <span className="am-link-status-hint">{L.linkSyncHintTTS}</span>
+            <button type="button" className="am-link-unlink-btn" onClick={onUnlink}>{L.unlink}</button>
           </div>
         </div>
       ) : (
@@ -6903,15 +7697,15 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
             className="am-align-quick-btn"
             onClick={alignToCaption}
             disabled={capCandidates.length === 0}
-            title={capCandidates.length === 0 ? '当前没有字幕 clip · 先拖一个 caption 上时间轴' : `配音 ⇌ 字幕 双向链接 (时段 + 文字, ${capCandidates.length} 个候选)`}
+            title={capCandidates.length === 0 ? L.noCapShort : L.linkCapTipN(capCandidates.length)}
           >
             <ArrowLeftRight size={14} strokeWidth={2.2} />
-            <span>链接字幕{capCandidates.length > 0 ? ` (${capCandidates.length})` : ''}</span>
+            <span>{L.linkCaption}{capCandidates.length > 0 ? ` (${capCandidates.length})` : ''}</span>
           </button>
-          <div className="am-align-quick-hint">{capCandidates.length === 0 ? '⚠️ 还没有字幕' : '一键时段+台词同步'}</div>
+          <div className="am-align-quick-hint">{capCandidates.length === 0 ? L.noCaptionYet : L.alignSyncHintTTS}</div>
         </div>
       )}
-      <Field label="台词">
+      <Field label={L.lines}>
         <textarea
           className="am-input am-textarea"
           value={clip.text || ''}
@@ -6922,26 +7716,26 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
               onUpdate({ text: newText, audioSrc: undefined, audioEngine: undefined, genFailed: false });
             }
           }}
-          placeholder={v.lang.startsWith('zh') ? '要说什么…' : 'What to say…'}
+          placeholder={v.lang.startsWith('zh') ? L.linesPlaceholderZh : L.linesPlaceholderEn}
         />
         <div className="am-tts-dur-row">
           <span className="am-tts-dur-info">
-            预计读 <strong>{estimated.toFixed(1)}s</strong> · 当前 {actual.toFixed(1)}s
-            {needsAlign && <span className="am-tts-dur-warn"> · 不匹配</span>}
+            {L.estRead} <strong>{estimated.toFixed(1)}s</strong> · {L.estCur} {actual.toFixed(1)}s
+            {needsAlign && <span className="am-tts-dur-warn">{L.estMismatch}</span>}
           </span>
           {needsAlign && (
             <button
               type="button"
               className="am-tts-align-btn"
               onClick={() => onUpdate({ end: clip.start + estimated })}
-              title="把片段长度调到预计朗读时间"
+              title={L.estAlignTitle}
             >
-              🎯 对齐
+              {L.estAlign}
             </button>
           )}
         </div>
       </Field>
-      <Field label="音色">
+      <Field label={L.voiceTone}>
         <div className="am-chips">
           {VOICE_LIB.map(item => (
             <button
@@ -6949,18 +7743,18 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
               className={'am-chip am-voice-chip' + (clip.voice === item.id ? ' is-active' : '')}
               onClick={() => onUpdate({ voice: item.id })}
               type="button"
-              title={item.desc}
+              title={lang === 'en' ? (VOICE_DESC_EN[item.id] ?? item.desc) : item.desc}
             >
               {item.icon ? <item.icon size={13} strokeWidth={2} /> : <span>{item.emoji}</span>}
-              <span>{item.name}</span>
+              <span>{voiceName(item.id, item.name, lang)}</span>
               <span className="am-voice-gender-mini">{item.gender === 'male' ? '♂' : '♀'}</span>
-              <span className="am-voice-lang-mini">{item.lang === 'zh-CN' ? '中' : item.lang === 'en-US' ? 'US' : 'UK'}</span>
+              <span className="am-voice-lang-mini">{voiceLangTag(item.lang, lang)}</span>
             </button>
           ))}
         </div>
       </Field>
       {/* v23-e: TTS 倍速 — clip 级, 0.5-3.0, 优先 voice 级 */}
-      <Field label={`倍速 · ${(clip.playbackRate ?? 1.0).toFixed(2)}x`}>
+      <Field label={L.rateLabel((clip.playbackRate ?? 1.0).toFixed(2))}>
         <div className="am-tts-rate-row">
           {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0].map(r => (
             <button
@@ -6984,9 +7778,9 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
           className="am-range"
         />
         <div className="am-field-sublabel">
-          {(clip.playbackRate ?? 1.0) === 1.0 ? '正常语速 · 改变后试听 / 重生成 audio 才生效' :
-            (clip.playbackRate ?? 1.0) > 1.0 ? `加速 ${((clip.playbackRate ?? 1.0) * 100).toFixed(0)}% · 实际朗读时长 = 原始 / ${(clip.playbackRate ?? 1.0).toFixed(2)}` :
-            `减速 ${((clip.playbackRate ?? 1.0) * 100).toFixed(0)}%`}
+          {(clip.playbackRate ?? 1.0) === 1.0 ? L.rateNormal :
+            (clip.playbackRate ?? 1.0) > 1.0 ? L.rateUp(((clip.playbackRate ?? 1.0) * 100).toFixed(0), (clip.playbackRate ?? 1.0).toFixed(2)) :
+            L.rateDown(((clip.playbackRate ?? 1.0) * 100).toFixed(0))}
         </div>
       </Field>
       <button
@@ -6999,24 +7793,24 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
             // 所听即所得: clip.audioSrc 已生成 → 直接播
             if (clip.audioSrc) { audioEngine.playTTSAudio(clip.audioSrc, 1.0, rate, onDone); return; }
             // 没 audioSrc → fetchTTSForVoice (preferred + fallback), 跟 auto-gen 同链路
-            const sample = clip.text?.trim() || (v.lang.startsWith('zh') ? '这是一段试听' : 'This is a preview');
+            const sample = clip.text?.trim() || (v.lang.startsWith('zh') ? L.sampleZh : L.sampleEn);
             try {
               const { dataUrl } = await fetchTTSForVoice(sample, v);
               if (!isCurrent()) return;
               audioEngine.playTTSAudio(dataUrl, 1.0, rate, onDone);
             } catch {
               if (!isCurrent()) return;
-              toast.error('云端试听失败, 退化浏览器 SS');
+              toast.error(L.cloudPreviewFail);
               const u = audioEngine.speak(sample, v); if (u) u.addEventListener('end', onDone); else onDone();
             }
           });
         }}
         type="button"
       >
-        {pk === 'tts-gen:' + clip.id ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听</>}
+        {pk === 'tts-gen:' + clip.id ? <><Pause size={12} /> {L.stop}</> : <><Play size={12} /> {L.preview}</>}
       </button>
 
-      <Field label="配音音频 · 生成 / 导入 (导出 MP4 带声)">
+      <Field label={L.audioField}>
         <input
           ref={uploadInputRef}
           type="file"
@@ -7031,64 +7825,64 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
               className="am-tb-btn am-tb-btn-primary am-tts-edge-btn"
               style={clip.genFailed ? { background: '#ef4444', color: '#fff', fontWeight: 700 } : undefined}
               onClick={async () => {
-                if (!clip.text?.trim()) { toast.error('先填台词'); return; }
-                const tid = toast.loading(clip.genFailed ? '🔄 重试生成…' : '生成配音中…');
+                if (!clip.text?.trim()) { toast.error(L.fillLineFirst); return; }
+                const tid = toast.loading(clip.genFailed ? L.genRetry : L.genLoading);
                 try {
                   // 走统一入口: 配了代理→真 Azure 语音; 否则 youdao→baidu (跟 auto-gen 一致)
                   const { dataUrl, engine } = await fetchTTSForVoice(clip.text, v);
                   toast.dismiss(tid);
-                  await applyAudioSrc(dataUrl, engine === 'proxy' ? '真 Azure 语音' : engine === 'baidu' ? 'baidu' : '有道');
+                  await applyAudioSrc(dataUrl, engine === 'proxy' ? L.engProxy : engine === 'baidu' ? L.engBaidu : L.engYoudao);
                 } catch (e) {
                   toast.dismiss(tid);
-                  toast.error(`配音生成失败: ${(e as Error).message}`);
+                  toast.error(L.genFail((e as Error).message));
                   onUpdate({ genFailed: true });
                 }
               }}
-              title="云端 TTS (youdao 失败自动试 baidu) · 自动按 audio 时长对齐时间轴"
+              title={L.cloudGenTitle}
             >
-              {clip.genFailed ? '🔄 重试生成 (上次失败)' : '🌐 云端生成 (推荐)'}
+              {clip.genFailed ? L.genRetryBtn : L.cloudGenBtn}
             </button>
             {_userTTSProxyURL && (
               <button
                 type="button"
                 className="am-tb-btn"
                 onClick={async () => {
-                  if (!clip.text?.trim()) { toast.error('先填台词'); return; }
-                  const tid = toast.loading(`代理 ${v.azureName}…`);
+                  if (!clip.text?.trim()) { toast.error(L.fillLineFirst); return; }
+                  const tid = toast.loading(L.proxyLoading(v.azureName));
                   try {
                     const dataUrl = await fetchTTSFromProxy(clip.text, v.azureName, 0, 0);
                     toast.dismiss(tid);
-                    await applyAudioSrc(dataUrl, `Neural ${v.name}`);
+                    await applyAudioSrc(dataUrl, L.neuralLabel(v.name));
                   } catch (e) {
                     toast.dismiss(tid);
-                    toast.error(`代理失败: ${(e as Error).message}`);
+                    toast.error(L.proxyFail((e as Error).message));
                   }
                 }}
               >
-                🎯 代理 Neural
+                {L.proxyNeural}
               </button>
             )}
             <button type="button" className="am-tb-btn am-tts-rec-btn" onClick={() => uploadInputRef.current?.click()}>
-              📂 上传 mp3
+              {L.uploadMp3}
             </button>
             <button type="button" className="am-tb-btn am-tts-rec-btn" onClick={startRecord}>
-              🎙 麦录
+              {L.micRec}
             </button>
             <a
               className="am-tb-btn"
               href={TTSMAKER_URL}
               target="_blank"
               rel="noopener noreferrer"
-              title="网页另一选项"
+              title={L.ttsmakerAlt}
             >
-              🌐 TTSMaker ↗
+              {L.ttsmakerLink}
             </a>
           </div>
         )}
         {recording && (
           <div className="am-tts-record-row">
             <button type="button" className="am-tb-btn am-tts-rec-btn is-rec" onClick={stopRecord}>
-              ⏹ 停止录音
+              {L.stopRec}
             </button>
           </div>
         )}
@@ -7098,20 +7892,18 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
               if (pk === 'tts-rec:' + clip.id) { previewStop(); return; }
               previewStart('tts-rec:' + clip.id, (onDone) => audioEngine.playTTSAudio(clip.audioSrc!, 1.0, clip.playbackRate ?? v.playbackRate ?? 1.0, onDone));
             }}>
-              {pk === 'tts-rec:' + clip.id ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听</>}
+              {pk === 'tts-rec:' + clip.id ? <><Pause size={12} /> {L.stop}</> : <><Play size={12} /> {L.preview}</>}
             </button>
             <button type="button" className="am-tb-btn" onClick={() => uploadInputRef.current?.click()}>
-              📂 重新上传
+              {L.reupload}
             </button>
             <button type="button" className="am-tb-btn am-tb-btn-danger" onClick={clearRecord}>
-              <X size={12} /> 删
+              <X size={12} /> {L.del}
             </button>
           </div>
         )}
         <div className="am-field-sublabel">
-          {clip.audioSrc
-            ? '✅ 已设音轨 · 导出 MP4 真带声 (不烧字幕). 备份/换设备 → 顶栏「导出项目 JSON」会连音频一起导出, 导入即恢复'
-            : '导入自己的配音: ① 点 🌐 TTSMaker (或任意 TTS / 录音) 生成并下载 mp3 → ② 点 📂 上传 mp3 附加到此片段. 「云端生成」= 一键 youdao 自动出声 (女声)'}
+          {clip.audioSrc ? L.audioSetHint : L.audioImportHint}
         </div>
       </Field>
     </>
@@ -7119,12 +7911,14 @@ function TTSProps({ clip, onUpdate, project, onLinkCaptionTTS, onUnlinkCaptionTT
 }
 
 function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<string, unknown>) => void }) {
+  const lang = useUiLang();
+  const L = INSPECTOR_DICT[lang];
   const pk = usePreviewKey();
   const pkey = 'bgmclip:' + clip.id;
   const previewing = pk === pkey;
   return (
     <>
-      <Field label="曲目">
+      <Field label={L.track}>
         <div className="am-chips">
           {BGM_LIB.map(b => (
             <button
@@ -7133,12 +7927,12 @@ function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<stri
               onClick={() => onUpdate({ bgmId: b.id, name: b.name })}
               type="button"
             >
-              {b.name}
+              {bgmName(b.id, b.name, lang)}
             </button>
           ))}
         </div>
       </Field>
-      <Field label={`音量 · ${Math.round((clip.volume ?? 0.5) * 100)}`}>
+      <Field label={L.volumeLabel(Math.round((clip.volume ?? 0.5) * 100))}>
         <input
           type="range" min="0" max="1" step="0.05"
           value={clip.volume ?? 0.5}
@@ -7155,7 +7949,7 @@ function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<stri
         }}
         type="button"
       >
-        {previewing ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 试听 8 秒</>}
+        {previewing ? <><Pause size={12} /> {L.stop}</> : <><Play size={12} /> {L.preview8s}</>}
       </button>
     </>
   );
@@ -7164,6 +7958,32 @@ function BGMProps({ clip, onUpdate }: { clip: BGMClip; onUpdate: (p: Record<stri
 // ============================================================
 // DRAFT POPOVER
 // ============================================================
+const DRAFT_POPOVER_DICT = {
+  zh: {
+    defaultName: (n: number) => `草稿${n}`,
+    title: '沙雕动画草稿',
+    namePlaceholder: (n: number) => `命名当前作品 — 默认 "草稿${n}"`,
+    fullTitle: (max: number) => `最多 ${max} 个 · 先删旧的`, saveCurrentTitle: '保存当前作品 (Ctrl+S)',
+    full: '已满', saveCurrent: '保存当前',
+    emptyTtl: '还没有草稿', emptyHint: '命名 + 点 保存当前 → 这里就有了',
+    loadTitle: '点击读入此草稿', load: '读入', rename: '改名',
+    statImage: '画面', statCaption: '字幕', statFx: '特效', statTts: '配音', statBgm: '音乐',
+    notePlaceholder: '备注…', duplicate: '复制一份',
+    delDlgTitle: '删除草稿', delDlgMsg: (n: string) => `删除 "${n}"?`, delConfirm: '删除', delete: '删除',
+  },
+  en: {
+    defaultName: (n: number) => `Draft ${n}`,
+    title: 'Silly Animation drafts',
+    namePlaceholder: (n: number) => `Name this project — default "Draft ${n}"`,
+    fullTitle: (max: number) => `Max ${max} · delete an old one first`, saveCurrentTitle: 'Save current project (Ctrl+S)',
+    full: 'Full', saveCurrent: 'Save current',
+    emptyTtl: 'No drafts yet', emptyHint: 'Name it + click Save current → it shows up here',
+    loadTitle: 'Click to load this draft', load: 'Load', rename: 'Rename',
+    statImage: 'Image', statCaption: 'Caption', statFx: 'FX', statTts: 'Voice', statBgm: 'Music',
+    notePlaceholder: 'Note…', duplicate: 'Duplicate',
+    delDlgTitle: 'Delete draft', delDlgMsg: (n: string) => `Delete "${n}"?`, delConfirm: 'Delete', delete: 'Delete',
+  },
+} as const;
 // v23-b: 重设计 — 卡片网格 + 缩略图 + inline 改名 + icon 化 + 复制功能
 function DraftPopover({
   drafts, onClose, onSave, onLoad, onDelete, onRename, onNote, onDuplicate,
@@ -7177,6 +7997,8 @@ function DraftPopover({
   onNote: (id: string, note: string) => void;
   onDuplicate: (id: string) => void;
 }) {
+  const lang = useUiLang();
+  const t = DRAFT_POPOVER_DICT[lang];
   const [name, setName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -7191,7 +8013,7 @@ function DraftPopover({
   };
 
   const handleSave = () => {
-    onSave(name.trim() || `草稿${drafts.length + 1}`);
+    onSave(name.trim() || t.defaultName(drafts.length + 1));
     setName('');
   };
 
@@ -7200,7 +8022,7 @@ function DraftPopover({
       <div className="am-popover-backdrop" onClick={onClose} />
       <div className="am-popover am-draft-popover-v3 win7-panel">
         <div className="am-popover-head">
-          <span className="am-popover-title"><FolderOpen size={15} strokeWidth={2.2} /> 沙雕动画草稿 ({drafts.length}/{AM_DRAFT_MAX})</span>
+          <span className="am-popover-title"><FolderOpen size={15} strokeWidth={2.2} /> {t.title} ({drafts.length}/{AM_DRAFT_MAX})</span>
           <button className="am-popover-close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="am-popover-body am-draft-body-v3">
@@ -7209,7 +8031,7 @@ function DraftPopover({
             <input
               type="text"
               className="am-input am-draft-save-input"
-              placeholder={`命名当前作品 — 默认 "草稿${drafts.length + 1}"`}
+              placeholder={t.namePlaceholder(drafts.length + 1)}
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
@@ -7219,10 +8041,10 @@ function DraftPopover({
               className="am-draft-save-btn-v3"
               onClick={handleSave}
               disabled={drafts.length >= AM_DRAFT_MAX}
-              title={drafts.length >= AM_DRAFT_MAX ? `最多 ${AM_DRAFT_MAX} 个 · 先删旧的` : '保存当前作品 (Ctrl+S)'}
+              title={drafts.length >= AM_DRAFT_MAX ? t.fullTitle(AM_DRAFT_MAX) : t.saveCurrentTitle}
             >
               <Save size={13} strokeWidth={2.2} />
-              <span>{drafts.length >= AM_DRAFT_MAX ? '已满' : '保存当前'}</span>
+              <span>{drafts.length >= AM_DRAFT_MAX ? t.full : t.saveCurrent}</span>
             </button>
           </div>
 
@@ -7230,8 +8052,8 @@ function DraftPopover({
           {drafts.length === 0 ? (
             <div className="am-draft-empty-v3">
               <FolderOpen size={28} strokeWidth={1.5} />
-              <div className="am-draft-empty-ttl">还没有草稿</div>
-              <div className="am-draft-empty-hint-v3">命名 + 点 保存当前 → 这里就有了</div>
+              <div className="am-draft-empty-ttl">{t.emptyTtl}</div>
+              <div className="am-draft-empty-hint-v3">{t.emptyHint}</div>
             </div>
           ) : (
             <div className="am-draft-grid-v3">
@@ -7251,7 +8073,7 @@ function DraftPopover({
                       type="button"
                       className="am-draft-thumb-btn"
                       onClick={() => onLoad(d.id)}
-                      title="点击读入此草稿"
+                      title={t.loadTitle}
                     >
                       {d.thumbSrc ? (
                         <img src={d.thumbSrc} alt={d.name} className="am-draft-thumb-img" />
@@ -7260,7 +8082,7 @@ function DraftPopover({
                       )}
                       <div className="am-draft-thumb-overlay">
                         <Play size={20} strokeWidth={2.2} />
-                        <span>读入</span>
+                        <span>{t.load}</span>
                       </div>
                       <span className="am-draft-thumb-dur">{d.project.duration.toFixed(1)}s</span>
                     </button>
@@ -7286,27 +8108,27 @@ function DraftPopover({
                             className="am-draft-icon-btn"
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setEditValue(d.name); setEditingId(d.id); }}
-                            title="改名"
+                            title={t.rename}
                           >
                             <Pencil size={11} strokeWidth={2.2} />
                           </button>
                         </div>
                       )}
                       <div className="am-draft-stats-v3">
-                        <span title={`画面 ${stats.image}`}><ImageIcon size={10} strokeWidth={2} />{stats.image}</span>
-                        <span title={`字幕 ${stats.caption}`}><TypeIcon size={10} strokeWidth={2} />{stats.caption}</span>
-                        {stats.fx > 0 && <span title={`特效 ${stats.fx}`}><Sparkles size={10} strokeWidth={2} />{stats.fx}</span>}
-                        {stats.tts > 0 && <span title={`配音 ${stats.tts}`}><Mic size={10} strokeWidth={2} />{stats.tts}</span>}
-                        {stats.bgm > 0 && <span title={`音乐 ${stats.bgm}`}><Music size={10} strokeWidth={2} />{stats.bgm}</span>}
+                        <span title={`${t.statImage} ${stats.image}`}><ImageIcon size={10} strokeWidth={2} />{stats.image}</span>
+                        <span title={`${t.statCaption} ${stats.caption}`}><TypeIcon size={10} strokeWidth={2} />{stats.caption}</span>
+                        {stats.fx > 0 && <span title={`${t.statFx} ${stats.fx}`}><Sparkles size={10} strokeWidth={2} />{stats.fx}</span>}
+                        {stats.tts > 0 && <span title={`${t.statTts} ${stats.tts}`}><Mic size={10} strokeWidth={2} />{stats.tts}</span>}
+                        {stats.bgm > 0 && <span title={`${t.statBgm} ${stats.bgm}`}><Music size={10} strokeWidth={2} />{stats.bgm}</span>}
                       </div>
                       <div className="am-draft-time-v3">
-                        {new Date(d.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(d.updatedAt).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </div>
                       <textarea
                         className="am-input am-draft-note-v3"
                         value={d.note || ''}
                         onChange={(e) => onNote(d.id, e.target.value)}
-                        placeholder="备注…"
+                        placeholder={t.notePlaceholder}
                         rows={1}
                       />
                       <div className="am-draft-actions-v3">
@@ -7315,7 +8137,7 @@ function DraftPopover({
                           type="button"
                           onClick={() => onDuplicate(d.id)}
                           disabled={drafts.length >= AM_DRAFT_MAX}
-                          title="复制一份"
+                          title={t.duplicate}
                         >
                           <CopyIcon size={12} strokeWidth={2} />
                         </button>
@@ -7324,14 +8146,14 @@ function DraftPopover({
                           type="button"
                           onClick={async () => {
                             const res = await showDialog({
-                              title: '删除草稿',
-                              message: `删除 "${d.name}"?`,
+                              title: t.delDlgTitle,
+                              message: t.delDlgMsg(d.name),
                               destructive: true,
-                              confirmText: '删除',
+                              confirmText: t.delConfirm,
                             });
                             if (res.confirmed) onDelete(d.id);
                           }}
-                          title="删除"
+                          title={t.delete}
                         >
                           <Trash2 size={12} strokeWidth={2} />
                         </button>
@@ -7352,6 +8174,8 @@ function DraftPopover({
 // PREVIEW MODAL — 全屏播放
 // ============================================================
 function PreviewModal({ project, userBGMs, aspect, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; aspect: AspectId; onClose: () => void }) {
+  const lang = useUiLang();
+  const t = PREVIEW_MODAL_DICT[lang];
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const userBGMsRef = useRef(userBGMs);
@@ -7473,7 +8297,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
     <div className="am-preview-modal-backdrop" onClick={onClose}>
       <div className="am-preview-modal" onClick={(e) => e.stopPropagation()}>
         <div className="am-popover-head">
-          <span>🎬 全屏预览 · {project.duration.toFixed(1)}s · {project.clips.length} 片段</span>
+          <span>{t.title} · {project.duration.toFixed(1)}s · {project.clips.length} {t.clips}</span>
           <button className="am-popover-close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="am-preview-modal-stage" ref={stageRef}>
@@ -7481,7 +8305,7 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
             {activeImageClips.length === 0 && (
               <div className="am-preview-empty">
                 <div className="am-preview-emoji">🐼</div>
-                <div className="am-preview-empty-text">空预览</div>
+                <div className="am-preview-empty-text">{t.emptyPreview}</div>
               </div>
             )}
             {activeImageClips.map((c) => {
@@ -7546,15 +8370,15 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
                     ...xformStyle,
                   }}
                 >
-                  {ent.visibleText || (c.text ? '' : '空字幕')}
+                  {ent.visibleText || (c.text ? '' : t.emptyCaption)}
                 </div>
               );
             })}
           </div>
         </div>
         <div className="am-preview-modal-transport">
-          <button className="am-step-btn" onClick={() => { setIsPlaying(false); setPlayhead(0); spokenRef.current.clear(); }} title="重头"><SkipBack size={16} /></button>
-          <button className="am-play-btn" onClick={() => setIsPlaying(prev => { if (!prev) setPlayhead(ph => (ph >= project.duration - 0.05 ? 0 : ph)); return !prev; })} title="播放/暂停 (Space)">
+          <button className="am-step-btn" onClick={() => { setIsPlaying(false); setPlayhead(0); spokenRef.current.clear(); }} title={t.restart}><SkipBack size={16} /></button>
+          <button className="am-play-btn" onClick={() => setIsPlaying(prev => { if (!prev) setPlayhead(ph => (ph >= project.duration - 0.05 ? 0 : ph)); return !prev; })} title={t.playPause}>
             {isPlaying ? <Pause size={20} /> : <Play size={20} />}
           </button>
           <div className="am-transport-time am-transport-time-big">
@@ -7562,17 +8386,29 @@ function PreviewModal({ project, userBGMs, aspect, onClose }: { project: Project
             <span className="am-transport-total">/ {formatTC(project.duration)}</span>
           </div>
           <div className="am-toolbar-spacer" />
-          <div className="am-transport-kbd">Esc 关闭 · Space 播放</div>
+          <div className="am-transport-kbd">{t.transportKbd}</div>
         </div>
       </div>
     </div>
   );
 }
+const PREVIEW_MODAL_DICT = {
+  zh: {
+    title: '🎬 全屏预览', clips: '片段', emptyPreview: '空预览', emptyCaption: '空字幕',
+    restart: '重头', playPause: '播放/暂停 (Space)', transportKbd: 'Esc 关闭 · Space 播放',
+  },
+  en: {
+    title: '🎬 Fullscreen preview', clips: 'clips', emptyPreview: 'Empty preview', emptyCaption: 'Empty caption',
+    restart: 'Restart', playPause: 'Play/Pause (Space)', transportKbd: 'Esc close · Space play',
+  },
+} as const;
 
 // ============================================================
 // EXPORT MODAL — 真渲染 + 下载
 // ============================================================
 function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: ProjectState; userBGMs: BGMPreset[]; name: string; aspect: AspectId; onClose: () => void }) {
+  const lang = useUiLang();
+  const t = EXPORT_MODAL_DICT[lang];
   const isMobile = useIsMobile();   // 手机端: 降默认分辨率/帧率 (防 1080p MediaRecorder OOM/掉帧)
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
@@ -7636,12 +8472,12 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
         }
       } catch (e) {
         if (!cancelledRef.current) {
-          setError((e as Error).message || '导出失败');
+          setError((e as Error).message || t.exportFail);
           setPhase('done');
         }
       }
     })();
-  }, [project, name, format, userBGMs, resolution, fps, isGif, gifPresetId]);
+  }, [project, name, format, userBGMs, resolution, fps, isGif, gifPresetId, aspect, t]);
 
   useEffect(() => {
     return () => { cancelledRef.current = true; audioEngine.cancelAll(); audioEngine.stopExportCapture(); };
@@ -7651,18 +8487,18 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
     <div className="am-export-modal-backdrop" onClick={(done || error) ? onClose : undefined}>
       <div className="am-export-modal win7-panel" onClick={(e) => e.stopPropagation()}>
         <div className="am-popover-head">
-          <span><Download size={14} /> {isGif ? '导出 GIF' : `导出视频 (${supportedMime.ext.toUpperCase()})`}</span>
+          <span><Download size={14} /> {isGif ? t.headGif : t.headVideo(supportedMime.ext.toUpperCase())}</span>
           {(done || error || phase === 'ready') && <button className="am-popover-close" onClick={onClose}><X size={14} /></button>}
         </div>
         <div className="am-export-body">
           {phase === 'ready' && isGif && (
             <>
               <div className="am-export-status">
-                <strong>导出 GIF 动图</strong>
-                <span className="am-export-sub">{gifPreset.width}×{gifPreset.height} · {gifPreset.fps}fps · 时长 {Math.min(project.duration, GIF_MAX_DURATION, gifPreset.maxDuration).toFixed(1)}s · 预估 ~{gifEstSize}KB</span>
+                <strong>{t.gifTitle}</strong>
+                <span className="am-export-sub">{gifPreset.width}×{gifPreset.height} · {gifPreset.fps}fps · {t.duration} {Math.min(project.duration, GIF_MAX_DURATION, gifPreset.maxDuration).toFixed(1)}s · {t.est} ~{gifEstSize}KB</span>
               </div>
               <div className="am-export-format-row">
-                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>社媒预设 (尺寸 + 帧率)</div>
+                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>{t.socialPreset}</div>
                 <div className="am-row" style={{ gap: 6, flexWrap: 'wrap' }}>
                   {GIF_PRESETS.map(p => (
                     <button
@@ -7681,22 +8517,22 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
               </div>
               <div className="am-export-hint">
                 <AlertCircle size={11} />
-                <span>GIF 无声音 · 跨设备兼容性最强 (微信/X/TG 直发) · 体积越小延迟越低</span>
+                <span>{t.gifHint}</span>
               </div>
               <button className="am-tb-btn am-tb-btn-primary" onClick={startExport} style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}>
-                <Download size={13} /> 开始导出 GIF
+                <Download size={13} /> {t.startGif}
               </button>
             </>
           )}
           {phase === 'ready' && !isGif && (
             <>
               <div className="am-export-status">
-                <strong>{`导出 ${(supportedMime.ext || 'mp4').toUpperCase()} 视频`}</strong>
-                <span className="am-export-sub">{exportDims(resolution, aspect).w}×{exportDims(resolution, aspect).h} · {fps}fps · 时长 {project.duration.toFixed(1)}s · 估算码率 {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
+                <strong>{t.videoTitle((supportedMime.ext || 'mp4').toUpperCase())}</strong>
+                <span className="am-export-sub">{exportDims(resolution, aspect).w}×{exportDims(resolution, aspect).h} · {fps}fps · {t.duration} {project.duration.toFixed(1)}s · {t.estBitrate} {(RESOLUTION_VBPS[resolution] / 1_000_000).toFixed(1)} Mbps</span>
               </div>
               {/* v23-k Phase A: 分辨率 + 帧率 自选 */}
               <div className="am-export-format-row">
-                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>分辨率</div>
+                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>{t.resolution}</div>
                 <div className="am-row" style={{ gap: 6 }}>
                   {(['480p', '720p', '1080p'] as ExportResolution[]).map(r => (
                     <button
@@ -7707,13 +8543,13 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
                       style={{ flex: 1, justifyContent: 'center' }}
                       title={`${exportDims(r, aspect).w}×${exportDims(r, aspect).h} · ${(RESOLUTION_VBPS[r] / 1_000_000).toFixed(1)} Mbps`}
                     >
-                      {r === '480p' ? '480p 标清' : r === '720p' ? '720p 高清' : '1080p 蓝光'}
+                      {r === '480p' ? t.res480 : r === '720p' ? t.res720 : t.res1080}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="am-export-format-row">
-                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>帧率</div>
+                <div className="am-field-sublabel" style={{ marginBottom: 4 }}>{t.fps}</div>
                 <div className="am-row" style={{ gap: 6 }}>
                   {([24, 30, 60] as ExportFps[]).map(f => (
                     <button
@@ -7722,7 +8558,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
                       className={'am-tb-btn' + (fps === f ? ' am-tb-btn-primary' : '')}
                       onClick={() => setFps(f)}
                       style={{ flex: 1, justifyContent: 'center' }}
-                      title={f === 24 ? '电影感' : f === 30 ? '标准 (推荐)' : '丝滑 (慢动作友好)'}
+                      title={f === 24 ? t.fps24 : f === 30 ? t.fps30 : t.fps60}
                     >
                       {f}fps {f === 24 ? '🎞️' : f === 30 ? '⭐' : '✨'}
                     </button>
@@ -7732,24 +8568,24 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
               <div className="am-export-track-grid">
                 <div className="am-export-track">
                   <span className="am-export-track-ic">🎬</span>
-                  <span className="am-export-track-lbl">画面</span>
-                  <span className="am-export-track-ok">真录制</span>
+                  <span className="am-export-track-lbl">{t.trackImage}</span>
+                  <span className="am-export-track-ok">{t.realRecord}</span>
                 </div>
                 <div className="am-export-track">
                   <span className="am-export-track-ic">💬</span>
-                  <span className="am-export-track-lbl">字幕</span>
-                  <span className="am-export-track-ok">真录制</span>
+                  <span className="am-export-track-lbl">{t.trackCaption}</span>
+                  <span className="am-export-track-ok">{t.realRecord}</span>
                 </div>
                 <div className={'am-export-track' + (hasBGM ? '' : ' is-empty')}>
                   <span className="am-export-track-ic">🎵</span>
                   <span className="am-export-track-lbl">BGM</span>
-                  <span className={hasBGM ? 'am-export-track-ok' : 'am-export-track-skip'}>{hasBGM ? '真录入音轨' : '无 BGM'}</span>
+                  <span className={hasBGM ? 'am-export-track-ok' : 'am-export-track-skip'}>{hasBGM ? t.realAudio : t.noBgm}</span>
                 </div>
                 <div className={'am-export-track' + (hasTTS ? '' : ' is-empty')}>
                   <span className="am-export-track-ic">🎤</span>
-                  <span className="am-export-track-lbl">配音</span>
+                  <span className="am-export-track-lbl">{t.trackVoice}</span>
                   <span className={!hasTTS ? 'am-export-track-skip' : ttsAllRecorded ? 'am-export-track-ok' : hasRecordedTTS ? 'am-export-track-warn' : 'am-export-track-warn'}>
-                    {!hasTTS ? '无配音' : ttsAllRecorded ? '真录入音轨' : hasRecordedTTS ? '部分录音 / 部分字幕' : '需录音才能进音轨'}
+                    {!hasTTS ? t.noVoice : ttsAllRecorded ? t.realAudio : hasRecordedTTS ? t.partialVoice : t.needRecord}
                   </span>
                 </div>
               </div>
@@ -7760,11 +8596,11 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
                 onClick={() => setShowAdvanced(s => !s)}
                 style={{ width: '100%', justifyContent: 'center', fontSize: 11, color: '#666' }}
               >
-                {showAdvanced ? '⊟ 收起高级选项' : '⊞ 高级 (其他格式)'}
+                {showAdvanced ? t.collapseAdv : t.expandAdv}
               </button>
               {showAdvanced && (
                 <div className="am-export-format-row">
-                  <div className="am-field-sublabel" style={{ marginBottom: 4 }}>视频格式</div>
+                  <div className="am-field-sublabel" style={{ marginBottom: 4 }}>{t.videoFormat}</div>
                   <div className="am-row" style={{ gap: 6 }}>
                     <button
                       type="button"
@@ -7772,7 +8608,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
                       onClick={() => setFormat('mp4')}
                       style={{ flex: 1, justifyContent: 'center' }}
                     >
-                      MP4 <span style={{ opacity: 0.7, fontSize: 10 }}>{mp4AudioOK === null ? '探测中…' : mp4AudioOK ? '默认 · 兼容性高' : '⚠️ 此浏览器音轨可能丢'}</span>
+                      MP4 <span style={{ opacity: 0.7, fontSize: 10 }}>{mp4AudioOK === null ? t.probing : mp4AudioOK ? t.mp4Default : t.mp4MayLose}</span>
                     </button>
                     <button
                       type="button"
@@ -7780,7 +8616,7 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
                       onClick={() => setFormat('webm')}
                       style={{ flex: 1, justifyContent: 'center' }}
                     >
-                      WebM <span style={{ opacity: 0.7, fontSize: 10 }}>pro · 真音轨更稳</span>
+                      WebM <span style={{ opacity: 0.7, fontSize: 10 }}>{t.webmPro}</span>
                     </button>
                   </div>
                 </div>
@@ -7788,19 +8624,21 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
               {format === 'mp4' && mp4AudioOK === false && (
                 <div className="am-export-hint" style={{ background: '#fff4d8', borderColor: '#c89028' }}>
                   <AlertCircle size={11} />
-                  <span><b>⚠️ 实测警告</b>: 此浏览器 MP4 容器 audio mux 失败 → 导出可能无声. 切到 WebM (高级里) 含真音轨, 任何播放器/剪映都能开.</span>
+                  <span>{lang === 'en' ? <><b>⚠️ Tested warning</b>: this browser's MP4 audio mux failed → export may be silent. Switch to WebM (in Advanced) for a real audio track that any player/CapCut can open.</> : <><b>⚠️ 实测警告</b>: 此浏览器 MP4 容器 audio mux 失败 → 导出可能无声. 切到 WebM (高级里) 含真音轨, 任何播放器/剪映都能开.</>}</span>
                 </div>
               )}
               {hasTTS && (
                 <div className="am-export-hint">
                   <AlertCircle size={11} />
                   <span>
-                    SS 不能录入 MediaStream. <b>想配音进音轨?</b> 选 TTS clip → Inspector: <b>🌐 TTSMaker</b> 生成真神经配音 mp3, 然后 <b>📂 上传</b> · 或 <b>🎙 麦录</b>. 没 audioSrc 的会烧字幕条.
+                    {lang === 'en'
+                      ? <>SS can't be recorded into a MediaStream. <b>Want voice in the audio track?</b> Select a TTS clip → Inspector: <b>🌐 TTSMaker</b> to generate a real Neural mp3, then <b>📂 Upload</b> · or <b>🎙 Record</b>. Clips without audioSrc get burned-in caption bars.</>
+                      : <>SS 不能录入 MediaStream. <b>想配音进音轨?</b> 选 TTS clip → Inspector: <b>🌐 TTSMaker</b> 生成真神经配音 mp3, 然后 <b>📂 上传</b> · 或 <b>🎙 麦录</b>. 没 audioSrc 的会烧字幕条.</>}
                   </span>
                 </div>
               )}
               <button className="am-tb-btn am-tb-btn-primary" onClick={startExport} style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}>
-                <Download size={13} /> 开始导出 ({supportedMime.ext.toUpperCase()})
+                <Download size={13} /> {t.startVideo(supportedMime.ext.toUpperCase())}
               </button>
             </>
           )}
@@ -7808,14 +8646,14 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
             <>
               <div className="am-export-status">
                 <strong>{Math.round(progress * 100)}%</strong>
-                <span className="am-export-sub">· 实时渲染 · {((1 - progress) * project.duration).toFixed(1)}s 剩余</span>
+                <span className="am-export-sub">· {t.rendering} · {t.remaining((((1 - progress) * project.duration)).toFixed(1))}</span>
               </div>
               <div className="am-export-progress">
                 <div className="am-export-progress-fill" style={{ width: `${progress * 100}%` }} />
               </div>
               <div className="am-export-hint">
                 <AlertCircle size={11} />
-                <span>渲染期间 tab 可以最小化, 但不要关闭. {isGif ? 'GIF encoder 走 worker 不阻塞 UI.' : '音轨走 Web Audio MediaStream 全自动.'}</span>
+                <span>{t.renderHint} {isGif ? t.renderHintGif : t.renderHintVideo}</span>
               </div>
               <div className="am-export-meta">
                 {isGif
@@ -7828,30 +8666,30 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
           {error && (
             <>
               <div className="am-export-error">❌ {error}</div>
-              <button className="am-tb-btn am-tb-btn-primary" onClick={onClose}>关闭</button>
+              <button className="am-tb-btn am-tb-btn-primary" onClick={onClose}>{t.close}</button>
             </>
           )}
           {done && !error && (
             <>
               <div className="am-export-done">
-                ✅ 导出完成 · {outputInfo?.ext.toUpperCase()} · {outputInfo
+                {t.exportDone} · {outputInfo?.ext.toUpperCase()} · {outputInfo
                   ? (outputInfo.size >= 1024 * 1024
                     ? `${(outputInfo.size / 1024 / 1024).toFixed(2)} MB`
                     : `${(outputInfo.size / 1024).toFixed(0)} KB`)
                   : '0 KB'}
-                {!isGif && (outputInfo?.hasAudio ? ' · 🔊 含音轨' : ' · 🔇 无音轨')}
-                {isGif && ` · ${outputInfo?.frameCount ?? 0} 帧`}
+                {!isGif && (outputInfo?.hasAudio ? t.withAudio : t.noAudio)}
+                {isGif && ` · ${outputInfo?.frameCount ?? 0} ${t.frames}`}
               </div>
               <div className="am-export-hint">
                 <AlertCircle size={11} />
                 <span>
-                  文件已下载.{' '}
+                  {t.fileDownloaded}{' '}
                   {isGif
-                    ? '直接发微信/X/TG. 无声音 — 这是 GIF 格式特性.'
-                    : <>{outputInfo?.hasAudio ? 'BGM 已写入. ' : ''}{hasTTS ? 'TTS 文字已烧录成字幕条. ' : ''}如需多音轨完整版, 推荐剪映/CapCut 二次处理.</>}
+                    ? t.gifDoneHint
+                    : <>{outputInfo?.hasAudio ? t.bgmWritten : ''}{hasTTS ? t.ttsBurned : ''}{t.multiTrackHint}</>}
                 </span>
               </div>
-              <button className="am-tb-btn am-tb-btn-primary" onClick={onClose}>完成</button>
+              <button className="am-tb-btn am-tb-btn-primary" onClick={onClose}>{t.doneBtn}</button>
             </>
           )}
         </div>
@@ -7860,6 +8698,52 @@ function ExportModal({ project, userBGMs, name, aspect, onClose }: { project: Pr
   );
 }
 
+const EXPORT_MODAL_DICT = {
+  zh: {
+    exportFail: '导出失败',
+    headGif: '导出 GIF', headVideo: (ext: string) => `导出视频 (${ext})`,
+    gifTitle: '导出 GIF 动图', duration: '时长', est: '预估', estBitrate: '估算码率',
+    socialPreset: '社媒预设 (尺寸 + 帧率)',
+    gifHint: 'GIF 无声音 · 跨设备兼容性最强 (微信/X/TG 直发) · 体积越小延迟越低',
+    startGif: '开始导出 GIF',
+    videoTitle: (ext: string) => `导出 ${ext} 视频`,
+    resolution: '分辨率', res480: '480p 标清', res720: '720p 高清', res1080: '1080p 蓝光',
+    fps: '帧率', fps24: '电影感', fps30: '标准 (推荐)', fps60: '丝滑 (慢动作友好)',
+    trackImage: '画面', trackCaption: '字幕', trackVoice: '配音', realRecord: '真录制', realAudio: '真录入音轨',
+    noBgm: '无 BGM', noVoice: '无配音', partialVoice: '部分录音 / 部分字幕', needRecord: '需录音才能进音轨',
+    collapseAdv: '⊟ 收起高级选项', expandAdv: '⊞ 高级 (其他格式)', videoFormat: '视频格式',
+    probing: '探测中…', mp4Default: '默认 · 兼容性高', mp4MayLose: '⚠️ 此浏览器音轨可能丢', webmPro: 'pro · 真音轨更稳',
+    startVideo: (ext: string) => `开始导出 (${ext})`,
+    rendering: '实时渲染', remaining: (s: string) => `${s}s 剩余`,
+    renderHint: '渲染期间 tab 可以最小化, 但不要关闭.', renderHintGif: 'GIF encoder 走 worker 不阻塞 UI.', renderHintVideo: '音轨走 Web Audio MediaStream 全自动.',
+    close: '关闭', exportDone: '✅ 导出完成', withAudio: ' · 🔊 含音轨', noAudio: ' · 🔇 无音轨', frames: '帧',
+    fileDownloaded: '文件已下载.', gifDoneHint: '直接发微信/X/TG. 无声音 — 这是 GIF 格式特性.',
+    bgmWritten: 'BGM 已写入. ', ttsBurned: 'TTS 文字已烧录成字幕条. ', multiTrackHint: '如需多音轨完整版, 推荐剪映/CapCut 二次处理.',
+    doneBtn: '完成',
+  },
+  en: {
+    exportFail: 'Export failed',
+    headGif: 'Export GIF', headVideo: (ext: string) => `Export video (${ext})`,
+    gifTitle: 'Export animated GIF', duration: 'duration', est: 'est.', estBitrate: 'est. bitrate',
+    socialPreset: 'Social preset (size + fps)',
+    gifHint: 'GIF is silent · widest cross-device compatibility (WeChat/X/TG direct) · smaller = lower latency',
+    startGif: 'Start GIF export',
+    videoTitle: (ext: string) => `Export ${ext} video`,
+    resolution: 'Resolution', res480: '480p SD', res720: '720p HD', res1080: '1080p FHD',
+    fps: 'Frame rate', fps24: 'Cinematic', fps30: 'Standard (recommended)', fps60: 'Smooth (slow-mo friendly)',
+    trackImage: 'Image', trackCaption: 'Caption', trackVoice: 'Voice', realRecord: 'real record', realAudio: 'real audio track',
+    noBgm: 'No BGM', noVoice: 'No voice', partialVoice: 'partial voice / partial caption', needRecord: 'needs recording for audio track',
+    collapseAdv: '⊟ Hide advanced', expandAdv: '⊞ Advanced (other formats)', videoFormat: 'Video format',
+    probing: 'Probing…', mp4Default: 'default · high compat', mp4MayLose: '⚠️ this browser may drop audio', webmPro: 'pro · steadier audio',
+    startVideo: (ext: string) => `Start export (${ext})`,
+    rendering: 'Live render', remaining: (s: string) => `${s}s remaining`,
+    renderHint: 'You can minimize the tab while rendering, but don\'t close it.', renderHintGif: 'GIF encoder runs in a worker, no UI blocking.', renderHintVideo: 'Audio runs through a Web Audio MediaStream, fully automatic.',
+    close: 'Close', exportDone: '✅ Export done', withAudio: ' · 🔊 with audio', noAudio: ' · 🔇 no audio', frames: 'frames',
+    fileDownloaded: 'File downloaded.', gifDoneHint: 'Send directly to WeChat/X/TG. Silent — that\'s a GIF property.',
+    bgmWritten: 'BGM written in. ', ttsBurned: 'TTS text burned in as caption bars. ', multiTrackHint: 'For a full multi-track version, post-process in CapCut.',
+    doneBtn: 'Done',
+  },
+} as const;
 // ============================================================
 // TIMELINE
 // ============================================================
@@ -7884,6 +8768,8 @@ function Timeline({
   onSplit?: (id: string) => void;
   onEmptyContextMenu?: (e: React.MouseEvent) => void;
 }) {
+  const lang = useUiLang();
+  const tl = TIMELINE_DICT[lang];
   void onSetDuration;
   const [zoom, setZoom] = useState(1.0);
   const pxPerSec = Math.round(80 * zoom);
@@ -8025,7 +8911,7 @@ function Timeline({
             const curRate = ts.playbackRate ?? 1.0;
             if (Math.abs(newRate - curRate) > 0.02) {
               onUpdateClipLive(d.clipId, { playbackRate: Math.abs(newRate - 1.0) < 0.02 ? undefined : Number(newRate.toFixed(2)) });
-              toast(`📐 已自动调倍速 ${newRate.toFixed(2)}x 让配音 fit ${finalDur.toFixed(2)}s`, { duration: 2500 });
+              toast(tl.autoRate(newRate.toFixed(2), finalDur.toFixed(2)), { duration: 2500 });
             }
           }
         }
@@ -8039,7 +8925,7 @@ function Timeline({
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-  }, [pxPerSec, playhead, project, onSelect, onBeginDrag, onEndDrag, onUpdateClipLive]);
+  }, [pxPerSec, playhead, project, onSelect, onBeginDrag, onEndDrag, onUpdateClipLive, tl]);
 
   const handleDrop = (e: React.DragEvent, type: TrackType, lane: number) => {
     e.preventDefault();
@@ -8051,7 +8937,7 @@ function Timeline({
     if (payload.type !== type) return;
     // v23-l: GIF 模式无声 → TTS/BGM 拖入 timeline 阻挡 (LeftPane 已隐藏 tab, 这里防其他入口) (audit-recent MED-2d-2)
     if ((project.mode ?? 'video') === 'gif' && (payload.type === 'tts' || payload.type === 'bgm')) {
-      toast.warning('GIF 模式无声音, 不能加 ' + (payload.type === 'tts' ? '配音' : '背景音乐'));
+      toast.warning(tl.gifNoSound(payload.type === 'tts' ? tl.voiceWord : tl.bgmWord));
       return;
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -8102,12 +8988,12 @@ function Timeline({
       if (type === 'caption') {
         const available = project.duration - start;
         if (available < 0.3) {
-          toast.error('实在塞不下, 请加长视频时长或换轨');
+          toast.error(tl.cantFitCaption);
           return;
         }
         effectiveDur = available;
       } else {
-        toast.error('放不下, 请加长视频时长或换轨');
+        toast.error(tl.cantFit);
         return;
       }
     }
@@ -8146,9 +9032,9 @@ function Timeline({
       const fxBase: FXClip = { id, trackId: 'fx', lane: droppedLane, start, end: start + effectiveDur, fx: fxKind, targetClipId: targetImage?.id };
       initFXDefaults(fxBase, targetTr);
       if (fxKind === 'move') {
-        toast.success('已加入移动动画 · 在画板上拖 A/B 圆圈设位置', { duration: 4000 });
+        toast.success(tl.addedMove, { duration: 4000 });
       } else if (targetImage) {
-        toast.success(`已加 ${FX_LIB.find(f => f.id === fxKind)?.name || fxKind} · 作用于 ${targetImage.label || '图片'}${targetImage.kind === 'scene' ? ' (场景)' : ''} · Inspector 可改对象`, { duration: 3500 });
+        toast.success(tl.addedFx(fxLabel(fxKind, lang) || fxKind, targetImage.label || (lang === 'en' ? 'image' : '图片'), targetImage.kind === 'scene' ? tl.sceneTag : ''), { duration: 3500 });
       }
       clip = fxBase;
     }
@@ -8229,16 +9115,16 @@ function Timeline({
   return (
     <section className="am-timeline win7-panel" data-tour="timeline" style={{ '--lane-h': `${LANE_ROW_H}px` } as React.CSSProperties}>
       <div className="am-tl-head">
-        <span className="am-tl-head-title">⏱ 时间轴</span>
-        <span className="am-tl-head-sub">{project.clips.length} 片段 · {totalLanes} 轨 · {project.duration.toFixed(1)}s</span>
+        <span className="am-tl-head-title">{tl.title}</span>
+        <span className="am-tl-head-sub">{project.clips.length} {tl.clips} · {totalLanes} {tl.tracks} · {project.duration.toFixed(1)}s</span>
         <button className="am-tb-btn am-tb-btn-primary" disabled={splitDisabledTL}
           onClick={() => selClipTL && onSplit?.(selClipTL.id)}
-          title={splitDisabledTL ? '选中片段 + 把 playhead 移到它中间, 才能切分 (快捷键 S)' : '在 playhead 处切分选中片段 (快捷键 S)'}>
-          <Scissors size={13} /> <span>切分</span>
+          title={splitDisabledTL ? tl.splitDisabledTitle : tl.splitTitle}>
+          <Scissors size={13} /> <span>{tl.split}</span>
         </button>
         <div className="am-toolbar-spacer" />
         <div className="am-tl-zoom">
-          <span>缩放</span>
+          <span>{tl.zoom}</span>
           <input type="range" min="0.4" max="2.0" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} />
           <span className="am-tl-zoom-val">{zoom.toFixed(1)}x</span>
         </div>
@@ -8258,17 +9144,17 @@ function Timeline({
                 onDragStart={isFirstOfType ? () => handleTypeDragStart(type) : undefined}
                 onDragOver={(e) => handleTypeDragOver(e, type)}
                 onDrop={() => handleTypeDrop(type)}
-                title={isFirstOfType ? '拖动整组改变顺序' : ''}
+                title={isFirstOfType ? tl.dragGroup : ''}
               >
-                {isFirstOfType && <span className="am-tl-label-drag" title="拖动调整轨道顺序">⋮⋮</span>}
+                {isFirstOfType && <span className="am-tl-label-drag" title={tl.dragOrder}>⋮⋮</span>}
                 <span className="am-tl-label-emoji"><TMIcon size={12} strokeWidth={2.2} /></span>
-                <span className="am-tl-label-name">{TRACK_META[type].name} {project.lanes[type] > 1 ? lane + 1 : ''}</span>
+                <span className="am-tl-label-name">{trackName(type, lang)} {project.lanes[type] > 1 ? lane + 1 : ''}</span>
                 <div className="am-tl-label-actions">
                   {isLastOfType && (
-                    <button className="am-tl-lane-btn am-tl-lane-add" onClick={() => onAddLane(type)} title={`增加${TRACK_META[type].name}轨`}><Plus size={11} /></button>
+                    <button className="am-tl-lane-btn am-tl-lane-add" onClick={() => onAddLane(type)} title={tl.addLane(trackName(type, lang))}><Plus size={11} /></button>
                   )}
                   {!isFirstOfType && (
-                    <button className="am-tl-lane-btn am-tl-lane-del" onClick={() => onRemoveLane(type, lane)} title={`删除空${TRACK_META[type].name}轨 ${lane + 1}`}><Minus size={11} /></button>
+                    <button className="am-tl-lane-btn am-tl-lane-del" onClick={() => onRemoveLane(type, lane)} title={tl.delLane(trackName(type, lang), lane + 1)}><Minus size={11} /></button>
                   )}
                 </div>
               </div>
@@ -8286,12 +9172,12 @@ function Timeline({
                   <div className="am-tl-tick-label" style={{ left: t.s * pxPerSec }}>{t.s}s</div>
                 </Fragment>
               ))}
-              <div className="am-tl-playhead-handle" style={{ left: playhead * pxPerSec }} onPointerDown={startPlayheadDrag} title="拖动跳转" />
+              <div className="am-tl-playhead-handle" style={{ left: playhead * pxPerSec }} onPointerDown={startPlayheadDrag} title={tl.dragSeek} />
               <div
                 className="am-tl-duration-handle"
                 style={{ left: project.duration * pxPerSec }}
                 onPointerDown={startDurationDrag}
-                title={`拖动改总时长 — 左缩短 / 右延长 (当前 ${project.duration.toFixed(1)}s · 上限 ${isGifMode ? GIF_MAX_DURATION : 60}s)`}
+                title={tl.durHandle(project.duration.toFixed(1), isGifMode ? GIF_MAX_DURATION : 60)}
               >
                 <span className="am-tl-duration-handle-bar" />
                 <span className="am-tl-duration-handle-lbl">{project.duration.toFixed(1)}s</span>
@@ -8322,7 +9208,7 @@ function Timeline({
             })}
             {snapLine !== null && <div className="am-tl-snap-line" style={{ left: snapLine * pxPerSec }} />}
             {timelineEnd > project.duration + 0.01 && (
-              <div className="am-tl-cutzone" style={{ left: project.duration * pxPerSec, width: (timelineEnd - project.duration) * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} title="超出总时长 — 导出时这部分会被截断 (拖时长手柄右移可保留)" />
+              <div className="am-tl-cutzone" style={{ left: project.duration * pxPerSec, width: (timelineEnd - project.duration) * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} title={tl.cutzone} />
             )}
             <div className="am-tl-playhead" style={{ left: playhead * pxPerSec, top: 0, height: RULER_H + timelineBodyHeight }} />
           </div>
@@ -8333,6 +9219,44 @@ function Timeline({
   );
 }
 
+const TIMELINE_DICT = {
+  zh: {
+    voiceWord: '配音', bgmWord: '背景音乐',
+    gifNoSound: (what: string) => 'GIF 模式无声音, 不能加 ' + what,
+    cantFitCaption: '实在塞不下, 请加长视频时长或换轨', cantFit: '放不下, 请加长视频时长或换轨',
+    addedMove: '已加入移动动画 · 在画板上拖 A/B 圆圈设位置',
+    addedFx: (name: string, target: string, sceneTag: string) => `已加 ${name} · 作用于 ${target}${sceneTag} · Inspector 可改对象`,
+    sceneTag: ' (场景)',
+    autoRate: (rate: string, dur: string) => `📐 已自动调倍速 ${rate}x 让配音 fit ${dur}s`,
+    title: '⏱ 时间轴', clips: '片段', tracks: '轨',
+    splitDisabledTitle: '选中片段 + 把 playhead 移到它中间, 才能切分 (快捷键 S)', splitTitle: '在 playhead 处切分选中片段 (快捷键 S)', split: '切分',
+    zoom: '缩放',
+    dragGroup: '拖动整组改变顺序', dragOrder: '拖动调整轨道顺序',
+    addLane: (name: string) => `增加${name}轨`, delLane: (name: string, n: number) => `删除空${name}轨 ${n}`,
+    dragSeek: '拖动跳转',
+    durHandle: (cur: string, max: number) => `拖动改总时长 — 左缩短 / 右延长 (当前 ${cur}s · 上限 ${max}s)`,
+    cutzone: '超出总时长 — 导出时这部分会被截断 (拖时长手柄右移可保留)',
+    emptyCaption: '空字幕', fxWord: '特效', emptyVoice: '空配音', voiceDur: '配音时长', musicDur: '音乐时长',
+  },
+  en: {
+    voiceWord: 'voice', bgmWord: 'background music',
+    gifNoSound: (what: string) => 'GIF mode is silent, cannot add ' + what,
+    cantFitCaption: 'No room — lengthen the video duration or use another track', cantFit: "Doesn't fit — lengthen the video duration or use another track",
+    addedMove: 'Move animation added · drag the A/B circles on the canvas to set positions',
+    addedFx: (name: string, target: string, sceneTag: string) => `Added ${name} · applied to ${target}${sceneTag} · change target in the Inspector`,
+    sceneTag: ' (scene)',
+    autoRate: (rate: string, dur: string) => `📐 Auto-set speed to ${rate}x to fit voice in ${dur}s`,
+    title: '⏱ Timeline', clips: 'clips', tracks: 'tracks',
+    splitDisabledTitle: 'Select a clip + move the playhead inside it to split (shortcut S)', splitTitle: 'Split the selected clip at the playhead (shortcut S)', split: 'Split',
+    zoom: 'Zoom',
+    dragGroup: 'Drag the whole group to reorder', dragOrder: 'Drag to reorder tracks',
+    addLane: (name: string) => `Add a ${name} track`, delLane: (name: string, n: number) => `Delete empty ${name} track ${n}`,
+    dragSeek: 'Drag to seek',
+    durHandle: (cur: string, max: number) => `Drag to change total duration — left shortens / right extends (currently ${cur}s · max ${max}s)`,
+    cutzone: 'Beyond total duration — this part is trimmed on export (drag the duration handle right to keep it)',
+    emptyCaption: 'Empty caption', fxWord: 'FX', emptyVoice: 'Empty voice', voiceDur: 'Voice duration', musicDur: 'Music duration',
+  },
+} as const;
 function TLClip({ clip, pxPerSec, isSelected, onDown, onResizeL, onResizeR, onContextMenu }: {
   clip: Clip; pxPerSec: number; isSelected: boolean;
   onDown: (e: React.PointerEvent) => void;
@@ -8340,18 +9264,20 @@ function TLClip({ clip, pxPerSec, isSelected, onDown, onResizeL, onResizeR, onCo
   onResizeR: (e: React.PointerEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
+  const lang = useUiLang();
+  const tl = TIMELINE_DICT[lang];
   const left = clip.start * pxPerSec;
   const width = Math.max(20, (clip.end - clip.start) * pxPerSec);
   const t = clip.trackId;
   let inner: React.ReactNode = null;
   if (t === 'image') {
-    inner = (<><div className="am-tl-clip-thumb"><img src={clip.src} alt="" /></div><div className="am-tl-clip-label">{clip.label || '图片'}</div></>);
+    inner = (<><div className="am-tl-clip-thumb"><img src={clip.src} alt="" /></div><div className="am-tl-clip-label">{clip.label || (lang === 'en' ? 'Image' : '图片')}</div></>);
   } else if (t === 'caption') {
-    inner = (<><span className="am-tl-clip-emoji"><TypeIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{(clip as CaptionClip).text || '空字幕'}</div></>);
+    inner = (<><span className="am-tl-clip-emoji"><TypeIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{(clip as CaptionClip).text || tl.emptyCaption}</div></>);
   } else if (t === 'fx') {
     const fxInfo = FX_LIB.find(f => f.id === (clip as FXClip).fx);
     const FXIcon = fxInfo?.icon ?? Sparkles;
-    inner = (<><span className="am-tl-clip-emoji"><FXIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{fxInfo?.name ?? '特效'}</div></>);
+    inner = (<><span className="am-tl-clip-emoji"><FXIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{fxInfo ? fxName(fxInfo.id, fxInfo.name, lang) : tl.fxWord}</div></>);
   } else if (t === 'tts') {
     const ts = clip as TTSClip;
     const v = VOICE_BY_ID[resolveVoiceId(ts.voice)];
@@ -8363,9 +9289,9 @@ function TLClip({ clip, pxPerSec, isSelected, onDown, onResizeL, onResizeR, onCo
     const stateIcon = ts.text?.trim()
       ? (ts.audioSrc ? ' 🔊' : ts.genFailed ? ' ❌' : (v?.source === 'youdao' ? ' ⏳' : ' 🎤'))
       : '';
-    inner = (<><span className="am-tl-clip-emoji"><VIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{v?.name ? `${v.name}：` : ''}{ts.text || '空配音'}{stateIcon}</div><span className="am-tl-clip-dur" title="配音时长">{(clip.end - clip.start).toFixed(1)}s</span></>);
+    inner = (<><span className="am-tl-clip-emoji"><VIcon size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{v?.name ? `${voiceName(v.id, v.name, lang)}：` : ''}{ts.text || tl.emptyVoice}{stateIcon}</div><span className="am-tl-clip-dur" title={tl.voiceDur}>{(clip.end - clip.start).toFixed(1)}s</span></>);
   } else {
-    inner = (<><span className="am-tl-clip-emoji"><Music size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{(clip as BGMClip).name || 'BGM'}</div><span className="am-tl-clip-dur" title="音乐时长">{(clip.end - clip.start).toFixed(1)}s</span></>);
+    inner = (<><span className="am-tl-clip-emoji"><Music size={11} strokeWidth={2.2} /></span><div className="am-tl-clip-label">{bgmName((clip as BGMClip).bgmId, (clip as BGMClip).name, lang) || 'BGM'}</div><span className="am-tl-clip-dur" title={tl.musicDur}>{(clip.end - clip.start).toFixed(1)}s</span></>);
   }
   // v23-h: 'move' FX clip 用更显眼的样式 (跟其他 FX 区分, 提示用户可点击编辑)
   const isMoveFx = clip.trackId === 'fx' && (clip as FXClip).fx === 'move';
@@ -8381,6 +9307,34 @@ function TLClip({ clip, pxPerSec, isSelected, onDown, onResizeL, onResizeR, onCo
 // ============================================================
 // DEV-only — 📋 模板库 Modal
 // ============================================================
+const TEMPLATES_MODAL_DICT = {
+  zh: {
+    fillName: '填模板名',
+    existsTitle: '模板已存在', existsMsg: (id: string) => `模板 id "${id}" 已存在, 覆盖?`, overwrite: '覆盖',
+    written: (n: number) => `✅ 已写入 src/data/animateTemplates.ts (${n} 模板) · 刷新生效`, writeFail: '写盘失败: ',
+    delTitle: '删除模板', delMsg: (id: string) => `删除模板 "${id}"?`, del: '删除',
+    keepOne: '至少留 1 个模板 (防误删)', deleted: '已删', delFail: '删除失败: ',
+    title: '模板库 (DEV)', headSub: '写到 src/data/animateTemplates.ts · prod tree-shake',
+    saveAsNew: '💾 保存当前 project 为新模板',
+    namePlaceholder: '模板名 (如 熊猫斗图开场)', descPlaceholder: '一句话描述', tagsPlaceholder: 'tags (逗号分隔)',
+    writing: '写盘中…', saveToSource: '💾 保存到源文件',
+    curProject: '当前 project', existing: '已有模板',
+    noTpl: '暂无模板 · 用上方表单保存当前 project', noDesc: '(无描述)', none: '(无)', load: '📂 读入', close: '关闭',
+  },
+  en: {
+    fillName: 'Enter a template name',
+    existsTitle: 'Template exists', existsMsg: (id: string) => `Template id "${id}" already exists, overwrite?`, overwrite: 'Overwrite',
+    written: (n: number) => `✅ Written to src/data/animateTemplates.ts (${n} templates) · refresh to apply`, writeFail: 'Write failed: ',
+    delTitle: 'Delete template', delMsg: (id: string) => `Delete template "${id}"?`, del: 'Delete',
+    keepOne: 'Keep at least 1 template (prevents accidental deletion)', deleted: 'Deleted', delFail: 'Delete failed: ',
+    title: 'Template library (DEV)', headSub: 'writes to src/data/animateTemplates.ts · prod tree-shake',
+    saveAsNew: '💾 Save current project as a new template',
+    namePlaceholder: 'Template name (e.g. Panda battle intro)', descPlaceholder: 'One-line description', tagsPlaceholder: 'tags (comma-separated)',
+    writing: 'Writing…', saveToSource: '💾 Save to source file',
+    curProject: 'Current project', existing: 'Existing templates',
+    noTpl: 'No templates · use the form above to save the current project', noDesc: '(no description)', none: '(none)', load: '📂 Load', close: 'Close',
+  },
+} as const;
 function TemplatesModal({
   currentProject, onLoad, onClose,
 }: {
@@ -8388,6 +9342,8 @@ function TemplatesModal({
   onLoad: (tpl: AnimateTemplate) => void;
   onClose: () => void;
 }) {
+  const lang = useUiLang();
+  const tt = TEMPLATES_MODAL_DICT[lang];
   const [templates, setTemplates] = useState<AnimateTemplate[]>(ANIMATE_TEMPLATES);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -8413,14 +9369,14 @@ function TemplatesModal({
   }, [currentProject]);
 
   const save = async () => {
-    if (!name.trim()) { toast.error('填模板名'); return; }
+    if (!name.trim()) { toast.error(tt.fillName); return; }
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `tpl-${Date.now()}`;
     if (templates.some(t => t.id === id)) {
       const overwriteRes = await showDialog({
-        title: '模板已存在',
-        message: `模板 id "${id}" 已存在, 覆盖?`,
+        title: tt.existsTitle,
+        message: tt.existsMsg(id),
         variant: 'warning',
-        confirmText: '覆盖',
+        confirmText: tt.overwrite,
       });
       if (!overwriteRes.confirmed) return;
     }
@@ -8436,26 +9392,26 @@ function TemplatesModal({
         body: JSON.stringify({ templates: next }),
       });
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`${res.status}: ${t.slice(0, 200)}`);
+        const txt = await res.text();
+        throw new Error(`${res.status}: ${txt.slice(0, 200)}`);
       }
       setTemplates(next);
-      toast.success(`✅ 已写入 src/data/animateTemplates.ts (${next.length} 模板) · 刷新生效`);
+      toast.success(tt.written(next.length));
       setName(''); setDesc('');
     } catch (e) {
-      toast.error('写盘失败: ' + (e as Error).message);
+      toast.error(tt.writeFail + (e as Error).message);
     } finally { setSaving(false); }
   };
   const remove = async (id: string) => {
     const removeRes = await showDialog({
-      title: '删除模板',
-      message: `删除模板 "${id}"?`,
+      title: tt.delTitle,
+      message: tt.delMsg(id),
       destructive: true,
-      confirmText: '删除',
+      confirmText: tt.del,
     });
     if (!removeRes.confirmed) return;
     const next = templates.filter(t => t.id !== id);
-    if (next.length === 0) { toast.error('至少留 1 个模板 (防误删)'); return; }
+    if (next.length === 0) { toast.error(tt.keepOne); return; }
     try {
       const res = await fetch('/__sync/animate-templates', {
         method: 'POST',
@@ -8464,9 +9420,9 @@ function TemplatesModal({
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setTemplates(next);
-      toast.success('已删');
+      toast.success(tt.deleted);
     } catch (e) {
-      toast.error('删除失败: ' + (e as Error).message);
+      toast.error(tt.delFail + (e as Error).message);
     }
   };
 
@@ -8474,43 +9430,43 @@ function TemplatesModal({
     <div className="am-dev-modal-bg" onClick={onClose}>
       <div className="am-dev-modal" onClick={(e) => e.stopPropagation()}>
         <div className="am-dev-modal-head">
-          📋 <span>模板库 (DEV)</span>
+          📋 <span>{tt.title}</span>
           <span style={{ fontSize: 11, fontWeight: 400, color: '#888', marginLeft: 8 }}>
-            写到 src/data/animateTemplates.ts · prod tree-shake
+            {tt.headSub}
           </span>
           <button className="am-dev-close" onClick={onClose} type="button"><X size={14} /></button>
         </div>
         <div className="am-dev-modal-body">
           <div className="am-dev-row">
-            <strong>💾 保存当前 project 为新模板</strong>
+            <strong>{tt.saveAsNew}</strong>
           </div>
           <div className="am-dev-row">
-            <input className="am-input" placeholder="模板名 (如 熊猫斗图开场)" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1 }} />
+            <input className="am-input" placeholder={tt.namePlaceholder} value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1 }} />
           </div>
           <div className="am-dev-row">
-            <input className="am-input" placeholder="一句话描述" value={desc} onChange={(e) => setDesc(e.target.value)} style={{ flex: 2 }} />
-            <input className="am-input" placeholder="tags (逗号分隔)" value={tags} onChange={(e) => setTags(e.target.value)} style={{ flex: 1 }} />
+            <input className="am-input" placeholder={tt.descPlaceholder} value={desc} onChange={(e) => setDesc(e.target.value)} style={{ flex: 2 }} />
+            <input className="am-input" placeholder={tt.tagsPlaceholder} value={tags} onChange={(e) => setTags(e.target.value)} style={{ flex: 1 }} />
             <button className="am-tb-btn am-tb-btn-primary" onClick={save} disabled={saving || !name.trim()} type="button">
-              {saving ? '写盘中…' : '💾 保存到源文件'}
+              {saving ? tt.writing : tt.saveToSource}
             </button>
           </div>
           <div className="am-dev-row" style={{ color: '#888', fontSize: 10 }}>
-            当前 project: {currentProject.clips.length} clips · {currentProject.duration.toFixed(1)}s
+            {tt.curProject}: {currentProject.clips.length} clips · {currentProject.duration.toFixed(1)}s
             · {(JSON.stringify(serializedProject).length / 1024).toFixed(1)} KB
           </div>
           <hr style={{ margin: '12px 0', border: 0, borderTop: '1px dashed #cdd3da' }} />
-          <div className="am-dev-row"><strong>已有模板 ({templates.length})</strong></div>
+          <div className="am-dev-row"><strong>{tt.existing} ({templates.length})</strong></div>
           {templates.length === 0 ? (
-            <div className="am-dev-tpl-empty">暂无模板 · 用上方表单保存当前 project</div>
+            <div className="am-dev-tpl-empty">{tt.noTpl}</div>
           ) : (
             <div className="am-dev-tpl-grid">
               {templates.map(t => (
                 <div key={t.id} className="am-dev-tpl-card">
                   <div className="am-dev-tpl-card-name">{t.name}</div>
-                  <div className="am-dev-tpl-card-desc">{t.desc || '(无描述)'}</div>
-                  <div className="am-dev-tpl-card-meta">tags: {t.tags.join(', ') || '(无)'}</div>
+                  <div className="am-dev-tpl-card-desc">{t.desc || tt.noDesc}</div>
+                  <div className="am-dev-tpl-card-meta">tags: {t.tags.join(', ') || tt.none}</div>
                   <div className="am-row am-row-tight" style={{ marginTop: 6 }}>
-                    <button className="am-tb-btn" type="button" onClick={() => onLoad(t)}>📂 读入</button>
+                    <button className="am-tb-btn" type="button" onClick={() => onLoad(t)}>{tt.load}</button>
                     <button className="am-tb-btn am-tb-btn-danger" type="button" onClick={() => remove(t.id)}>✕</button>
                   </div>
                 </div>
@@ -8519,7 +9475,7 @@ function TemplatesModal({
           )}
         </div>
         <div className="am-dev-modal-foot">
-          <button className="am-tb-btn" onClick={onClose} type="button">关闭</button>
+          <button className="am-tb-btn" onClick={onClose} type="button">{tt.close}</button>
         </div>
       </div>
     </div>
@@ -8531,6 +9487,30 @@ function TemplatesModal({
 // 选 mp3 → Web Audio 解码 → 找节拍 → 一键按节拍生成 caption clips
 // 简易节拍检测 (energy onset): 切 50ms 窗, 算 RMS, peak detect with 0.5s 最小间隔
 // ============================================================
+const BGM_ALIGN_DICT = {
+  zh: {
+    audioTooBig: 'audio 文件超 30MB · 解码占内存过大, 拒绝', noAudioContext: '浏览器不支持 AudioContext',
+    decodeFail: '解码失败: ', detected: (n: number) => `检测到 ${n} 个节拍`, detectFirst: '先检测节拍',
+    title: 'BGM 字幕对齐器 (DEV)', headSub: '选 mp3 → 检测节拍 → 一键生成对齐字幕',
+    decoding: '解码中…', pickFile: '📂 选 mp3 / wav',
+    waveInfo: (d: string, frames: number) => `波形 ${d}s · ${frames} 帧`, notLoaded: '未加载',
+    sensitivity: '灵敏度 (peak 倍数)', minGap: '最小间隔 (s)', detectBeats: '⚡ 检测节拍',
+    textPool: '文本池', poolDefault: '默认', styleWord: '样式', stylePanel: '白板', styleBar: '黑条',
+    overridePlaceholder: '留空 = 自动从文本池抽; 或一行一句覆盖 (循环用)',
+    cancel: '取消', applyBtn: (n: number) => `✚ 加 ${n} 个节拍字幕到时间轴`,
+  },
+  en: {
+    audioTooBig: 'Audio file exceeds 30MB · decoding uses too much memory, rejected', noAudioContext: 'Browser does not support AudioContext',
+    decodeFail: 'Decode failed: ', detected: (n: number) => `Detected ${n} beats`, detectFirst: 'Detect beats first',
+    title: 'BGM caption aligner (DEV)', headSub: 'pick mp3 → detect beats → one-click aligned captions',
+    decoding: 'Decoding…', pickFile: '📂 Pick mp3 / wav',
+    waveInfo: (d: string, frames: number) => `Wave ${d}s · ${frames} frames`, notLoaded: 'Not loaded',
+    sensitivity: 'Sensitivity (peak multiplier)', minGap: 'Min gap (s)', detectBeats: '⚡ Detect beats',
+    textPool: 'Text pool', poolDefault: 'Default', styleWord: 'Style', stylePanel: 'Panel', styleBar: 'Bar',
+    overridePlaceholder: 'Leave empty = auto-pick from pool; or one line per caption to override (cycled)',
+    cancel: 'Cancel', applyBtn: (n: number) => `✚ Add ${n} beat captions to the timeline`,
+  },
+} as const;
 function BgmAlignModal({
   duration, onClose, onApply,
 }: {
@@ -8538,6 +9518,8 @@ function BgmAlignModal({
   onClose: () => void;
   onApply: (beatTimes: number[], texts: string[], style: CaptionStyle) => void;
 }) {
+  const lang = useUiLang();
+  const t = BGM_ALIGN_DICT[lang];
   const [waveData, setWaveData] = useState<{ peaks: number[]; durationSec: number } | null>(null);
   const [beats, setBeats] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
@@ -8551,13 +9533,13 @@ function BgmAlignModal({
   const analyze = async (file: File) => {
     // v23-b: caption/tts auto-extract 音频, 30MB 容纳长 BGM, 解码内存 OK
     if (file.size > 30 * 1024 * 1024) {
-      toast.error('audio 文件超 30MB · 解码占内存过大, 拒绝');
+      toast.error(t.audioTooBig);
       return;
     }
     setBusy(true);
     type WindowWithWebkit = Window & { webkitAudioContext?: typeof AudioContext };
     const AC = window.AudioContext || (window as WindowWithWebkit).webkitAudioContext;
-    if (!AC) { toast.error('浏览器不支持 AudioContext'); setBusy(false); return; }
+    if (!AC) { toast.error(t.noAudioContext); setBusy(false); return; }
     const ac = new AC();
     try {
       const buf = await file.arrayBuffer();
@@ -8574,7 +9556,7 @@ function BgmAlignModal({
       }
       setWaveData({ peaks, durationSec: audioBuf.duration });
     } catch (e) {
-      toast.error('解码失败: ' + (e as Error).message);
+      toast.error(t.decodeFail + (e as Error).message);
     } finally {
       try { await ac.close(); } catch {}
       setBusy(false);
@@ -8597,22 +9579,22 @@ function BgmAlignModal({
       }
     }
     setBeats(bts);
-    toast.success(`检测到 ${bts.length} 个节拍`);
-  }, [waveData, minGap, sensitivity]);
+    toast.success(t.detected(bts.length));
+  }, [waveData, minGap, sensitivity, t]);
   const applyToTimeline = () => {
-    if (beats.length === 0) { toast.error('先检测节拍'); return; }
+    if (beats.length === 0) { toast.error(t.detectFirst); return; }
     const overrideArr = overrideTexts.split('\n').map(s => s.trim()).filter(Boolean);
     let texts = overrideArr.length > 0 ? overrideArr : [];
     if (texts.length === 0) {
       // 从 quickModeTexts 抽 beats.length 条 (取够数, 自动循环)
       const want = Math.min(20, beats.length);
       for (let i = 0; i < want; i++) {
-        const t = pickRandomText('zh', textPoolMode, texts[texts.length - 1]);
-        if (t) texts.push(t); else texts.push('🎤');
+        const txt = pickRandomText('zh', textPoolMode, texts[texts.length - 1]);
+        if (txt) texts.push(txt); else texts.push('🎤');
       }
     }
     // 过滤超过 project.duration 的节拍
-    const inRange = beats.filter(t => t < duration);
+    const inRange = beats.filter(bt => bt < duration);
     onApply(inRange, texts, style);
   };
 
@@ -8637,9 +9619,9 @@ function BgmAlignModal({
     <div className="am-dev-modal-bg" onClick={onClose}>
       <div className="am-dev-modal" onClick={(e) => e.stopPropagation()}>
         <div className="am-dev-modal-head">
-          🎵 <span>BGM 字幕对齐器 (DEV)</span>
+          🎵 <span>{t.title}</span>
           <span style={{ fontSize: 11, fontWeight: 400, color: '#888', marginLeft: 8 }}>
-            选 mp3 → 检测节拍 → 一键生成对齐字幕
+            {t.headSub}
           </span>
           <button className="am-dev-close" onClick={onClose} type="button"><X size={14} /></button>
         </div>
@@ -8650,10 +9632,10 @@ function BgmAlignModal({
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void analyze(f); }}
             />
             <button className="am-tb-btn am-tb-btn-primary" onClick={() => fileRef.current?.click()} disabled={busy} type="button">
-              {busy ? '解码中…' : '📂 选 mp3 / wav'}
+              {busy ? t.decoding : t.pickFile}
             </button>
             <span style={{ fontSize: 11, color: '#888' }}>
-              {waveData ? `波形 ${waveData.durationSec.toFixed(1)}s · ${waveData.peaks.length} 帧` : '未加载'}
+              {waveData ? t.waveInfo(waveData.durationSec.toFixed(1), waveData.peaks.length) : t.notLoaded}
             </span>
           </div>
           {waveData && (
@@ -8667,40 +9649,40 @@ function BgmAlignModal({
                 ))}
               </div>
               <div className="am-dev-row">
-                <span>灵敏度 (peak 倍数)</span>
+                <span>{t.sensitivity}</span>
                 <input type="range" min="0.8" max="3" step="0.1" value={sensitivity} onChange={(e) => setSensitivity(parseFloat(e.target.value))} style={{ flex: 1 }} />
                 <strong>{sensitivity.toFixed(1)}</strong>
               </div>
               <div className="am-dev-row">
-                <span>最小间隔 (s)</span>
+                <span>{t.minGap}</span>
                 <input type="range" min="0.2" max="2" step="0.1" value={minGap} onChange={(e) => setMinGap(parseFloat(e.target.value))} style={{ flex: 1 }} />
                 <strong>{minGap.toFixed(1)}s</strong>
               </div>
               <div className="am-dev-row">
-                <button className="am-tb-btn" onClick={detectBeats} type="button">⚡ 检测节拍</button>
-                <span>找到 <strong>{beats.length}</strong> 个节拍</span>
+                <button className="am-tb-btn" onClick={detectBeats} type="button">{t.detectBeats}</button>
+                <span>{lang === 'en' ? <>Found <strong>{beats.length}</strong> beats</> : <>找到 <strong>{beats.length}</strong> 个节拍</>}</span>
               </div>
               <hr style={{ margin: '10px 0', border: 0, borderTop: '1px dashed #cdd3da' }} />
               <div className="am-dev-row">
-                <span>文本池</span>
+                <span>{t.textPool}</span>
                 {(['all', 'roast', 'fomo', 'fud'] as (CaptionMode | 'all')[]).map(m => (
                   <button key={m} type="button" className={'am-cap-quick-mode' + (textPoolMode === m ? ' is-active' : '')} onClick={() => setTextPoolMode(m)}>
-                    {m === 'all' ? '默认' : CAPTION_MODE_LABELS[m]?.zh ?? m}
+                    {m === 'all' ? t.poolDefault : (lang === 'en' ? (CAPTION_MODE_LABELS[m]?.en ?? CAPTION_MODE_LABELS[m]?.zh ?? m) : (CAPTION_MODE_LABELS[m]?.zh ?? m))}
                   </button>
                 ))}
               </div>
               <div className="am-dev-row">
-                <span>样式</span>
+                <span>{t.styleWord}</span>
                 {(['meme', 'panel', 'bar'] as CaptionStyle[]).map(s => (
                   <button key={s} type="button" className={'am-style-chip am-style-chip-' + s + (style === s ? ' is-active' : '')} onClick={() => setStyle(s)}>
-                    {s === 'meme' ? 'Meme' : s === 'panel' ? '白板' : '黑条'}
+                    {s === 'meme' ? 'Meme' : s === 'panel' ? t.stylePanel : t.styleBar}
                   </button>
                 ))}
               </div>
               <div className="am-dev-row">
                 <textarea
                   className="am-input am-textarea"
-                  placeholder="留空 = 自动从文本池抽; 或一行一句覆盖 (循环用)"
+                  placeholder={t.overridePlaceholder}
                   value={overrideTexts}
                   onChange={(e) => setOverrideTexts(e.target.value)}
                   style={{ flex: 1, minHeight: 60 }}
@@ -8710,9 +9692,9 @@ function BgmAlignModal({
           )}
         </div>
         <div className="am-dev-modal-foot">
-          <button className="am-tb-btn" onClick={onClose} type="button">取消</button>
+          <button className="am-tb-btn" onClick={onClose} type="button">{t.cancel}</button>
           <button className="am-tb-btn am-tb-btn-primary" onClick={applyToTimeline} disabled={beats.length === 0} type="button">
-            ✚ 加 {beats.length} 个节拍字幕到时间轴
+            {t.applyBtn(beats.length)}
           </button>
         </div>
       </div>
@@ -8724,94 +9706,118 @@ function BgmAlignModal({
 // DEV-only — 🛠 状态导出 Modal (封装 console 三件套, 不走快捷键)
 // ============================================================
 function StateDumpModal({ onClose }: { onClose: () => void }) {
+  const lang = useUiLang();
+  const t = STATE_DUMP_DICT[lang];
   const callDump = (name: '__dumpTTS' | '__dumpProject' | '__dumpTemplate') => {
     const fn = (window as unknown as Record<string, (() => void) | undefined>)[name];
     if (typeof fn === 'function') { fn(); }
-    else toast.error(name + ' 未挂载 (打开 AnimateMode 时 useEffect 才注册)');
+    else toast.error(name + t.notMounted);
   };
   return (
     <div className="am-dev-modal-bg" onClick={onClose}>
       <div className="am-dev-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(520px, 95vw)' }}>
         <div className="am-dev-modal-head">
-          🛠 <span>状态导出 (DEV)</span>
+          🛠 <span>{t.title}</span>
           <button className="am-dev-close" onClick={onClose} type="button"><X size={14} /></button>
         </div>
         <div className="am-dev-modal-body">
-          <p style={{ marginTop: 0 }}>导出当前 AnimateMode 内部状态到 console + 剪贴板 (报 bug 时可粘给开发者).</p>
+          <p style={{ marginTop: 0 }}>{t.intro}</p>
           <div className="am-dev-row">
             <button className="am-tb-btn am-tb-btn-primary" onClick={() => callDump('__dumpTTS')} type="button" style={{ flex: 1 }}>
-              🎤 TTS 状态表
+              {t.ttsTable}
             </button>
-            <span style={{ fontSize: 11, color: '#888' }}>显所有 TTS clip 的 audioSrc / engine / path</span>
+            <span style={{ fontSize: 11, color: '#888' }}>{t.ttsTableSub}</span>
           </div>
           <div className="am-dev-row">
             <button className="am-tb-btn am-tb-btn-primary" onClick={() => callDump('__dumpProject')} type="button" style={{ flex: 1 }}>
-              📋 Project 时间表
+              {t.projTable}
             </button>
-            <span style={{ fontSize: 11, color: '#888' }}>全 clip 排序按 start, 适合排查时序</span>
+            <span style={{ fontSize: 11, color: '#888' }}>{t.projTableSub}</span>
           </div>
           <div className="am-dev-row">
             <button className="am-tb-btn am-tb-btn-primary" onClick={() => callDump('__dumpTemplate')} type="button" style={{ flex: 1 }}>
-              📜 模板 (TS 代码)
+              {t.tplCode}
             </button>
-            <span style={{ fontSize: 11, color: '#888' }}>序列化 project 为 TS 代码, 可粘到 source</span>
+            <span style={{ fontSize: 11, color: '#888' }}>{t.tplCodeSub}</span>
           </div>
           <div className="am-dev-row" style={{ fontSize: 10, color: '#888', marginTop: 10 }}>
-            提示: 这 3 个 dump 也对应 F12 快捷键 <kbd>{fmtShortcut('Mod+Shift+D')}</kbd> / <kbd>{fmtShortcut('Mod+Shift+P')}</kbd> / <kbd>{fmtShortcut('Mod+Shift+T')}</kbd>
+            {t.tip} <kbd>{fmtShortcut('Mod+Shift+D')}</kbd> / <kbd>{fmtShortcut('Mod+Shift+P')}</kbd> / <kbd>{fmtShortcut('Mod+Shift+T')}</kbd>
           </div>
         </div>
         <div className="am-dev-modal-foot">
-          <button className="am-tb-btn" onClick={onClose} type="button">关闭</button>
+          <button className="am-tb-btn" onClick={onClose} type="button">{t.close}</button>
         </div>
       </div>
     </div>
   );
 }
+const STATE_DUMP_DICT = {
+  zh: {
+    notMounted: ' 未挂载 (打开 AnimateMode 时 useEffect 才注册)',
+    title: '状态导出 (DEV)',
+    intro: '导出当前 AnimateMode 内部状态到 console + 剪贴板 (报 bug 时可粘给开发者).',
+    ttsTable: '🎤 TTS 状态表', ttsTableSub: '显所有 TTS clip 的 audioSrc / engine / path',
+    projTable: '📋 Project 时间表', projTableSub: '全 clip 排序按 start, 适合排查时序',
+    tplCode: '📜 模板 (TS 代码)', tplCodeSub: '序列化 project 为 TS 代码, 可粘到 source',
+    tip: '提示: 这 3 个 dump 也对应 F12 快捷键', close: '关闭',
+  },
+  en: {
+    notMounted: ' not mounted (registered by a useEffect when AnimateMode opens)',
+    title: 'State dump (DEV)',
+    intro: 'Dump current AnimateMode internal state to console + clipboard (paste to a developer when reporting a bug).',
+    ttsTable: '🎤 TTS state table', ttsTableSub: 'shows audioSrc / engine / path of all TTS clips',
+    projTable: '📋 Project timetable', projTableSub: 'all clips sorted by start, good for timing debug',
+    tplCode: '📜 Template (TS code)', tplCodeSub: 'serialize project to TS code, can paste into source',
+    tip: 'Tip: these 3 dumps also map to F12 shortcuts', close: 'Close',
+  },
+} as const;
 
 // ============================================================
 // 快捷键完整 Modal
 // ============================================================
 function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const lang = useUiLang();
+  const S = SHORTCUTS_DICT[lang];
   const sections: { label: string; rows: { keys: string[]; desc: string }[] }[] = [
     {
-      label: '播放控制',
+      label: S.playControl,
       rows: [
-        { keys: ['Space', 'K'], desc: '播放 / 暂停' },
-        { keys: ['J'], desc: '倒退 1 秒' },
-        { keys: ['L'], desc: '前进 1 秒' },
-        { keys: [','], desc: '后退 1 帧' },
-        { keys: ['.'], desc: '前进 1 帧' },
-        { keys: ['Home'], desc: '跳到开头' },
-        { keys: ['End'], desc: '跳到结尾' },
+        { keys: ['Space', 'K'], desc: S.playPause },
+        { keys: ['J'], desc: S.back1s },
+        { keys: ['L'], desc: S.fwd1s },
+        { keys: [','], desc: S.back1f },
+        { keys: ['.'], desc: S.fwd1f },
+        { keys: ['Home'], desc: S.toStart },
+        { keys: ['End'], desc: S.toEnd },
       ],
     },
     {
-      label: '选中片段',
+      label: S.selectedClip,
       rows: [
-        { keys: ['S'], desc: '在 playhead 切分' },
-        { keys: [fmtShortcut('Mod+D')], desc: '复制片段' },
-        { keys: [fmtShortcut('Mod+C')], desc: '拷贝' },
-        { keys: [fmtShortcut('Mod+X')], desc: '剪切' },
-        { keys: [fmtShortcut('Mod+V')], desc: '粘贴到 playhead' },
-        { keys: ['Delete', 'Backspace'], desc: '删除' },
-        { keys: ['↑', '↓'], desc: '上 / 下 lane' },
-        { keys: ['←', '→'], desc: '微调 0.1s' },
-        { keys: ['Shift+←/→'], desc: '微调整秒' },
-        { keys: ['Alt+←/→'], desc: '微调 1 帧' },
-        { keys: ['Esc'], desc: '取消选择' },
+        { keys: ['S'], desc: S.splitAtPlayhead },
+        { keys: [fmtShortcut('Mod+D')], desc: S.dupClip },
+        { keys: [fmtShortcut('Mod+C')], desc: S.copy },
+        { keys: [fmtShortcut('Mod+X')], desc: S.cut },
+        { keys: [fmtShortcut('Mod+V')], desc: S.pasteAtPlayhead },
+        { keys: ['Delete', 'Backspace'], desc: S.delete },
+        { keys: ['↑', '↓'], desc: S.upDownLane },
+        { keys: ['←', '→'], desc: S.nudge01 },
+        { keys: ['Shift+←/→'], desc: S.nudgeSec },
+        { keys: ['Alt+←/→'], desc: S.nudge1f },
+        { keys: ['Esc'], desc: S.deselect },
       ],
     },
     {
-      label: '整体',
+      label: S.overall,
       rows: [
-        { keys: [fmtShortcut('Mod+Z')], desc: '撤销' },
-        { keys: [fmtShortcut('Mod+Shift+Z'), fmtShortcut('Mod+Y')], desc: '重做' },
-        { keys: [fmtShortcut('Mod+S')], desc: '保存草稿' },
-        { keys: [fmtShortcut('Mod+Shift+S')], desc: '另存草稿' },
-        { keys: [fmtShortcut('Mod+A')], desc: '全选' },
-        { keys: [fmtShortcut('Mod+Shift+Backspace')], desc: '清空所有片段' },
-        { keys: ['+', '='], desc: '时间轴放大' },
-        { keys: ['-', '_'], desc: '时间轴缩小' },
+        { keys: [fmtShortcut('Mod+Z')], desc: S.undo },
+        { keys: [fmtShortcut('Mod+Shift+Z'), fmtShortcut('Mod+Y')], desc: S.redo },
+        { keys: [fmtShortcut('Mod+S')], desc: S.saveDraft },
+        { keys: [fmtShortcut('Mod+Shift+S')], desc: S.saveAsDraft },
+        { keys: [fmtShortcut('Mod+A')], desc: S.selectAll },
+        { keys: [fmtShortcut('Mod+Shift+Backspace')], desc: S.clearAll },
+        { keys: ['+', '='], desc: S.zoomIn },
+        { keys: ['-', '_'], desc: S.zoomOut },
       ],
     },
   ];
@@ -8819,9 +9825,9 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
     <div className="am-dev-modal-bg" onClick={onClose}>
       <div className="am-dev-modal am-shortcut-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(640px, 95vw)' }}>
         <div className="am-dev-modal-head">
-          ⌨️ <span>沙雕动画 · 快捷键</span>
+          ⌨️ <span>{S.title}</span>
           <span style={{ fontSize: 11, fontWeight: 400, color: '#888', marginLeft: 8 }}>
-            当前系统: <strong>{IS_MAC ? 'macOS (⌘)' : 'Win/Linux (Ctrl)'}</strong>
+            {S.curSystem}: <strong>{IS_MAC ? 'macOS (⌘)' : 'Win/Linux (Ctrl)'}</strong>
           </span>
           <button className="am-dev-close" onClick={onClose} type="button"><X size={14} /></button>
         </div>
@@ -8846,11 +9852,25 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="am-dev-modal-foot">
-          <button className="am-tb-btn am-tb-btn-primary" onClick={onClose} type="button">知道了</button>
+          <button className="am-tb-btn am-tb-btn-primary" onClick={onClose} type="button">{S.gotIt}</button>
         </div>
       </div>
     </div>
   );
 }
+const SHORTCUTS_DICT = {
+  zh: {
+    title: '沙雕动画 · 快捷键', curSystem: '当前系统', gotIt: '知道了',
+    playControl: '播放控制', playPause: '播放 / 暂停', back1s: '倒退 1 秒', fwd1s: '前进 1 秒', back1f: '后退 1 帧', fwd1f: '前进 1 帧', toStart: '跳到开头', toEnd: '跳到结尾',
+    selectedClip: '选中片段', splitAtPlayhead: '在 playhead 切分', dupClip: '复制片段', copy: '拷贝', cut: '剪切', pasteAtPlayhead: '粘贴到 playhead', delete: '删除', upDownLane: '上 / 下 lane', nudge01: '微调 0.1s', nudgeSec: '微调整秒', nudge1f: '微调 1 帧', deselect: '取消选择',
+    overall: '整体', undo: '撤销', redo: '重做', saveDraft: '保存草稿', saveAsDraft: '另存草稿', selectAll: '全选', clearAll: '清空所有片段', zoomIn: '时间轴放大', zoomOut: '时间轴缩小',
+  },
+  en: {
+    title: 'Silly Animation · Shortcuts', curSystem: 'Current system', gotIt: 'Got it',
+    playControl: 'Playback', playPause: 'Play / Pause', back1s: 'Back 1s', fwd1s: 'Forward 1s', back1f: 'Back 1 frame', fwd1f: 'Forward 1 frame', toStart: 'Jump to start', toEnd: 'Jump to end',
+    selectedClip: 'Selected clip', splitAtPlayhead: 'Split at playhead', dupClip: 'Duplicate clip', copy: 'Copy', cut: 'Cut', pasteAtPlayhead: 'Paste at playhead', delete: 'Delete', upDownLane: 'Up / down lane', nudge01: 'Nudge 0.1s', nudgeSec: 'Nudge by second', nudge1f: 'Nudge 1 frame', deselect: 'Deselect',
+    overall: 'Overall', undo: 'Undo', redo: 'Redo', saveDraft: 'Save draft', saveAsDraft: 'Save as draft', selectAll: 'Select all', clearAll: 'Clear all clips', zoomIn: 'Zoom in timeline', zoomOut: 'Zoom out timeline',
+  },
+} as const;
 
 export default AnimateMode;

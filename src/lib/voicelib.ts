@@ -75,6 +75,12 @@ export const VOICE_LIB: VoicePreset[] = [
   },
 ];
 export const VOICE_BY_ID = Object.fromEntries(VOICE_LIB.map(v => [v.id, v])) as Record<string, VoicePreset>;
+// 配音音色 EN 名 (按 voice id). voicelib 是数据模块不能调 hook, 故 EN 名单独导出, 由消费方 (gifmode/sharededitor/animatemode)
+// 按 lang==='en' ? VOICE_NAME_EN[v.id] : v.name 取. zh 名仍用 VoicePreset.name (上面数据不动, 不破坏中文默认).
+export const VOICE_NAME_EN: Record<string, string> = {
+  'zh-youdao': 'Chinese · Xiaoxiao',
+  'en-joey': 'English · Aria',
+};
 // TTS 时长估算 — 让 clip width 跟实际朗读时间匹配
 // 中文: ≈ 0.26s / 字 (1.0 rate), 英文: ≈ 0.32s / 词
 // 抖音/CapCut 实测节奏类似. 留 +0.4s 头尾缓冲, 最少 0.8s 防极短 clip
