@@ -1074,7 +1074,10 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     beginDrag();
     const sx0 = e.clientX, startDur = D;
-    const minDur = Math.max(GIF_MIN_DURATION, ...projectRef.current.clips.map(c => c.end));
+    // 下限 = GIF_MIN_DURATION (能往左拖缩短). 不可用 clips.map(c=>c.end) 当下限 —
+    // GIF 主图层是 [0,duration] 全幅, 其 end===duration → 下限=当前时长 → 永远缩不了 (只能往右拖, 用户报"很傻逼").
+    // 缩短安全交给 clampClipsToDuration: 全幅层跟着缩 (wasFull→end=newD), 子片段夹紧 (≥0.1 宽), 变脸组按比例缩放.
+    const minDur = GIF_MIN_DURATION;
     const maxDur = Math.min(GIF_MAX_DURATION, preset.maxDuration);
     const onMove = (ev: PointerEvent) => {
       const next = startDur + (ev.clientX - sx0) / pxPerSec;
