@@ -82,12 +82,25 @@ export const GIF_PRESETS: GifPreset[] = [
   { id: 'wechat',      label: '小巧 · 省流', width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '体积最小 · 240² · 表情包/省流量' },
   { id: 'quick-share', label: '标准',        width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享' },
   { id: 'x',           label: '高清 · 推荐',  width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰 · 480² · 默认' },
+  { id: 'custom',      label: '自定义尺寸',   width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '自己设画板宽×高 (px)' },
 ];
-// 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)/自定义→高清(480²) — 老草稿无质量崩塌, 不落回 240².
-const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x', custom: 'x' };
+// 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)→高清(480²). 'custom' 现为真·可调尺寸, 不再 remap.
+const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x' };
 export function resolveGifPreset(id?: GifPresetId): GifPreset {
   const rid = id ? (GIF_PRESET_REMAP[id] ?? id) : 'x';   // 默认高清
   return GIF_PRESETS.find(p => p.id === rid) ?? GIF_PRESETS[2];   // 兜底也用高清
+}
+// GIF 画板尺寸钳制 (px) — 自定义尺寸用. 偶数对齐 (编码友好) + 范围 120~800.
+export function clampGifDim(n: number): number {
+  const v = Math.round((Number.isFinite(n) ? n : 480) / 2) * 2;
+  return Math.max(120, Math.min(800, v));
+}
+// 项目实际生效的 GIF 预设 — preset==='custom' 时用 project.customW/H 覆盖宽高 (其余字段沿用 custom 基准).
+// 这样 gifmode/gifloop 里所有 preset.width/height 调用点自动拿到自定义尺寸, 无需逐处改.
+export function effectiveGifPreset(project: { preset?: GifPresetId; customW?: number; customH?: number }): GifPreset {
+  const base = resolveGifPreset(project.preset);
+  if (project.preset !== 'custom') return base;
+  return { ...base, width: clampGifDim(project.customW ?? base.width), height: clampGifDim(project.customH ?? base.height) };
 }
 export const GIF_MAX_DURATION = 10; // s, GIF 总上限 (用户定 10s; 时间轴满宽=0..10s, 10s 在最右)
 export const GIF_MIN_DURATION = 1;

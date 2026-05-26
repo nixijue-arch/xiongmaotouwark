@@ -14,6 +14,13 @@
   color: var(--retro-text, #18324f); background: rgba(255,255,255,0.92); border: 1px solid rgba(13,103,198,0.4);
 }
 .gm-tb-num span { color: rgba(255,255,255,0.85); }
+/* 自定义画板尺寸 W×H 输入 (preset==='custom' 时显示) */
+.gm-tb-size { display: inline-flex; align-items: center; gap: 3px; }
+.gm-tb-size input {
+  width: 48px; height: 24px; padding: 0 5px; border-radius: 6px; font-size: 12px; font-weight: 700; text-align: right;
+  color: var(--retro-text, #18324f); background: rgba(255,255,255,0.92); border: 1px solid rgba(13,103,198,0.45);
+}
+.gm-tb-size-x { font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.92); }
 .gm-tb-loopgroup { display: inline-flex; align-items: center; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 2px; gap: 1px; }
 .gm-tb-loop { height: 24px; padding: 0 11px; border-radius: 6px; background: transparent; border: none; color: rgba(255,255,255,0.78); font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .gm-tb-loop:hover { background: rgba(255,255,255,0.12); color: #fff; }

@@ -11,7 +11,7 @@ import { useMeme, type DraftSlot } from '@/context/memecontext';
 import { getEditorPandaBox, calcEditorFaceLayout } from '@/lib/composeMeme';
 import { pickRandomText } from '@/data/quickModeTexts';
 import {
-  loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, resolveGifPreset, GIF_MAX_DURATION, GIF_MIN_DURATION,
+  loadMedia, mediaWH, isGifSrc, isGifFrames, drawableAt, GIF_PRESETS, resolveGifPreset, effectiveGifPreset, clampGifDim, GIF_MAX_DURATION, GIF_MIN_DURATION,
   fitCaptionFontPx, captionAvailH, contentBboxFrac, LOOP_MOTIONS, motionMeta,
   DEFAULT_TRANSFORM, DEFAULT_CAPTION_TRANSFORM,
   type MediaAsset, type Clip, type ImageClip, type CaptionClip, type Transform, type FaceLocal,
@@ -52,12 +52,12 @@ interface GifDraftSlot { id: string; name: string; updatedAt: number; project: G
 
 // LOOP_MOTIONS + motionMeta 已移到 animcore.ts (视频视图共用), 从那 import.
 
-// 精简到 3 个最常用 + 导出与预览严格一致的: 直接/乒乓/溶解 (去掉 倒放/急退 — 较少用且观感复杂).
-// 注: GifLoopMode 类型仍保留 reverse/rewind, loopTimeMap/buildExportFrameTimes 仍能处理 → 老 GIF 草稿不破坏, 只是不再新建.
+// 精简到 2 个: 直接/乒乓 (去掉"溶解" — 内置动作本就首尾闭环, 溶解在预览里跟"直接"看不出区别;
+// 非闭环素材 (导入 GIF / 不对称动作) 用"乒乓"即可保证无缝, 溶解冗余).
+// 注: GifLoopMode 类型仍保留 crossfade/reverse/rewind, loopTimeMap/buildExportFrameTimes 仍能处理 → 老草稿不破坏, 只是不再新建.
 const LOOP_MODES: { mode: GifLoopMode; short: string; hint: string }[] = [
   { mode: 'normal', short: '直接', hint: '正放循环 · 播完瞬间跳回开头 — 适合本身首尾闭环的动作 (内置动作都是)' },
-  { mode: 'boomerang', short: '乒乓', hint: '正放→倒放来回 · 任何动作都首尾无缝, 时长翻倍 — 最稳, 导出一致' },
-  { mode: 'crossfade', short: '溶解', hint: '尾段淡入开头 · 专治不闭环素材 (导入 GIF / 不对称动作) 的接缝跳变' },
+  { mode: 'boomerang', short: '乒乓', hint: '正放→倒放来回 · 任何动作/素材都首尾无缝, 时长翻倍 — 最稳, 导出一致' },
 ];
 
 // 算 image clip 在画板上的渲染框 (跟 animcore renderExportFrame 同公式) — 命中测试 / 选中描边 / A·B 手柄共用
@@ -324,7 +324,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   const layerDragId = useRef<string | null>(null);
   const [layerOverId, setLayerOverId] = useState<string | null>(null);
 
-  const preset = useMemo(() => resolveGifPreset(project.preset), [project.preset]);
+  const preset = useMemo(() => effectiveGifPreset({ preset: project.preset, customW: project.customW, customH: project.customH }), [project.preset, project.customW, project.customH]);
   const D = project.duration;
   const selected = project.clips.find(c => c.id === selectedId) ?? null;
   const imageClips = project.clips.filter(c => c.trackId === 'image') as ImageClip[];
@@ -414,7 +414,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     let raf = 0;
     const draw = () => {
       const p = projectRef.current;
-      const pr = resolveGifPreset(p.preset);
+      const pr = effectiveGifPreset(p);
       const w = pr.width, h = pr.height, dd = p.duration;
       const now = performance.now();
       const playPos = playingRef.current ? (now - startRef.current) / 1000 : frozenRef.current;
@@ -929,11 +929,22 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   }, [preset]);
 
   const setPresetId = useCallback((id: GifPresetId) => {
-    const pr = resolveGifPreset(id);
     setProject(p => {
+      const pr = resolveGifPreset(id);
       const dd = Math.min(p.duration, pr.maxDuration, GIF_MAX_DURATION);
-      return { ...p, preset: id, duration: dd, clips: clampClipsToDuration(p.clips, p.duration, dd) };
+      // 切到"自定义"且还没设过尺寸 → 用当前生效尺寸初始化 W×H (不会每次切回来都重置)
+      const seed = id === 'custom' && (p.customW == null || p.customH == null) ? effectiveGifPreset(p) : null;
+      return {
+        ...p, preset: id, duration: dd, clips: clampClipsToDuration(p.clips, p.duration, dd),
+        ...(seed ? { customW: seed.width, customH: seed.height } : {}),
+      };
     });
+  }, []);
+
+  // 自定义画板尺寸 (px) — 存原始值, 渲染/导出时 effectiveGifPreset 统一钳制到 120~800.
+  const setCustomSize = useCallback((dim: 'w' | 'h', val: number) => {
+    const v = Math.max(0, Math.round(Number.isFinite(val) ? val : 0));
+    setProject(p => ({ ...p, preset: 'custom', ...(dim === 'w' ? { customW: v } : { customH: v }) }));
   }, []);
 
   const setLoopMode = useCallback((mode: GifLoopMode) => {
@@ -1087,11 +1098,11 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     if (variantBusy) return;
     setVariantBusy(true); setVariantOpen(true);
     setVariants(prev => { prev?.forEach(x => URL.revokeObjectURL(x.url)); return null; });  // 先回收上一批 blob URL 防泄漏
-    const tid = toast.loading('生成三种变体… 0%');
+    const tid = toast.loading('生成两种变体… 0%');
     try {
       const vs = await exportGIFVariants(project, p => { toast.loading(`生成变体 ${Math.round(p * 100)}%…`, { id: tid }); });
       setVariants(vs.map(v => ({ v, url: URL.createObjectURL(v.blob) })));
-      toast.success('三种变体已就绪', { id: tid });
+      toast.success('两种变体已就绪', { id: tid });
     } catch (e) {
       toast.error('变体生成失败: ' + (e instanceof Error ? e.message : ''), { id: tid });
       setVariantOpen(false);
@@ -1180,6 +1191,8 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         const dur = Number.isFinite(data.duration) ? Math.max(GIF_MIN_DURATION, Math.min(data.duration, GIF_MAX_DURATION, pr.maxDuration)) : pr.defaultDuration;
         const safe: GifProject = {
           kind: 'gif-project', version: 1, preset: pr.id, duration: dur,
+          customW: pr.id === 'custom' && Number.isFinite(data.customW) ? clampGifDim(data.customW!) : undefined,
+          customH: pr.id === 'custom' && Number.isFinite(data.customH) ? clampGifDim(data.customH!) : undefined,
           loop: { ...DEFAULT_LOOP_CONFIG, ...(data.loop || {}) },
           lanes: { image: data.lanes?.image ?? 1, caption: data.lanes?.caption ?? 1, fx: data.lanes?.fx ?? 1 },
           clips: (data.clips.filter(c => c && (c.trackId === 'image' || c.trackId === 'caption') && (c.trackId !== 'image' || !!(c as ImageClip).src)) as Clip[])
@@ -1203,7 +1216,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
   useEffect(() => {
     if (!previewOpen) return;
     const cv = previewCanvasRef.current; if (!cv) return;
-    const pr0 = resolveGifPreset(projectRef.current.preset);
+    const pr0 = effectiveGifPreset(projectRef.current);
     cv.width = pr0.width; cv.height = pr0.height;
     const ctx = cv.getContext('2d', { alpha: false }); if (!ctx) return;
     const scratch = document.createElement('canvas'); scratch.width = pr0.width; scratch.height = pr0.height;
@@ -1212,7 +1225,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
     let raf = 0;
     const draw = () => {
       const p = projectRef.current;
-      const pr = resolveGifPreset(p.preset);
+      const pr = effectiveGifPreset(p);
       const D = p.duration;
       const t = loopTimeMap((performance.now() - t0) / 1000, D, p.loop.mode);
       renderLoopFrame(ctx, loopSpecAt(t, D, p.loop, pr.fps), p, pr.width, pr.height, cacheRef.current, makeLoopMotionAt(D, pr.width, pr.height), sctx, '#ffffff', makeBoundFaceAt(D, pr.width, pr.height));
@@ -1635,6 +1648,15 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           onChange={e => setPresetId(e.target.value as GifPresetId)}>
           {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
+        {project.preset === 'custom' && (
+          <span className="gm-tb-size" title="自定义画板尺寸 (px, 120~800)">
+            <input type="number" min={120} max={800} step={10} value={project.customW ?? preset.width}
+              onChange={e => setCustomSize('w', Number(e.target.value || '0'))} aria-label="画板宽" />
+            <span className="gm-tb-size-x">×</span>
+            <input type="number" min={120} max={800} step={10} value={project.customH ?? preset.height}
+              onChange={e => setCustomSize('h', Number(e.target.value || '0'))} aria-label="画板高" />
+          </span>
+        )}
         <label className="gm-tb-num" title={`时长 (上限 ${maxDur}s)`}>
           ⏱<input type="number" min={GIF_MIN_DURATION} max={maxDur} step={0.5}
             value={Number(D.toFixed(1))} onChange={e => setDuration(Number(e.target.value || '1'))} /><span>s</span>
@@ -1684,7 +1706,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
           )}
         </div>
         <button className="am-tb-btn" onClick={() => setPreviewOpen(true)} title="全屏预览 — 大图看循环"><Maximize2 size={13} /> <span>预览</span></button>
-        <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓/溶解 三变体并排对比" data-mobile-hide>
+        <button className="am-tb-btn" onClick={openVariants} disabled={variantBusy} title="渲染 直接/乒乓 两变体并排对比" data-mobile-hide>
           <Layers size={13} /> <span>对比变体</span>
         </button>
         <button className="am-tb-btn am-tb-more-toggle" onClick={() => setGifTbMore(v => !v)} title="更多功能">{gifTbMore ? '收起 ▲' : '⋯ 更多'}</button>
@@ -2456,7 +2478,7 @@ export function GifMode({ view, onSwitchView }: { view: ProjectMode; onSwitchVie
         <div className="gm-modal" onClick={closeVariants}>
           <div className="gm-modal-box" onClick={e => e.stopPropagation()}>
             <div className="gm-modal-head">
-              <span>三种循环变体 — 挑文件最小 / 最顺的下载</span>
+              <span>两种循环变体 — 挑文件最小 / 最顺的下载</span>
               <button onClick={closeVariants}><X size={16} /></button>
             </div>
             {variantBusy && <div className="gm-empty" style={{ padding: 24 }}>生成中… (串行渲 3 个, 稍等)</div>}
