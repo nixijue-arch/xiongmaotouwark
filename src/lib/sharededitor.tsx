@@ -16,6 +16,91 @@ import { pickRandomText, type Mode as CaptionMode, MODE_LABELS as CAPTION_MODE_L
 import { VOICE_LIB, resolveVoiceId, estimateTTSDuration } from '@/lib/voicelib';
 import { PandaSearchModal } from '@/components/pandasearchmodal';
 import { SmartExtractModal } from '@/components/smartextractmodal';
+import { useUiLang, pickLang } from '@/lib/animate-i18n';
+
+// 沙雕动画 视频/GIF 共享面板的 i18n 字典 (跟随顶栏 中/EN 全局开关). zh 保持与改造前逐字一致.
+const DICT = {
+  zh: {
+    comboTitle: '🐼+🤔 配套合成',
+    comboSubTwo: '双图层 · 可分别套动作', comboSubOne: '单图层 · 整体一起动', comboSubVideo: '校准自动应用 · 单层加入',
+    panda: '熊猫头', face: '表情',
+    prev: '上一个', next: '下一个', expandPick: '点击展开全部选项手动选',
+    shufflePair: '随机一对', clickDrag: '点 / 拖拽 加入', composing: '合成中…',
+    layerTwo: '双层 · 可分别动', layerTwoTip: '熊猫 + 脸 拆成两图层, 各自可套不同循环动作 (脸动身体不动 等)',
+    layerOne: '单层 · 整体', layerOneTip: '合成一张图层, 整体一起动 (简单稳)',
+    adding: '加入中…', addTwo: '✚ 加入 · 双层', addOne: '✚ 加入 · 单层', addTimeline: '✚ 加入时间轴',
+    pick: '选', searchPanda: '搜熊猫头…', searchFace: '搜表情…', noMatch: '无匹配 · 改关键词试试',
+    comboPreview: '合成预览',
+    addedCombo: '配套', composeFail: '合成失败',
+    webSearch: '联网搜图', webSearchTip: '联网搜熊猫头表情包, 选中加入熊猫池',
+    smartExtract: '智能抠脸', smartExtractTip: '上传照片智能抠出人脸, 加入表情池',
+    extractLabel: '抠脸', addedToPanda: '已加入熊猫池', addedToFace: '已加入表情池',
+    composeShort: '合成中…', processFail: '处理失败', del: '删除',
+    cardTip: '单击或拖到时间轴', draftTip: '点击加入', draftTipSuffix: '— 画面 + 字幕 自动分轨',
+    layerCount: '层', capSplit: '字幕分轨', draftFallback: '草图',
+    capQuickHead: '🎲 快速生成', capQuickSub: '从快速模式池抽 · 编辑后加', defaultMode: '默认',
+    defaultFull: '默认 (全池)', styleDemoTip: '样式演示 · 加时实际文字', textEmpty: '空', fontSize: '字号',
+    rerollTip: '再抽一条 (避免连出同句)', reroll: '换一条', typeHere: '或直接打字',
+    styleLabel: '样式', styleMeme: 'Meme', stylePanel: '白板', styleBar: '黑条',
+    autoSize: '自动', autoSizeTip: '自适应: 短文案撑大 / 长文案缩小分行 (推荐, 跟随机生成一致)', adaptive: '自适应',
+    colorLabel: '颜色', addCaption: '✚ 加字幕', sampleCaption: '字幕样式',
+    posHead: '📍 字幕位置预设', posSub: '点一下加位置示例 · 加入后可继续拖',
+    posTop: '顶部', posMidUp: '中上', posMid: '居中', posMidDown: '中下', posBottom: '底部',
+    posSample: '位置示例', addedCaptionPos: '已加字幕',
+    emojiHead: '🎭 沙雕表情字幕', emojiSub: '单击加一条单 emoji 字幕 · 大字号',
+    emojiBtnTip1: '加', emojiBtnTip2: '表情 (自适应字号 · 1.2s · 可拖角缩放)',
+    batchHead: '📋 批量导入台词稿', batchGifTag: '(GIF · 仅字幕)',
+    pasteEmpty: '粘贴一段台词, 每行一条字幕',
+    batchPairTitle: '每行台词同时建 1 个字幕 + 1 个配音 · 双向链接 (改一个另一个自动跟)',
+    batchPairMain: '字幕 + 配音 一起加', batchPairSub: '推荐 · 双向链接',
+    batchCapOnlyTitle: '仅字幕轨, 每条 2.5s 接龙', batchCapOnlyMain: '只加字幕', batchCapOnlySub: '每条 2.5s',
+    batchPlaceholder: '家人们谁懂啊\n直接裂开\n但我装作很淡定\n我可太牛了',
+    addBtn: '✚ 加', batchSeg: '段', batchToCap: '→ 字幕', batchToCapTTS: '→ 字幕+配音',
+    batchDoneTTS1: '✓', batchDoneTTS2: '段台词 → 字幕 + 配音 配套生成, 已双向链接',
+    batchDoneCap1: '已加', batchDoneCap2: '条字幕',
+    radioGroup: '生成模式',
+  },
+  en: {
+    comboTitle: '🐼+🤔 Combo',
+    comboSubTwo: 'Two layers · animate each', comboSubOne: 'One layer · move together', comboSubVideo: 'Auto-aligned · single layer',
+    panda: 'Panda head', face: 'Face',
+    prev: 'Prev', next: 'Next', expandPick: 'Click to expand & pick manually',
+    shufflePair: 'Shuffle pair', clickDrag: 'Click / drag to add', composing: 'Composing…',
+    layerTwo: 'Two layers · move apart', layerTwoTip: 'Split panda + face into two layers, each can take its own loop motion (face moves, body still, etc.)',
+    layerOne: 'One layer · together', layerOneTip: 'Compose into one layer, moves as a whole (simple & stable)',
+    adding: 'Adding…', addTwo: '✚ Add · 2 layers', addOne: '✚ Add · 1 layer', addTimeline: '✚ Add to timeline',
+    pick: 'Pick', searchPanda: 'Search panda heads…', searchFace: 'Search faces…', noMatch: 'No match · try other keywords',
+    comboPreview: 'Combo preview',
+    addedCombo: 'combo', composeFail: 'Compose failed',
+    webSearch: 'Web search', webSearchTip: 'Search panda memes online, pick to add to panda pool',
+    smartExtract: 'Cut-out face', smartExtractTip: 'Upload a photo to auto cut out the face, add to face pool',
+    extractLabel: 'Face', addedToPanda: 'Added to panda pool', addedToFace: 'Added to face pool',
+    composeShort: 'Composing…', processFail: 'Failed', del: 'Delete',
+    cardTip: 'Click or drag to timeline', draftTip: 'Click to add', draftTipSuffix: '— image + captions auto-split into tracks',
+    layerCount: 'layers', capSplit: 'caption track', draftFallback: 'Draft',
+    capQuickHead: '🎲 Quick generate', capQuickSub: 'Pull from quick-mode pool · edit then add', defaultMode: 'Default',
+    defaultFull: 'Default (all pools)', styleDemoTip: 'Style demo · actual text on add', textEmpty: 'empty', fontSize: 'Size',
+    rerollTip: 'Roll another (avoid repeats)', reroll: 'Roll again', typeHere: 'or just type',
+    styleLabel: 'Style', styleMeme: 'Meme', stylePanel: 'White', styleBar: 'Black bar',
+    autoSize: 'Auto', autoSizeTip: 'Auto-fit: short text grows / long text shrinks & wraps (recommended, matches random generate)', adaptive: 'Auto-fit',
+    colorLabel: 'Color', addCaption: '✚ Add caption', sampleCaption: 'Caption style',
+    posHead: '📍 Caption position presets', posSub: 'Click to add a sample · keep dragging after add',
+    posTop: 'Top', posMidUp: 'Upper', posMid: 'Center', posMidDown: 'Lower', posBottom: 'Bottom',
+    posSample: 'Position sample', addedCaptionPos: 'Added caption',
+    emojiHead: '🎭 Meme emoji captions', emojiSub: 'Click to add a single-emoji caption · big size',
+    emojiBtnTip1: 'Add', emojiBtnTip2: 'emoji (auto-fit size · 1.2s · drag corner to scale)',
+    batchHead: '📋 Batch import script', batchGifTag: '(GIF · captions only)',
+    pasteEmpty: 'Paste a script, one caption per line',
+    batchPairTitle: 'Each line builds 1 caption + 1 voice, two-way linked (edit one, the other follows)',
+    batchPairMain: 'Caption + voice together', batchPairSub: 'Recommended · two-way linked',
+    batchCapOnlyTitle: 'Caption track only, 2.5s each in sequence', batchCapOnlyMain: 'Captions only', batchCapOnlySub: '2.5s each',
+    batchPlaceholder: 'who even gets this\njust falling apart\nbut I act all chill\nI am so winning',
+    addBtn: '✚ Add', batchSeg: 'lines', batchToCap: '→ captions', batchToCapTTS: '→ captions+voice',
+    batchDoneTTS1: '✓', batchDoneTTS2: 'lines → caption + voice combos, two-way linked',
+    batchDoneCap1: 'Added', batchDoneCap2: 'captions',
+    radioGroup: 'Generate mode',
+  },
+} as const;
 
 // 拖拽 / 快速添加 的数据载体 — 组件只 emit 它, 由各 host 自行建 clip
 // (video = timeline 语义 playhead+找空位; gif = 全幅 [0,duration])。这是抽取的接缝。
@@ -71,6 +156,8 @@ export function ComboTab({ onAdd, onAddCombo }: {
   onAdd: (payload: DragPayload) => void;
   onAddCombo?: (panda: Material, face: Material) => void; // GIF: 拆两个独立图层 (host 自己算 face 位置)
 }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const [pIdx, setPIdx] = useState(() => Math.floor(Math.random() * ALL_PANDAS.length));
   const [fIdx, setFIdx] = useState(() => Math.floor(Math.random() * ALL_FACES.length));
   const [comboLayers, setComboLayers] = useState<'one' | 'two'>('two'); // GIF: 双层(各自动) / 单层(整体). video 永远单层
@@ -118,9 +205,9 @@ export function ComboTab({ onAdd, onAddCombo }: {
         fillInternalShell: true,
       });
       onAdd({ type: 'image', src: composed, label: `${panda.labelCn}+${face.labelCn}`, defaultDuration: 2.5 });
-      toast.success(`已加 ${panda.labelCn}+${face.labelCn} 配套`);
+      toast.success(lang === 'en' ? `Added ${panda.labelEn}+${face.labelEn} ${t('addedCombo')}` : `已加 ${panda.labelCn}+${face.labelCn} ${t('addedCombo')}`);
     } catch {
-      toast.error('合成失败');
+      toast.error(t('composeFail'));
     } finally {
       setLoading(false);
     }
@@ -149,79 +236,79 @@ export function ComboTab({ onAdd, onAddCombo }: {
   return (
     <div className="am-combo-tab">
       <div className="am-combo-tab-head">
-        <span className="am-combo-tab-title">🐼+🤔 配套合成</span>
-        <span className="am-combo-tab-sub">{onAddCombo ? (comboLayers === 'two' ? '双图层 · 可分别套动作' : '单图层 · 整体一起动') : '校准自动应用 · 单层加入'}</span>
+        <span className="am-combo-tab-title">{t('comboTitle')}</span>
+        <span className="am-combo-tab-sub">{onAddCombo ? (comboLayers === 'two' ? t('comboSubTwo') : t('comboSubOne')) : t('comboSubVideo')}</span>
       </div>
 
       <div className="am-combo-tab-slots">
         <div className="am-combo-tab-slot">
-          <div className="am-combo-tab-slot-label">熊猫头 ({pIdx + 1}/{ALL_PANDAS.length})</div>
+          <div className="am-combo-tab-slot-label">{t('panda')} ({pIdx + 1}/{ALL_PANDAS.length})</div>
           <div className="am-combo-tab-slot-row">
-            <button className="am-combo-arrow" onClick={() => cyclePanda(-1)} type="button" title="上一个">‹</button>
+            <button className="am-combo-arrow" onClick={() => cyclePanda(-1)} type="button" title={t('prev')}>‹</button>
             <button
               className="am-combo-tab-thumb-btn"
               onClick={() => { setPicker('panda'); setPickerQ(''); }}
-              title="点击展开全部选项手动选"
+              title={t('expandPick')}
               type="button"
             >
               <img src={panda.src} alt={panda.labelCn} className="am-combo-tab-thumb" draggable={false} />
-              <span className="am-combo-tab-thumb-name">{panda.labelCn}</span>
+              <span className="am-combo-tab-thumb-name">{lang === 'en' ? panda.labelEn : panda.labelCn}</span>
               <span className="am-combo-tab-expand">▾</span>
             </button>
-            <button className="am-combo-arrow" onClick={() => cyclePanda(1)} type="button" title="下一个">›</button>
+            <button className="am-combo-arrow" onClick={() => cyclePanda(1)} type="button" title={t('next')}>›</button>
           </div>
         </div>
 
         <div className="am-combo-tab-slot">
-          <div className="am-combo-tab-slot-label">表情 ({fIdx + 1}/{ALL_FACES.length})</div>
+          <div className="am-combo-tab-slot-label">{t('face')} ({fIdx + 1}/{ALL_FACES.length})</div>
           <div className="am-combo-tab-slot-row">
-            <button className="am-combo-arrow" onClick={() => cycleFace(-1)} type="button" title="上一个">‹</button>
+            <button className="am-combo-arrow" onClick={() => cycleFace(-1)} type="button" title={t('prev')}>‹</button>
             <button
               className="am-combo-tab-thumb-btn"
               onClick={() => { setPicker('face'); setPickerQ(''); }}
-              title="点击展开全部选项手动选"
+              title={t('expandPick')}
               type="button"
             >
               <img src={face.src} alt={face.labelCn} className="am-combo-tab-thumb" draggable={false} />
-              <span className="am-combo-tab-thumb-name">{face.labelCn}</span>
+              <span className="am-combo-tab-thumb-name">{lang === 'en' ? face.labelEn : face.labelCn}</span>
               <span className="am-combo-tab-expand">▾</span>
             </button>
-            <button className="am-combo-arrow" onClick={() => cycleFace(1)} type="button" title="下一个">›</button>
+            <button className="am-combo-arrow" onClick={() => cycleFace(1)} type="button" title={t('next')}>›</button>
           </div>
         </div>
       </div>
 
       <button className="am-combo-shuffle-btn" onClick={shuffle} type="button">
-        <Shuffle size={12} /> <span>随机一对</span>
+        <Shuffle size={12} /> <span>{t('shufflePair')}</span>
       </button>
 
       <div
         className="am-combo-tab-preview"
         draggable={!!preview}
         onDragStart={onDragStart}
-        title={preview ? '点 / 拖拽 加入' : '合成中…'}
+        title={preview ? t('clickDrag') : t('composing')}
       >
         {preview ? (
-          <img src={preview} alt="合成预览" className="am-combo-tab-preview-img" draggable={false} />
+          <img src={preview} alt={t('comboPreview')} className="am-combo-tab-preview-img" draggable={false} />
         ) : (
-          <div className="am-combo-preview-loading">合成中…</div>
+          <div className="am-combo-preview-loading">{t('composing')}</div>
         )}
       </div>
       {onAddCombo && (
         <div className="am-combo-layers">
-          <button type="button" className={'am-combo-layer-btn' + (comboLayers === 'two' ? ' is-active' : '')} onClick={() => setComboLayers('two')} title="熊猫 + 脸 拆成两图层, 各自可套不同循环动作 (脸动身体不动 等)">双层 · 可分别动</button>
-          <button type="button" className={'am-combo-layer-btn' + (comboLayers === 'one' ? ' is-active' : '')} onClick={() => setComboLayers('one')} title="合成一张图层, 整体一起动 (简单稳)">单层 · 整体</button>
+          <button type="button" className={'am-combo-layer-btn' + (comboLayers === 'two' ? ' is-active' : '')} onClick={() => setComboLayers('two')} title={t('layerTwoTip')}>{t('layerTwo')}</button>
+          <button type="button" className={'am-combo-layer-btn' + (comboLayers === 'one' ? ' is-active' : '')} onClick={() => setComboLayers('one')} title={t('layerOneTip')}>{t('layerOne')}</button>
         </div>
       )}
-      <button className="am-combo-add" onClick={handleAdd} disabled={loading || !preview} type="button">
-        {loading ? '加入中…' : (onAddCombo ? (comboLayers === 'two' ? '✚ 加入 · 双层' : '✚ 加入 · 单层') : '✚ 加入时间轴')}
+      <button className="am-combo-add" data-tour="btn-add-combo" onClick={handleAdd} disabled={loading || !preview} type="button">
+        {loading ? t('adding') : (onAddCombo ? (comboLayers === 'two' ? t('addTwo') : t('addOne')) : t('addTimeline'))}
       </button>
 
       {picker && (
         <div className="am-combo-picker-overlay" onClick={() => setPicker(null)}>
           <div className="am-combo-picker win7-panel" onClick={(e) => e.stopPropagation()}>
             <div className="am-combo-picker-head">
-              <span>选 {picker === 'panda' ? '熊猫头' : '表情'} · {pickerList.length}/{picker === 'panda' ? ALL_PANDAS.length : ALL_FACES.length}</span>
+              <span>{t('pick')} {picker === 'panda' ? t('panda') : t('face')} · {pickerList.length}/{picker === 'panda' ? ALL_PANDAS.length : ALL_FACES.length}</span>
               <button className="am-popover-close" onClick={() => setPicker(null)} type="button"><X size={14} /></button>
             </div>
             <div className="am-combo-picker-search material-search-box">
@@ -230,7 +317,7 @@ export function ComboTab({ onAdd, onAddCombo }: {
                 autoFocus
                 type="text"
                 className="material-search-input"
-                placeholder={`搜${picker === 'panda' ? '熊猫头' : '表情'}…`}
+                placeholder={picker === 'panda' ? t('searchPanda') : t('searchFace')}
                 value={pickerQ}
                 onChange={(e) => setPickerQ(e.target.value)}
               />
@@ -257,12 +344,12 @@ export function ComboTab({ onAdd, onAddCombo }: {
                     title={m.labelCn}
                   >
                     <img src={m.src} alt={m.labelCn} className="am-combo-picker-thumb" draggable={false} loading="lazy" />
-                    <span className="am-combo-picker-name">{m.labelCn}</span>
+                    <span className="am-combo-picker-name">{lang === 'en' ? m.labelEn : m.labelCn}</span>
                   </button>
                 );
               })}
               {pickerList.length === 0 && (
-                <div className="am-combo-picker-empty">无匹配 · 改关键词试试</div>
+                <div className="am-combo-picker-empty">{t('noMatch')}</div>
               )}
             </div>
           </div>
@@ -279,33 +366,35 @@ export function ComboTab({ onAdd, onAddCombo }: {
 // kind='panda' → 联网搜图 (整张熊猫头, 落 kind=panda); kind='face' → 智能抠脸 (MediaPipe, 落 kind=face)
 // 复用编辑器/快速已有的 PandaSearchModal / SmartExtractModal, 不重写
 export function MaterialSourceButtons({ kind, onAdd }: { kind: 'panda' | 'face'; onAdd: (m: Material) => void }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const [searchOpen, setSearchOpen] = useState(false);
   const [extractOpen, setExtractOpen] = useState(false);
   return (
     <div className="am-matsrc">
       {kind === 'panda' ? (
-        <button type="button" className="am-tb-btn am-matsrc-btn" onClick={() => setSearchOpen(true)} title="联网搜熊猫头表情包, 选中加入熊猫池">
-          <Search size={13} strokeWidth={2.2} /> 联网搜图
+        <button type="button" className="am-tb-btn am-matsrc-btn" onClick={() => setSearchOpen(true)} title={t('webSearchTip')}>
+          <Search size={13} strokeWidth={2.2} /> {t('webSearch')}
         </button>
       ) : (
-        <button type="button" className="am-tb-btn am-matsrc-btn" onClick={() => setExtractOpen(true)} title="上传照片智能抠出人脸, 加入表情池">
-          <Sparkles size={13} strokeWidth={2.2} /> 智能抠脸
+        <button type="button" className="am-tb-btn am-matsrc-btn" onClick={() => setExtractOpen(true)} title={t('smartExtractTip')}>
+          <Sparkles size={13} strokeWidth={2.2} /> {t('smartExtract')}
         </button>
       )}
       {searchOpen && (
         <PandaSearchModal
-          open lang="zh"
+          open lang={lang}
           onClose={() => setSearchOpen(false)}
-          onSelect={(mat) => { onAdd({ ...mat, kind: 'panda' }); setSearchOpen(false); toast.success(`已加入熊猫池: ${mat.labelCn}`); }}
+          onSelect={(mat) => { onAdd({ ...mat, kind: 'panda' }); setSearchOpen(false); toast.success(`${t('addedToPanda')}: ${lang === 'en' ? mat.labelEn : mat.labelCn}`); }}
         />
       )}
       {extractOpen && (
         <SmartExtractModal
-          isOpen language="zh"
+          isOpen language={lang}
           onClose={() => setExtractOpen(false)}
           onConfirm={(dataUrl) => {
             onAdd({ id: `custom-face-${uid('cf')}`, src: dataUrl, labelCn: '抠脸', labelEn: 'Face', tags: ['抠脸'], tagsEn: ['face'], faceOffset: { x: 100, y: 70, w: 250, h: 250 }, kind: 'face' });
-            setExtractOpen(false); toast.success('已加入表情池');
+            setExtractOpen(false); toast.success(t('addedToFace'));
           }}
         />
       )}
@@ -321,6 +410,9 @@ function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
   onQuickAdd: (payload: DragPayload) => void;
   onDelete?: () => void;
 }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
+  const dispName = lang === 'en' ? item.labelEn : item.labelCn;
   // 单独 panda/face 拖入沙雕动画时, flattenAlphaShell 把内部 transparent fill 白, 防场景透出
   // scene 不处理 (本身就是背景), upload 用户图也不动 (尊重用户原图)
   // ⚠️ 联网搜的网络梗图是「完整图」(不是透明熊猫壳): 绝不能跑 flattenAlphaShell — 否则白底填充+四角洪泛
@@ -357,16 +449,16 @@ function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
     void buildPayload().then(p => { cachedPayloadRef.current = p; }).catch(() => {});
   };
   const handleClick = useCallback(async () => {
-    const tid = needsFlattenShell ? toast.loading('合成中…') : null;
+    const tid = needsFlattenShell ? toast.loading(t('composeShort')) : null;
     try {
       const payload = await buildPayload();
       if (tid) toast.dismiss(tid);
       onQuickAdd(payload);
     } catch (e) {
       if (tid) toast.dismiss(tid);
-      toast.error('处理失败: ' + (e as Error).message);
+      toast.error(t('processFail') + ': ' + (e as Error).message);
     }
-  }, [buildPayload, needsFlattenShell, onQuickAdd]);
+  }, [buildPayload, needsFlattenShell, onQuickAdd, t]);
   const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     const p = cachedPayloadRef.current ?? {
       type: 'image' as const, src: item.src, label: item.labelCn,
@@ -386,7 +478,7 @@ function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
       onClick={handleClick}
       onDoubleClick={handleClick}
       onMouseEnter={onHover}
-      title={`单击或拖到时间轴: ${item.labelCn}`}
+      title={`${t('cardTip')}: ${dispName}`}
     >
       <img
         src={item.src}
@@ -402,14 +494,14 @@ function MaterialCardClipImpl({ item, kind, onQuickAdd, onDelete }: {
           el.removeAttribute('src');
         }}
       />
-      <span className="material-name">{item.labelCn}</span>
+      <span className="material-name">{dispName}</span>
       {item.tags.length > 0 && kind !== 'scene' && (
         <div className="material-tags">
-          {item.tags.slice(0, 2).map(t => <span key={t} className="material-tag">{t}</span>)}
+          {(lang === 'en' && item.tagsEn?.length ? item.tagsEn : item.tags).slice(0, 2).map(tg => <span key={tg} className="material-tag">{tg}</span>)}
         </div>
       )}
       {onDelete && (
-        <button className="am-card-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="删除">
+        <button className="am-card-del" onClick={(e) => { e.stopPropagation(); onDelete(); }} title={t('del')}>
           <X size={10} />
         </button>
       )}
@@ -424,6 +516,8 @@ export function DraftCardClip({ slot, onAddDraftAsClips }: {
   slot: DraftSlot;
   onAddDraftAsClips: (s: DraftSlot) => void;
 }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const { previewUrl, name, elementCount } = slot;
   // 检测是否有文字 — 用于给 card 加 "字幕分轨" tag
   const hasText = useMemo(() => {
@@ -434,7 +528,7 @@ export function DraftCardClip({ slot, onAddDraftAsClips }: {
       className="material-card am-card am-card-draft"
       onClick={() => onAddDraftAsClips(slot)}
       onDoubleClick={() => onAddDraftAsClips(slot)}
-      title={`点击加入: ${name} — 画面 + 字幕 自动分轨`}
+      title={`${t('draftTip')}: ${name} ${t('draftTipSuffix')}`}
     >
       {previewUrl ? (
         <img src={previewUrl} alt={name} className="material-img am-img-draft" draggable={false} loading="lazy" />
@@ -443,8 +537,8 @@ export function DraftCardClip({ slot, onAddDraftAsClips }: {
       )}
       <span className="material-name">{name}</span>
       <div className="material-tags">
-        <span className="material-tag">{elementCount} 层</span>
-        {hasText && <span className="material-tag am-draft-tag-cap">字幕分轨</span>}
+        <span className="material-tag">{elementCount} {t('layerCount')}</span>
+        {hasText && <span className="material-tag am-draft-tag-cap">{t('capSplit')}</span>}
       </div>
     </div>
   );
@@ -504,10 +598,11 @@ export async function draftToLayers(slot: DraftSlot): Promise<{ imgSrc: string; 
 // 字幕工具 (video + gif 共用) — 快速生成 / 位置预设 / 表情 / 批量导入
 // 全部 emit DragPayload(type:'caption') 或 Clip[]; host 自行建 clip (timeline / 全幅)
 // ============================================================
-const CAPTION_SAMPLE_TEXT = '字幕样式';
 
 // 字幕快速生成 — 从 quickModeTexts 随机出文字 + 用户调样式 → 拖/单击加
 export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const [mode, setMode] = useState<CaptionMode | 'all'>('all');
   const [text, setText] = useState(() => pickRandomText('zh', 'all') || '点击编辑字幕');
   const [style, setStyle] = useState<CaptionStyle>('meme');
@@ -534,8 +629,8 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
   return (
     <div className="am-cap-quick win7-panel">
       <div className="am-cap-quick-head">
-        <span>🎲 快速生成</span>
-        <span className="am-cap-quick-sub">从快速模式池抽 · 编辑后加</span>
+        <span>{t('capQuickHead')}</span>
+        <span className="am-cap-quick-sub">{t('capQuickSub')}</span>
       </div>
       <div className="am-cap-quick-modes">
         {MODE_BTNS.map(m => (
@@ -543,10 +638,10 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
             key={m}
             type="button"
             className={'am-cap-quick-mode' + (mode === m ? ' is-active' : '')}
-            onClick={() => { setMode(m); const t = pickRandomText('zh', m); if (t) setText(t); }}
-            title={m === 'all' ? '默认 (全池)' : CAPTION_MODE_LABELS[m]?.zh ?? m}
+            onClick={() => { setMode(m); const r = pickRandomText('zh', m); if (r) setText(r); }}
+            title={m === 'all' ? t('defaultFull') : CAPTION_MODE_LABELS[m]?.[lang] ?? m}
           >
-            {m === 'all' ? '默认' : CAPTION_MODE_LABELS[m]?.zh ?? m}
+            {m === 'all' ? t('defaultMode') : CAPTION_MODE_LABELS[m]?.[lang] ?? m}
           </button>
         ))}
       </div>
@@ -559,25 +654,25 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
           color,
           minHeight: Math.max(60, fontSize * 0.95),
         }}
-        title={`样式演示 · 加时实际文字: "${text || '空'}" · 字号 ${fontSize}px`}
+        title={`${t('styleDemoTip')}: "${text || t('textEmpty')}" · ${t('fontSize')} ${fontSize}px`}
       >
-        {CAPTION_SAMPLE_TEXT}
+        {t('sampleCaption')}
       </div>
       <div className="am-row am-row-tight" style={{ marginTop: 6 }}>
-        <button type="button" className="am-tb-btn" onClick={reroll} title="再抽一条 (避免连出同句)">
-          <Shuffle size={11} /> 换一条
+        <button type="button" className="am-tb-btn" onClick={reroll} title={t('rerollTip')}>
+          <Shuffle size={11} /> {t('reroll')}
         </button>
         <input
           type="text"
           className="am-input am-cap-quick-input"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="或直接打字"
+          placeholder={t('typeHere')}
           maxLength={80}
         />
       </div>
       <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">样式</span>
+        <span className="am-cap-quick-label">{t('styleLabel')}</span>
         <div className="am-style-chips am-style-chips-mini">
           {(['meme', 'panel', 'bar'] as CaptionStyle[]).map(s => (
             <button
@@ -590,15 +685,15 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
                 if (s !== 'panel' && color === '#222222') setColor('#ffffff');
               }}
             >
-              {s === 'meme' ? 'Meme' : s === 'panel' ? '白板' : '黑条'}
+              {s === 'meme' ? t('styleMeme') : s === 'panel' ? t('stylePanel') : t('styleBar')}
             </button>
           ))}
         </div>
       </div>
       <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">字号</span>
-        <button type="button" onClick={() => setAutoSize(a => !a)} title="自适应: 短文案撑大 / 长文案缩小分行 (推荐, 跟随机生成一致)"
-          style={{ padding: '2px 8px', borderRadius: 5, border: '1px solid', borderColor: autoSize ? '#FF5E00' : '#cbd5e1', background: autoSize ? '#fff4ec' : '#fff', color: autoSize ? '#c84a00' : '#64748b', fontSize: 11, fontWeight: 700, cursor: 'pointer', flex: 'none' }}>自动</button>
+        <span className="am-cap-quick-label">{t('fontSize')}</span>
+        <button type="button" onClick={() => setAutoSize(a => !a)} title={t('autoSizeTip')}
+          style={{ padding: '2px 8px', borderRadius: 5, border: '1px solid', borderColor: autoSize ? '#FF5E00' : '#cbd5e1', background: autoSize ? '#fff4ec' : '#fff', color: autoSize ? '#c84a00' : '#64748b', fontSize: 11, fontWeight: 700, cursor: 'pointer', flex: 'none' }}>{t('autoSize')}</button>
         <input
           type="range" min="20" max="100" step="2"
           value={fontSize}
@@ -607,10 +702,10 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
           className="am-range am-cap-quick-range"
           style={{ opacity: autoSize ? 0.4 : 1 }}
         />
-        <span className="am-cap-quick-val">{autoSize ? '自适应' : fontSize}</span>
+        <span className="am-cap-quick-val">{autoSize ? t('adaptive') : fontSize}</span>
       </div>
       <div className="am-cap-quick-row">
-        <span className="am-cap-quick-label">颜色</span>
+        <span className="am-cap-quick-label">{t('colorLabel')}</span>
         <div className="am-chips am-chips-tight">
           {['#ffffff', '#222222', '#ff5e00', '#1f84df', '#00cc66', '#cb2a2a', '#ffbf22'].map(c => (
             <button
@@ -629,7 +724,7 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
         className="am-tb-btn am-tb-btn-primary am-cap-quick-add"
         onClick={() => onQuickAdd(payload)}
       >
-        ✚ 加字幕
+        {t('addCaption')}
       </button>
     </div>
   );
@@ -637,29 +732,31 @@ export function CaptionQuickGen({ onQuickAdd }: { onQuickAdd: (p: DragPayload) =
 
 // 字幕位置预设 — 5 个常用位置. captionTransform 真正定位 (gif host 应用; video host 忽略, 同旧行为)
 export function CaptionPositionPresets({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
-  const presets: { id: string; label: string; x: number; y: number; emoji: string }[] = [
-    { id: 'top',       label: '顶部',   x: 0,  y: -35, emoji: '⬆️' },
-    { id: 'mid-up',    label: '中上',   x: 0,  y: -15, emoji: '↗' },
-    { id: 'mid',       label: '居中',   x: 0,  y: 0,   emoji: '·' },
-    { id: 'mid-down',  label: '中下',   x: 0,  y: 15,  emoji: '↘' },
-    { id: 'bottom',    label: '底部',   x: 0,  y: 35,  emoji: '⬇️' },
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
+  const presets: { id: string; labelKey: 'posTop' | 'posMidUp' | 'posMid' | 'posMidDown' | 'posBottom'; x: number; y: number; emoji: string }[] = [
+    { id: 'top',       labelKey: 'posTop',     x: 0,  y: -35, emoji: '⬆️' },
+    { id: 'mid-up',    labelKey: 'posMidUp',   x: 0,  y: -15, emoji: '↗' },
+    { id: 'mid',       labelKey: 'posMid',     x: 0,  y: 0,   emoji: '·' },
+    { id: 'mid-down',  labelKey: 'posMidDown', x: 0,  y: 15,  emoji: '↘' },
+    { id: 'bottom',    labelKey: 'posBottom',  x: 0,  y: 35,  emoji: '⬇️' },
   ];
   const addAt = (p: typeof presets[number]) => {
     onQuickAdd({
       type: 'caption', text: '位置示例', captionStyle: 'meme',   // 不写 captionFontSize → 自适应字号 (短超大/长缩字, 跟随机生成一致)
       defaultDuration: 2.5, captionTransform: { x: p.x, y: p.y },
     });
-    toast(`已加字幕 · ${p.label}`, { duration: 2000 });
+    toast(`${t('addedCaptionPos')}${lang === 'en' ? ' ' : ' · '}${t(p.labelKey)}`, { duration: 2000 });
   };
   return (
     <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📍 字幕位置预设</div>
-      <div className="am-cap-extra-sub">点一下加位置示例 · 加入后可继续拖</div>
+      <div className="am-cap-extra-head">{t('posHead')}</div>
+      <div className="am-cap-extra-sub">{t('posSub')}</div>
       <div className="am-cap-pos-grid">
         {presets.map(p => (
           <button key={p.id} type="button" className="am-cap-pos-btn" onClick={() => addAt(p)} title={`y=${p.y}%`}>
             <span className="am-cap-pos-icon">{p.emoji}</span>
-            <span className="am-cap-pos-label">{p.label}</span>
+            <span className="am-cap-pos-label">{t(p.labelKey)}</span>
           </button>
         ))}
       </div>
@@ -669,11 +766,13 @@ export function CaptionPositionPresets({ onQuickAdd }: { onQuickAdd: (p: DragPay
 
 // 沙雕常用 emoji 一键插入 — 单 emoji 字幕, 大字号
 export function CaptionEmojiPicker({ onQuickAdd }: { onQuickAdd: (p: DragPayload) => void }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const emojis = ['😂', '🤣', '💀', '🐼', '🤡', '🥹', '🫠', '😭', '👀', '👻', '💩', '🔥', '✨', '💯', '🙏', '🤝'];
   return (
     <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">🎭 沙雕表情字幕</div>
-      <div className="am-cap-extra-sub">单击加一条单 emoji 字幕 · 大字号</div>
+      <div className="am-cap-extra-head">{t('emojiHead')}</div>
+      <div className="am-cap-extra-sub">{t('emojiSub')}</div>
       <div className="am-cap-emoji-grid">
         {emojis.map(e => (
           <button
@@ -681,7 +780,7 @@ export function CaptionEmojiPicker({ onQuickAdd }: { onQuickAdd: (p: DragPayload
             type="button"
             className="am-cap-emoji-btn"
             onClick={() => onQuickAdd({ type: 'caption', text: e, captionStyle: 'meme', defaultDuration: 1.2 })}
-            title={`加 ${e} 表情 (自适应字号 · 1.2s · 可拖角缩放)`}
+            title={`${t('emojiBtnTip1')} ${e} ${t('emojiBtnTip2')}`}
           >
             {e}
           </button>
@@ -699,12 +798,14 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
   projectDuration: number;
   isGif?: boolean;
 }) {
+  const lang = useUiLang();
+  const t = pickLang(DICT, lang);
   const [text, setText] = useState('');
   const [withTTS, setWithTTS] = useState(!isGif);
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const effWithTTS = !isGif && withTTS;
   const doImport = () => {
-    if (lines.length === 0) { toast.error('粘贴一段台词, 每行一条字幕'); return; }
+    if (lines.length === 0) { toast.error(t('pasteEmpty')); return; }
     if (effWithTTS) {
       const voice = VOICE_LIB[0].id;
       const ttsVoice = resolveVoiceId(voice);
@@ -728,31 +829,31 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
         cursor = segEnd + gap;
       }
       onAddClipsBatch(clips);
-      toast.success(`✓ ${lines.length} 段台词 → 字幕 + 配音 配套生成, 已双向链接`);
+      toast.success(`${t('batchDoneTTS1')} ${lines.length} ${t('batchDoneTTS2')}`);
     } else {
       lines.forEach(line => {
         onQuickAdd({ type: 'caption', text: line, captionStyle: 'meme', defaultDuration: 2.5 });   // 自适应字号
       });
-      toast.success(`已加 ${lines.length} 条字幕`);
+      toast.success(`${t('batchDoneCap1')} ${lines.length} ${t('batchDoneCap2')}`);
     }
     setText('');
   };
   return (
     <div className="am-cap-extra-card">
-      <div className="am-cap-extra-head">📋 批量导入台词稿{isGif && <span className="am-cap-extra-sub" style={{ marginLeft: 8 }}>(GIF · 仅字幕)</span>}</div>
+      <div className="am-cap-extra-head">{t('batchHead')}{isGif && <span className="am-cap-extra-sub" style={{ marginLeft: 8 }}>{t('batchGifTag')}</span>}</div>
       {!isGif && (
-        <div className="am-pair-mode-row" role="radiogroup" aria-label="生成模式">
+        <div className="am-pair-mode-row" role="radiogroup" aria-label={t('radioGroup')}>
           <button
             type="button"
             role="radio"
             aria-checked={withTTS}
             className={'am-pair-mode' + (withTTS ? ' is-active' : '')}
             onClick={() => setWithTTS(true)}
-            title="每行台词同时建 1 个字幕 + 1 个配音 · 双向链接 (改一个另一个自动跟)"
+            title={t('batchPairTitle')}
           >
             <span className="am-pair-mode-ic">✨</span>
-            <span className="am-pair-mode-main">字幕 + 配音 一起加</span>
-            <span className="am-pair-mode-sub">推荐 · 双向链接</span>
+            <span className="am-pair-mode-main">{t('batchPairMain')}</span>
+            <span className="am-pair-mode-sub">{t('batchPairSub')}</span>
           </button>
           <button
             type="button"
@@ -760,11 +861,11 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
             aria-checked={!withTTS}
             className={'am-pair-mode' + (!withTTS ? ' is-active' : '')}
             onClick={() => setWithTTS(false)}
-            title="仅字幕轨, 每条 2.5s 接龙"
+            title={t('batchCapOnlyTitle')}
           >
             <span className="am-pair-mode-ic">💬</span>
-            <span className="am-pair-mode-main">只加字幕</span>
-            <span className="am-pair-mode-sub">每条 2.5s</span>
+            <span className="am-pair-mode-main">{t('batchCapOnlyMain')}</span>
+            <span className="am-pair-mode-sub">{t('batchCapOnlySub')}</span>
           </button>
         </div>
       )}
@@ -772,7 +873,7 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
         className="am-input am-textarea am-cap-batch-input"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'家人们谁懂啊\n直接裂开\n但我装作很淡定\n我可太牛了'}
+        placeholder={t('batchPlaceholder')}
         rows={5}
       />
       <button
@@ -781,7 +882,7 @@ export function CaptionBatchImport({ onQuickAdd, onAddClipsBatch, playhead, proj
         onClick={doImport}
         disabled={lines.length === 0}
       >
-        ✚ 加 {lines.length > 0 ? `${lines.length} 段` : ''} {effWithTTS ? '→ 字幕+配音' : '→ 字幕'}
+        {t('addBtn')} {lines.length > 0 ? `${lines.length} ${t('batchSeg')}` : ''} {effWithTTS ? t('batchToCapTTS') : t('batchToCap')}
       </button>
     </div>
   );

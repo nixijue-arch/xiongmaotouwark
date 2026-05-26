@@ -1,7 +1,7 @@
 // gifloop.ts — GIF 循环引擎 (P1: normal + boomerang). 纯逻辑, 在 animcore 合成器之上加
 // "时间重映射 + 帧序列 + 循环安全动作". crossfade / 多变体 / onion-skin 见 P2.
 import {
-  renderExportFrame, loadMedia, clamp, resolveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM, loopMotionDelta, makeLoopMotionAt,
+  renderExportFrame, loadMedia, clamp, effectiveGifPreset, GIF_MAX_DURATION, DEFAULT_TRANSFORM, loopMotionDelta, makeLoopMotionAt,
   type Clip, type ImageClip, type GifPresetId, type MediaAsset, type MotionDelta, type FaceLocal, type BoundFaceBox,
 } from '@/lib/animcore';
 // gif.js worker 源码内联 (?raw) → 运行时包成 Blob URL 当 workerScript.
@@ -29,6 +29,8 @@ export interface GifProject {
   lanes: { image: number; caption: number; fx: number };
   duration: number;                                // s, <= GIF_MAX_DURATION
   preset: GifPresetId;
+  customW?: number;                                // preset==='custom' 时的自定义画板宽 (px)
+  customH?: number;                                // preset==='custom' 时的自定义画板高 (px)
   loop: GifLoopConfig;
 }
 
@@ -227,7 +229,7 @@ async function preloadImgCache(project: GifProject): Promise<Map<string, MediaAs
 async function encodeGIFBlob(
   project: GifProject, mode: GifLoopMode, imgCache: Map<string, MediaAsset>, onProgress: (p: number) => void,
 ): Promise<{ blob: Blob; W: number; H: number; fps: number; frameCount: number; durationSec: number }> {
-  const preset = resolveGifPreset(project.preset);
+  const preset = effectiveGifPreset(project);
   const { width: W, height: H, fps } = preset;
   const D = Math.min(project.duration, GIF_MAX_DURATION, preset.maxDuration);
 
@@ -331,7 +333,7 @@ export async function exportGIFLoop(
 export interface GifVariant { mode: GifLoopMode; blob: Blob; size: number; frameCount: number; }
 export async function exportGIFVariants(project: GifProject, onProgress: (p: number) => void): Promise<GifVariant[]> {
   const imgCache = await preloadImgCache(project);
-  const modes: GifLoopMode[] = ['normal', 'boomerang', 'crossfade'];
+  const modes: GifLoopMode[] = ['normal', 'boomerang'];
   const out: GifVariant[] = [];
   try {
     for (let i = 0; i < modes.length; i++) {
