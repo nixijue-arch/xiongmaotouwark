@@ -2007,7 +2007,7 @@ export function GifMode({ view, onSwitchView, onOpenGuide }: { view: ProjectMode
         )}
         <select className="gm-tb-select" value={project.preset} title={t('sizePreset')}
           onChange={e => setPresetId(e.target.value as GifPresetId)}>
-          {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          {GIF_PRESETS.map(p => <option key={p.id} value={p.id}>{lang === 'en' ? p.labelEn : p.label}</option>)}
         </select>
         {project.preset === 'custom' && (
           <span className="gm-tb-size" title={t('customSizeTip')}>

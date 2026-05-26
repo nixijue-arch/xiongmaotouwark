@@ -68,21 +68,23 @@ export type GifPresetId = 'wechat' | 'moments' | 'tg' | 'quick-share' | 'x' | 'c
 export interface GifPreset {
   id: GifPresetId;
   label: string;
+  labelEn: string;   // EN 界面用 (gifmode 预设下拉按 lang 取); 整板块 i18n 跟随顶栏 中/EN 开关
   width: number;
   height: number;
   fps: number;
   defaultDuration: number; // s
   maxDuration: number;
   note: string;
+  noteEn: string;
 }
 // 按"质量/体积"直接命名, 精简成 3 档 (小巧/标准/高清). 默认高清.
 //   ('自定义' 旧档其实没有任何可调 UI = 无功能占位, 已移除; 老草稿的 'custom' 经 remap 落到高清.)
 // fps: 小巧 20 控体积; 标准/高清 25 = 整数 cs 延时无漂移, 接近预览流畅度. 编码加抖动+超采样, 见 gifloop.
 export const GIF_PRESETS: GifPreset[] = [
-  { id: 'wechat',      label: '小巧 · 省流', width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '体积最小 · 240² · 表情包/省流量' },
-  { id: 'quick-share', label: '标准',        width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享' },
-  { id: 'x',           label: '高清 · 推荐',  width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰 · 480² · 默认' },
-  { id: 'custom',      label: '自定义尺寸',   width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '自己设画板宽×高 (px)' },
+  { id: 'wechat',      label: '小巧 · 省流', labelEn: 'Compact · Lite',   width: 240, height: 240, fps: 20, defaultDuration: 2.5, maxDuration: 10, note: '体积最小 · 240² · 表情包/省流量', noteEn: 'Smallest file · 240² · stickers / low data' },
+  { id: 'quick-share', label: '标准',        labelEn: 'Standard',         width: 360, height: 360, fps: 25, defaultDuration: 4,   maxDuration: 10, note: '清晰与体积平衡 · 360² · 通用分享', noteEn: 'Balanced quality & size · 360² · general sharing' },
+  { id: 'x',           label: '高清 · 推荐',  labelEn: 'HD · Recommended', width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '更清晰 · 480² · 默认', noteEn: 'Sharper · 480² · default' },
+  { id: 'custom',      label: '自定义尺寸',   labelEn: 'Custom size',      width: 480, height: 480, fps: 25, defaultDuration: 5,   maxDuration: 10, note: '自己设画板宽×高 (px)', noteEn: 'Set canvas width × height (px)' },
 ];
 // 旧预设 ID 向后兼容: 朋友圈(400²)→标准(360²), TG(512²)→高清(480²). 'custom' 现为真·可调尺寸, 不再 remap.
 const GIF_PRESET_REMAP: Partial<Record<GifPresetId, GifPresetId>> = { moments: 'quick-share', tg: 'x' };
